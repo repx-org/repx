@@ -31,5 +31,6 @@
       packages."x86_64-linux" = {
         example-lab = exampleLabOutputs.lab;
       };
+      formatter."x86_64-linux" = pkgs.nixfmt-tree;
     };
 }
