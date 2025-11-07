@@ -223,7 +223,27 @@ let
       allParams = params // {
         pipeline = pipelines;
       };
-      allCombinations = pkgs.lib.cartesianProduct allParams;
+
+      allCombinations =
+        let
+          invalidParams = pkgs.lib.filter (param: !pkgs.lib.isList param.value) (
+            pkgs.lib.mapAttrsToList (name: value: { inherit name value; }) allParams
+          );
+        in
+        if invalidParams != [ ] then
+          let
+            paramNames = pkgs.lib.map (p: p.name) invalidParams;
+            formattedNames = pkgs.lib.concatStringsSep ", " (map (n: ''"${n}"'') paramNames);
+          in
+          throw ''
+            Type error in 'mkRun' parameters for run "${name}".
+            The 'cartesianProduct' function for parameter sweeps expects all parameter values to be lists.
+            The following parameters have non-list values: ${formattedNames}.
+
+            Please ensure each parameter value is wrapped in a list, e.g., 'param = [ "value" ];'
+          ''
+        else
+          pkgs.lib.cartesianProduct allParams;
 
       repxForDiscovery = repx-lib.mkPipelineHelpers {
         inherit pkgs repx-lib;
