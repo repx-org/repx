@@ -8,8 +8,38 @@ let
   gatherDef = stageDef.gather;
   paramInputs = stageDef.paramInputs or { };
 
+  subStageValidationError =
+    let
+      check =
+        subStageName: subStageDef:
+        let
+          validKeys = [
+            "pname"
+            "inputs"
+            "outputs"
+            "run"
+            "runDependencies"
+          ];
+          actualKeys = builtins.attrNames subStageDef;
+          invalidKeys = pkgs.lib.subtractLists actualKeys validKeys;
+        in
+        if invalidKeys != [ ] then
+          ''
+            In scatter-gather stage "${groupPname}", the "${subStageName}" definition has unknown attributes: ${builtins.toJSON invalidKeys}.
+            Valid attributes are: ${builtins.toJSON validKeys}.
+          ''
+        else
+          null;
+    in
+    pkgs.lib.findFirst (e: e != null) null [
+      (check "scatter" scatterDef)
+      (check "worker" workerDef)
+      (check "gather" gatherDef)
+    ];
 in
-if !(scatterDef.outputs ? "worker__arg") then
+if subStageValidationError != null then
+  throw subStageValidationError
+else if !(scatterDef.outputs ? "worker__arg") then
   throw ''
     Scatter-gather stage "${groupPname}" is invalid.
     The 'scatter' section MUST define a special output named "worker__arg".
