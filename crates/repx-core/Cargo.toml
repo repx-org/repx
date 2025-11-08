@@ -1,0 +1,19 @@
+[package]
+name = "repx-core"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+chrono = { workspace = true, features = ["serde"] }
+toml = { workspace = true }
+clap = { workspace = true }
+num_cpus = { workspace = true }
+once_cell = { workspace = true }
+regex = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tempfile = { workspace = true }
+thiserror = { workspace = true }
+walkdir = { workspace = true }
+xdg = { workspace = true }
+shellexpand = { workspace = true }

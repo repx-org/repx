@@ -1,0 +1,810 @@
+use crate::{
+    app::{App, InputMode, PanelFocus},
+    model::{TargetState, TuiDisplayRow, TuiRowItem},
+    widgets::{BrailleGraph, BrailleSparkline, GraphDirection},
+};
+use ratatui::{
+    prelude::*,
+    widgets::{
+        Block, BorderType, Borders, Cell, Clear, Paragraph, Row, Scrollbar, ScrollbarOrientation,
+        ScrollbarState, Table,
+    },
+};
+use repx_core::model::Lab;
+use std::collections::{HashSet, VecDeque};
+
+pub fn draw(f: &mut Frame, app: &mut App) {
+    let main_chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(10), Constraint::Min(0)])
+        .split(f.area());
+
+    draw_overview_panel(f, main_chunks[0], app);
+
+    let bottom_chunks = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(40), Constraint::Percentage(60)])
+        .split(main_chunks[1]);
+
+    draw_left_column(f, bottom_chunks[0], app);
+    draw_right_column(f, bottom_chunks[1], app);
+
+    if app.input_mode == InputMode::SpaceMenu {
+        draw_space_menu_popup(f, f.area());
+    } else if app.input_mode == InputMode::GMenu {
+        draw_g_menu_popup(f, f.area());
+    }
+}
+
+fn draw_overview_panel(f: &mut Frame, area: Rect, app: &mut App) {
+    let overview_border_style = Style::default().fg(Color::Magenta);
+    let targets_border_style = Style::default().fg(Color::DarkGray);
+    let loading_indicator = if app.is_loading { " [Updating...]" } else { "" };
+
+    let rate_display = format!("- {}ms +", app.tick_rate.as_millis());
+    let overview_block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(overview_border_style)
+        .title_top(
+            Line::from(vec![
+                Span::styled("─┐", overview_border_style),
+                Span::styled("¹OVERVIEW", Style::default().add_modifier(Modifier::BOLD)),
+                Span::styled("┌─┐", overview_border_style),
+                Span::styled(
+                    format!("[Lab: ./result-lab (rev: test-rev)]{}", loading_indicator),
+                    Style::default().add_modifier(Modifier::DIM),
+                ),
+                Span::styled("┌", overview_border_style),
+            ])
+            .alignment(Alignment::Left),
+        )
+        .title_top(
+            Line::from(vec![
+                Span::styled("┐", overview_border_style),
+                Span::styled("18:35:12", Style::default().add_modifier(Modifier::DIM)),
+                Span::styled("┌", overview_border_style),
+                Span::styled("─", overview_border_style),
+                Span::styled("┐", overview_border_style),
+                Span::styled(rate_display, Style::default().add_modifier(Modifier::DIM)),
+                Span::styled("┌─", overview_border_style),
+            ])
+            .alignment(Alignment::Right),
+        );
+
+    let overview_inner_area = overview_block.inner(area);
+    f.render_widget(overview_block, area);
+
+    let top_inner_chunks = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Min(0), Constraint::Length(60)])
+        .split(overview_inner_area);
+
+    draw_graphs(f, top_inner_chunks[0], app);
+    draw_targets(f, top_inner_chunks[1], app, targets_border_style);
+}
+
+fn draw_graphs(f: &mut Frame, area: Rect, app: &App) {
+    let graph_chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Percentage(50),
+            Constraint::Length(1),
+            Constraint::Percentage(50),
+        ])
+        .split(area);
+
+    let progress_area = graph_chunks[0];
+    let divider_area = graph_chunks[1];
+    let throughput_area = graph_chunks[2];
+
+    let graph_width_in_cells = area.width as usize;
+    let data_points_to_render = graph_width_in_cells * 2;
+
+    let create_padded_slice = |data: &VecDeque<f64>| -> Vec<f64> {
+        let current_data_len = data.len();
+        let padding = data_points_to_render.saturating_sub(current_data_len);
+        let data_slice = data
+            .iter()
+            .skip(current_data_len.saturating_sub(data_points_to_render));
+        std::iter::repeat(0.0)
+            .take(padding)
+            .chain(data_slice.copied())
+            .collect()
+    };
+
+    let progress_data_slice = create_padded_slice(&app.progress_data);
+    let throughput_data_slice = create_padded_slice(&app.throughput_data);
+
+    let progress_graph = BrailleGraph {
+        data: &progress_data_slice,
+        max_value: 100.0,
+        low_color: Color::Rgb(0, 150, 0),
+        high_color: Color::Rgb(100, 255, 100),
+        direction: GraphDirection::Upwards,
+    };
+    f.render_widget(progress_graph, progress_area);
+
+    let throughput_graph = BrailleGraph {
+        data: &throughput_data_slice,
+        max_value: 100.0,
+        low_color: Color::Rgb(255, 160, 0),
+        high_color: Color::Rgb(255, 255, 100),
+        direction: GraphDirection::Downwards,
+    };
+    f.render_widget(throughput_graph, throughput_area);
+
+    let label_style = Style::default().add_modifier(Modifier::DIM);
+    let text = "througput─▼▲─progress";
+    let text_width = text.len();
+    let line_width = divider_area.width.saturating_sub(text_width as u16);
+    let left_line_width = line_width / 2;
+    let right_line_width = line_width - left_line_width;
+
+    let divider = Paragraph::new(Line::from(vec![
+        Span::styled("─".repeat(left_line_width as usize), label_style),
+        Span::styled(text, label_style),
+        Span::styled("─".repeat(right_line_width as usize), label_style),
+    ]));
+    f.render_widget(divider, divider_area);
+}
+
+fn draw_targets(f: &mut Frame, area: Rect, app: &mut App, border_style: Style) {
+    let targets_block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(border_style)
+        .title_top(
+            Line::from(vec![
+                Span::styled("─┐", border_style),
+                Span::styled("⁴TARGETS", Style::default().add_modifier(Modifier::BOLD)),
+                Span::styled("┌─", border_style),
+            ])
+            .alignment(Alignment::Left),
+        );
+    let targets_inner_area = targets_block.inner(area);
+    f.render_widget(targets_block, area);
+
+    if !app.targets.is_empty() {
+        let highlight_style = Style::default()
+            .bg(border_style.fg.unwrap_or(Color::Cyan))
+            .fg(Color::Black)
+            .add_modifier(Modifier::BOLD);
+
+        let target_rows: Vec<Row> = app
+            .targets
+            .iter()
+            .map(|target| {
+                let (state_text, state_style) = match target.state {
+                    TargetState::Active => (
+                        "[ACTIVE]",
+                        Style::default()
+                            .fg(Color::Green)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    TargetState::Inactive => ("[INACTIVE]", Style::default().fg(Color::Yellow)),
+                    TargetState::Down => ("[DOWN]", Style::default().add_modifier(Modifier::DIM)),
+                };
+
+                Row::new(vec![
+                    Cell::from(target.name.clone()).style(Style::default()),
+                    Cell::from(state_text).style(state_style),
+                ])
+            })
+            .collect();
+
+        let table = Table::new(target_rows, [Constraint::Min(0), Constraint::Length(12)])
+            .highlight_style(if app.focused_panel == PanelFocus::Targets {
+                highlight_style
+            } else {
+                Style::default()
+            });
+
+        f.render_stateful_widget(table, targets_inner_area, &mut app.targets_table_state);
+    }
+}
+
+fn draw_left_column(f: &mut Frame, area: Rect, app: &App) {
+    let left_chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(12), Constraint::Min(0)])
+        .split(area);
+
+    draw_context_panel(f, left_chunks[0], app);
+    draw_logs_panel(f, left_chunks[1], app);
+}
+
+fn draw_context_panel(f: &mut Frame, area: Rect, app: &App) {
+    let context_border_style = Style::default().fg(Color::Green);
+    let selected_job = app
+        .table_state
+        .selected()
+        .and_then(|i| app.display_rows.get(i))
+        .and_then(|row| {
+            if let TuiRowItem::Job { job } = &row.item {
+                Some(job)
+            } else {
+                None
+            }
+        });
+    let context_title = if let Some(job) = selected_job {
+        format!("[Job: {}]", job.id)
+    } else {
+        "[Job: (none)]".to_string()
+    };
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(context_border_style)
+        .title_top(
+            Line::from(vec![
+                Span::styled("─┐", context_border_style),
+                Span::styled("³CONTEXT", Style::default().add_modifier(Modifier::BOLD)),
+                Span::styled("┌─┐", context_border_style),
+                Span::styled(context_title, Style::default().add_modifier(Modifier::DIM)),
+                Span::styled("┌", context_border_style),
+            ])
+            .alignment(Alignment::Left),
+        );
+    let inner_area = block.inner(area);
+    f.render_widget(block, area);
+
+    let content = if let Some(job) = selected_job {
+        Paragraph::new(vec![
+            Line::from(vec![Span::raw("Run: "), Span::raw(job.run.clone())]),
+            Line::from(vec![Span::raw("Elapsed: "), Span::raw(job.elapsed.clone())]),
+            Line::from(vec![
+                Span::raw("Depends on: "),
+                Span::raw(job.context_depends_on.clone()),
+            ]),
+            Line::from(vec![
+                Span::raw("Dependents: "),
+                Span::raw(job.context_dependents.clone()),
+            ]),
+        ])
+    } else {
+        Paragraph::new("Select a job to see its context.")
+    };
+    f.render_widget(content, inner_area);
+}
+
+fn draw_logs_panel(f: &mut Frame, area: Rect, app: &App) {
+    let logs_border_style = Style::default().fg(Color::Red);
+    let selected_job = app
+        .table_state
+        .selected()
+        .and_then(|i| app.display_rows.get(i))
+        .and_then(|row| {
+            if let TuiRowItem::Job { job } = &row.item {
+                Some(job)
+            } else {
+                None
+            }
+        });
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(logs_border_style)
+        .title_top(Line::from(vec![
+            Span::styled("─┐", logs_border_style),
+            Span::styled(
+                "⁵LOG PREVIEW",
+                Style::default().add_modifier(Modifier::BOLD),
+            ),
+            Span::styled("┌─", logs_border_style),
+        ]));
+    let inner_area = block.inner(area);
+    f.render_widget(block, area);
+
+    let content = if let Some(job) = selected_job {
+        Paragraph::new(
+            job.logs
+                .iter()
+                .map(|log| Line::from(log.as_str()))
+                .collect::<Vec<Line>>(),
+        )
+    } else {
+        Paragraph::new("Select a job to see its logs.")
+    };
+    f.render_widget(content, inner_area);
+}
+
+fn draw_right_column(f: &mut Frame, area: Rect, app: &mut App) {
+    let runs_jobs_border_style = Style::default().fg(Color::Cyan);
+    let filtered_count = app.display_rows.len();
+    let counter_text = if filtered_count > 0 {
+        let selected_index = app.table_state.selected().unwrap_or(0);
+        format!("{}/{}", selected_index + 1, filtered_count)
+    } else {
+        "0/0".to_string()
+    };
+
+    let status_filter_text = format!("← {} →", app.status_filter.to_str());
+    let reverse_style = if app.is_reversed {
+        Style::default().add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().add_modifier(Modifier::DIM)
+    };
+    let tree_style = if app.is_tree_view {
+        Style::default().add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().add_modifier(Modifier::DIM)
+    };
+
+    let right_title_content = format!("┐reverse┌┐tree┌┐{}┌─", status_filter_text);
+    let right_title_width = right_title_content.chars().count() as u16 + 1;
+    let left_title_prefix = "─┐²RUNS & JOBS┌─┐";
+    let left_title_suffix = "┌";
+    let left_title_fixed_width =
+        (left_title_prefix.chars().count() + left_title_suffix.chars().count()) as u16;
+    let max_filter_width = area
+        .width
+        .saturating_sub(left_title_fixed_width)
+        .saturating_sub(right_title_width)
+        .saturating_sub(2);
+
+    let (filter_display_text, filter_style) = match app.input_mode {
+        InputMode::Editing => (format!("{}_", app.filter_text), Style::default()),
+        InputMode::Normal | InputMode::SpaceMenu | InputMode::GMenu => {
+            if !app.filter_text.is_empty() {
+                (app.filter_text.clone(), Style::default())
+            } else {
+                (
+                    "filter".to_string(),
+                    Style::default().add_modifier(Modifier::DIM),
+                )
+            }
+        }
+    };
+
+    let text_to_truncate =
+        if app.input_mode == InputMode::Editing && filter_display_text.len() < "filter".len() {
+            format!("{:<width$}", filter_display_text, width = "filter".len())
+        } else {
+            filter_display_text
+        };
+
+    let truncated_filter_text = if text_to_truncate.len() > max_filter_width as usize {
+        let start_index = text_to_truncate.len() - max_filter_width as usize;
+        &text_to_truncate[start_index..]
+    } else {
+        &text_to_truncate
+    };
+    let filter_span = Span::styled(truncated_filter_text, filter_style);
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(runs_jobs_border_style)
+        .title_top(
+            Line::from(vec![
+                Span::styled(left_title_prefix, runs_jobs_border_style),
+                filter_span,
+                Span::styled(left_title_suffix, runs_jobs_border_style),
+            ])
+            .alignment(Alignment::Left),
+        )
+        .title_top(
+            Line::from(vec![
+                Span::styled("┐", runs_jobs_border_style),
+                Span::styled("r", reverse_style),
+                Span::styled("everse", Style::default().add_modifier(Modifier::DIM)),
+                Span::styled("┌", runs_jobs_border_style),
+                Span::styled("┐", runs_jobs_border_style),
+                Span::styled("t", tree_style),
+                Span::styled("ree", Style::default().add_modifier(Modifier::DIM)),
+                Span::styled("┌", runs_jobs_border_style),
+                Span::styled("┐", runs_jobs_border_style),
+                Span::styled(
+                    status_filter_text,
+                    Style::default().add_modifier(Modifier::DIM),
+                ),
+                Span::styled("┌─", runs_jobs_border_style),
+            ])
+            .alignment(Alignment::Right),
+        )
+        .title_bottom(
+            Line::from(vec![
+                Span::styled("─┘", runs_jobs_border_style),
+                Span::styled("j ", Style::default().add_modifier(Modifier::BOLD)),
+                Span::styled("select ", Style::default().add_modifier(Modifier::DIM)),
+                Span::styled("k ", Style::default().add_modifier(Modifier::BOLD)),
+                Span::styled("└┘", runs_jobs_border_style),
+                Span::styled("cancel", Style::default().add_modifier(Modifier::DIM)),
+                Span::styled("└┘", runs_jobs_border_style),
+                Span::styled("debug", Style::default().add_modifier(Modifier::DIM)),
+                Span::styled("└", runs_jobs_border_style),
+            ])
+            .alignment(Alignment::Left),
+        )
+        .title_bottom(
+            Line::from(vec![
+                Span::styled("┘", runs_jobs_border_style),
+                Span::styled(counter_text, Style::default().add_modifier(Modifier::DIM)),
+                Span::styled("└─", runs_jobs_border_style),
+            ])
+            .alignment(Alignment::Right),
+        );
+
+    let jobs_table = if app.is_tree_view {
+        let header = Row::new(vec!["", "Item:", "Worker:", "Elapsed:", "Status:"])
+            .style(Style::default().add_modifier(Modifier::BOLD));
+        let constraints = [
+            Constraint::Length(1),
+            Constraint::Min(45),
+            Constraint::Min(10),
+            Constraint::Length(10),
+            Constraint::Length(10),
+        ];
+        let rows = build_tree_rows(
+            &app.display_rows,
+            &app.selected_jobs,
+            &app.collapsed_nodes,
+            app.lab(),
+        );
+        Table::new(rows, constraints)
+            .header(header.height(1))
+            .block(block)
+            .row_highlight_style(if app.focused_panel == PanelFocus::Jobs {
+                Style::default()
+                    .bg(runs_jobs_border_style.fg.unwrap_or(Color::Cyan))
+                    .fg(Color::Black)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default()
+            })
+            .highlight_symbol("")
+    } else {
+        let header = Row::new(vec!["", "jobid:", "Run:", "Worker:", "Elapsed:", "Status:"])
+            .style(Style::default().add_modifier(Modifier::BOLD));
+        let constraints = [
+            Constraint::Length(1),
+            Constraint::Min(35),
+            Constraint::Min(15),
+            Constraint::Min(10),
+            Constraint::Length(10),
+            Constraint::Length(10),
+        ];
+        let rows = build_flat_rows(&app.display_rows, &app.selected_jobs);
+        Table::new(rows, constraints)
+            .header(header.height(1))
+            .block(block)
+            .row_highlight_style(if app.focused_panel == PanelFocus::Jobs {
+                Style::default()
+                    .bg(runs_jobs_border_style.fg.unwrap_or(Color::Cyan))
+                    .fg(Color::Black)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default()
+            })
+            .highlight_symbol("")
+    };
+
+    f.render_stateful_widget(jobs_table, area, &mut app.table_state);
+
+    let mut scrollbar_state = ScrollbarState::default()
+        .content_length(filtered_count)
+        .position(app.table_state.selected().unwrap_or(0))
+        .viewport_content_length(area.height.saturating_sub(3) as usize);
+
+    f.render_stateful_widget(
+        Scrollbar::default()
+            .orientation(ScrollbarOrientation::VerticalRight)
+            .begin_symbol(Some("▲"))
+            .end_symbol(Some("▼"))
+            .thumb_symbol("█")
+            .track_style(Style::default().fg(Color::DarkGray)),
+        area.inner(Margin {
+            vertical: 1,
+            horizontal: 0,
+        }),
+        &mut scrollbar_state,
+    );
+}
+
+fn build_flat_rows<'a>(
+    display_rows: &'a [TuiDisplayRow],
+    selected_jobs: &HashSet<String>,
+) -> Vec<Row<'a>> {
+    display_rows
+        .iter()
+        .map(|row_data| {
+            let (job, is_selected) = if let TuiRowItem::Job { job } = &row_data.item {
+                (job, selected_jobs.contains(&row_data.id))
+            } else {
+                unreachable!();
+            };
+
+            let selector = if is_selected {
+                Cell::from("█").style(Style::default().fg(Color::Yellow))
+            } else {
+                Cell::from(" ")
+            };
+            let status_style = match job.status.as_str() {
+                "Succeeded" => Style::default().fg(Color::Green),
+                "Failed" => Style::default().fg(Color::Red),
+                "Submit Failed" => Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+                "Pending" => Style::default().fg(Color::Yellow),
+                "Running" => Style::default().fg(Color::Cyan),
+                "Queued" => Style::default().fg(Color::Rgb(189, 147, 249)),
+                "Blocked" => Style::default().fg(Color::Magenta),
+                "Submitting..." => Style::default()
+                    .fg(Color::Blue)
+                    .add_modifier(Modifier::BOLD),
+                _ => Style::default(),
+            };
+            let status_cell = Cell::from(Span::styled(job.status.clone(), status_style));
+
+            Row::new(vec![
+                selector,
+                Cell::from(job.id.clone()),
+                Cell::from(job.run.clone()),
+                Cell::from(job.worker.clone()),
+                Cell::from(job.elapsed.clone()),
+                status_cell,
+            ])
+        })
+        .collect()
+}
+
+fn build_tree_rows<'a>(
+    display_rows: &'a [TuiDisplayRow],
+    selected_jobs: &HashSet<String>,
+    collapsed_nodes: &HashSet<String>,
+    lab: &Lab,
+) -> Vec<Row<'a>> {
+    let mut rows = Vec::new();
+    let mut ancestor_is_last_stack: Vec<bool> = Vec::new();
+
+    for row_data in display_rows.iter() {
+        let is_selected_for_action = selected_jobs.contains(&row_data.id);
+        let selector = if is_selected_for_action {
+            Cell::from("█").style(Style::default().fg(Color::Yellow))
+        } else {
+            Cell::from(" ")
+        };
+
+        while ancestor_is_last_stack.len() > row_data.depth {
+            ancestor_is_last_stack.pop();
+        }
+
+        match &row_data.item {
+            TuiRowItem::Run { id } => {
+                let run = lab.runs.get(id).unwrap();
+                let is_expanded = !collapsed_nodes.contains(&row_data.id);
+
+                let item_prefix = if !run.jobs.is_empty() {
+                    if is_expanded {
+                        "[-] "
+                    } else {
+                        "[+] "
+                    }
+                } else {
+                    "    "
+                };
+
+                let display_text = id.to_string();
+                let item_style = Style::default().add_modifier(Modifier::BOLD);
+
+                rows.push(Row::new(vec![
+                    selector,
+                    Cell::from(Line::from(vec![
+                        Span::raw(item_prefix),
+                        Span::styled(display_text, item_style),
+                    ])),
+                    Cell::from(""),
+                    Cell::from(""),
+                    Cell::from(""),
+                ]));
+
+                ancestor_is_last_stack.push(row_data.is_last_child);
+            }
+            TuiRowItem::Job { job } => {
+                let lab_job = lab.jobs.get(&job.full_id).unwrap();
+                let has_children = lab_job.executables.values().any(|e| !e.inputs.is_empty());
+                let is_expanded = !collapsed_nodes.contains(&row_data.id);
+
+                let branch = if row_data.is_last_child { "└" } else { "├" };
+
+                let item_marker = if has_children {
+                    if is_expanded {
+                        "[-]"
+                    } else {
+                        "[+]"
+                    }
+                } else {
+                    "───"
+                };
+
+                let prefix: String = (0..row_data.depth)
+                    .map(|i| {
+                        if *ancestor_is_last_stack.get(i).unwrap_or(&false) {
+                            "  "
+                        } else {
+                            "│ "
+                        }
+                    })
+                    .collect();
+
+                let corrected_prefix = if !ancestor_is_last_stack.get(0).cloned().unwrap_or(true) {
+                    prefix
+                } else {
+                    prefix.get(2..).unwrap_or("").to_string()
+                };
+
+                ancestor_is_last_stack.push(row_data.is_last_child);
+
+                let display_text = job.id.clone();
+                let item_style = Style::default();
+                let status_style = match job.status.as_str() {
+                    "Succeeded" => Style::default().fg(Color::Green),
+                    "Failed" => Style::default().fg(Color::Red),
+                    "Submit Failed" => Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+                    "Pending" => Style::default().fg(Color::Yellow),
+                    "Running" => Style::default().fg(Color::Cyan),
+                    "Queued" => Style::default().fg(Color::Rgb(189, 147, 249)),
+                    "Blocked" => Style::default().fg(Color::Magenta),
+                    "Submitting..." => Style::default()
+                        .fg(Color::Blue)
+                        .add_modifier(Modifier::BOLD),
+                    _ => Style::default(),
+                };
+                let worker = Cell::from(job.worker.clone());
+                let elapsed = Cell::from(job.elapsed.clone());
+                let status = Cell::from(Span::styled(job.status.clone(), status_style));
+
+                rows.push(Row::new(vec![
+                    selector,
+                    Cell::from(Line::from(vec![
+                        Span::raw(format!(" {}{}{} ", corrected_prefix, branch, item_marker)),
+                        Span::styled(display_text, item_style),
+                    ])),
+                    worker,
+                    elapsed,
+                    status,
+                ]));
+            }
+        }
+    }
+    rows
+}
+
+fn draw_space_menu_popup(f: &mut Frame, area: Rect) {
+    let popup_height = 10;
+    let horizontal_padding = 2;
+    let bottom_padding = 1;
+
+    let popup_area = Rect {
+        x: area.x + horizontal_padding,
+        y: area
+            .height
+            .saturating_sub(popup_height)
+            .saturating_sub(bottom_padding),
+        width: area.width.saturating_sub(horizontal_padding * 2),
+        height: popup_height,
+    };
+
+    let block = Block::default()
+        .title(" Quick Actions ")
+        .borders(Borders::ALL)
+        .border_type(BorderType::Double)
+        .border_style(Style::default().fg(Color::Yellow));
+
+    let inner_area = block.inner(popup_area);
+
+    let shortcuts = [
+        ("r", "Run Selected"),
+        ("c", "Cancel Selected"),
+        ("d", "Debug Shell"),
+        ("p", "Show Path"),
+        ("l", "Follow Logs"),
+        ("ESC", "Close Menu"),
+    ];
+
+    let mut rows = vec![];
+    for chunk in shortcuts.chunks(3) {
+        let mut cells = chunk
+            .iter()
+            .map(|(key, desc)| {
+                Cell::from(Line::from(vec![
+                    Span::styled(
+                        format!(" {} ", key),
+                        Style::default()
+                            .fg(Color::Black)
+                            .bg(Color::Yellow)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::raw(format!(" {}", desc)),
+                ]))
+            })
+            .collect::<Vec<_>>();
+
+        while cells.len() < 3 {
+            cells.push(Cell::from(""));
+        }
+        rows.push(Row::new(cells).height(2));
+    }
+
+    let table = Table::new(
+        rows,
+        [
+            Constraint::Percentage(33),
+            Constraint::Percentage(33),
+            Constraint::Percentage(34),
+        ],
+    )
+    .column_spacing(2);
+
+    f.render_widget(Clear, popup_area);
+    f.render_widget(block, popup_area);
+    f.render_widget(table, inner_area);
+}
+
+fn draw_g_menu_popup(f: &mut Frame, area: Rect) {
+    let popup_height = 6;
+    let horizontal_padding = 2;
+    let bottom_padding = 1;
+
+    let popup_area = Rect {
+        x: area.x + horizontal_padding,
+        y: area
+            .height
+            .saturating_sub(popup_height)
+            .saturating_sub(bottom_padding),
+        width: area.width.saturating_sub(horizontal_padding * 2),
+        height: popup_height,
+    };
+
+    let block = Block::default()
+        .title(" Go To ")
+        .borders(Borders::ALL)
+        .border_type(BorderType::Double)
+        .border_style(Style::default().fg(Color::Yellow));
+
+    let inner_area = block.inner(popup_area);
+
+    let shortcuts = [
+        ("g", "Go to Top"),
+        ("e", "Go to End"),
+        ("ESC", "Close Menu"),
+    ];
+
+    let mut rows = vec![];
+    for chunk in shortcuts.chunks(3) {
+        let mut cells = chunk
+            .iter()
+            .map(|(key, desc)| {
+                Cell::from(Line::from(vec![
+                    Span::styled(
+                        format!(" {} ", key),
+                        Style::default()
+                            .fg(Color::Black)
+                            .bg(Color::Yellow)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::raw(format!(" {}", desc)),
+                ]))
+            })
+            .collect::<Vec<_>>();
+
+        while cells.len() < 3 {
+            cells.push(Cell::from(""));
+        }
+        rows.push(Row::new(cells).height(2));
+    }
+
+    let table = Table::new(
+        rows,
+        [
+            Constraint::Percentage(33),
+            Constraint::Percentage(33),
+            Constraint::Percentage(34),
+        ],
+    )
+    .column_spacing(2);
+
+    f.render_widget(Clear, popup_area);
+    f.render_widget(block, popup_area);
+    f.render_widget(table, inner_area);
+}

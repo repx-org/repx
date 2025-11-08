@@ -1,0 +1,159 @@
+use crate::app::{App, InputMode, PanelFocus};
+use crossterm::event::{self, Event as CrosstermEvent, KeyCode, KeyEvent};
+use repx_core::log_debug;
+use std::io;
+use std::time::Duration;
+
+pub fn handle_key_event(key: KeyEvent, app: &mut App) {
+    log_debug!(
+        "Key event received: {:?}, Mode: {:?}, Focus: {:?}",
+        key.code,
+        app.input_mode,
+        app.focused_panel
+    );
+
+    if app.input_mode == InputMode::Editing {
+        handle_editing_mode_key_event(key, app);
+        return;
+    }
+
+    if app.input_mode == InputMode::SpaceMenu {
+        handle_space_menu_key_event(key, app);
+        return;
+    }
+
+    if app.input_mode == InputMode::GMenu {
+        handle_g_menu_key_event(key, app);
+        return;
+    }
+
+
+    match key.code {
+        KeyCode::Char('q') => app.quit(),
+        KeyCode::Char(' ') => {
+            app.input_mode = InputMode::SpaceMenu;
+            return;
+        }
+        KeyCode::Char('g') => {
+            app.input_mode = InputMode::GMenu;
+            return;
+        }
+        KeyCode::Char('2') => {
+            app.set_focused_panel(PanelFocus::Jobs);
+            return;
+        }
+        KeyCode::Char('4') => {
+            app.set_focused_panel(PanelFocus::Targets);
+            return;
+        }
+        _ => {}
+    }
+
+    match app.focused_panel {
+        PanelFocus::Jobs => handle_jobs_panel_key_event(key, app),
+        PanelFocus::Targets => handle_targets_panel_key_event(key, app),
+    }
+}
+
+fn handle_jobs_panel_key_event(key: KeyEvent, app: &mut App) {
+    match key.code {
+        KeyCode::Down | KeyCode::Char('j') => app.next_job(),
+        KeyCode::Up | KeyCode::Char('k') => app.previous_job(),
+        KeyCode::Char('+') | KeyCode::Char('=') => app.increase_tick_rate(),
+        KeyCode::Char('-') => app.decrease_tick_rate(),
+        KeyCode::Char('t') => app.toggle_tree_view(),
+        KeyCode::Char('.') => app.toggle_collapse_selected(),
+        KeyCode::Char('x') => app.toggle_selection_and_move_down(),
+        KeyCode::Esc => {
+            app.clear_selection();
+        }
+        KeyCode::Char('/') => {
+            app.input_mode = InputMode::Editing;
+        }
+        KeyCode::Char('l') => app.next_status_filter(),
+        KeyCode::Char('h') => app.previous_status_filter(),
+        KeyCode::Char('r') => app.toggle_reverse(),
+        KeyCode::Char('%') => app.select_all(),
+        _ => {}
+    }
+}
+
+fn handle_targets_panel_key_event(key: KeyEvent, app: &mut App) {
+    match key.code {
+        KeyCode::Down | KeyCode::Char('j') => app.next_target(),
+        KeyCode::Up | KeyCode::Char('k') => app.previous_target(),
+        KeyCode::Enter => app.set_active_target(),
+        _ => {}
+    }
+}
+
+fn handle_space_menu_key_event(key: KeyEvent, app: &mut App) {
+    match key.code {
+        KeyCode::Char('r') => {
+            app.run_selected();
+            app.input_mode = InputMode::Normal;
+        }
+        KeyCode::Char('c') => {
+            app.cancel_selected();
+            app.input_mode = InputMode::Normal;
+        }
+        KeyCode::Char('d') => {
+            app.debug_selected();
+            app.input_mode = InputMode::Normal;
+        }
+        KeyCode::Char('p') => {
+            app.show_path_selected();
+            app.input_mode = InputMode::Normal;
+        }
+        KeyCode::Char('l') => {
+            app.follow_logs_selected();
+            app.input_mode = InputMode::Normal;
+        }
+        KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char(' ') => {
+            app.input_mode = InputMode::Normal;
+        }
+        _ => {}
+    }
+}
+
+fn handle_g_menu_key_event(key: KeyEvent, app: &mut App) {
+    match key.code {
+        KeyCode::Char('g') => {
+            app.go_to_top();
+            app.input_mode = InputMode::Normal;
+        }
+        KeyCode::Char('e') => {
+            app.go_to_end();
+            app.input_mode = InputMode::Normal;
+        }
+        KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char(' ') => {
+            app.input_mode = InputMode::Normal;
+        }
+        _ => {}
+    }
+}
+
+fn handle_editing_mode_key_event(key: KeyEvent, app: &mut App) {
+    match key.code {
+        KeyCode::Char(c) => {
+            app.filter_text.push(c);
+            app.rebuild_display_list();
+        }
+        KeyCode::Backspace => {
+            app.filter_text.pop();
+            app.rebuild_display_list();
+        }
+        KeyCode::Enter | KeyCode::Esc => {
+            app.input_mode = InputMode::Normal;
+        }
+        _ => {}
+    }
+}
+
+pub fn poll_event(timeout: Duration) -> io::Result<Option<CrosstermEvent>> {
+    if event::poll(timeout)? {
+        Ok(Some(crossterm::event::read()?))
+    } else {
+        Ok(None)
+    }
+}

@@ -1,0 +1,13 @@
+[package]
+name = "repx-executor"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+repx-core = { workspace = true }
+log = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+shellexpand = { workspace = true }
+nix = { workspace = true, features = ["fs"] }
+tempfile = { workspace = true }

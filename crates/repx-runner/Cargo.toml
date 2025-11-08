@@ -1,0 +1,31 @@
+[package]
+name = "repx-runner"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "repx-runner"
+path = "src/main.rs"
+
+[dependencies]
+repx-core = { workspace = true }
+repx-client = { workspace = true }
+clap = { workspace = true }
+indicatif = { workspace = true }
+log = { workspace = true }
+toml = { workspace = true }
+xdg = { workspace = true }
+colored = "3.0.0"
+serde_json = { workspace = true }
+serde = { workspace = true }
+repx-executor = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread"] }
+futures = { workspace = true }
+itertools = "0.14.0"
+num_cpus.workspace = true
+
+
+[dev-dependencies]
+assert_cmd = "2.1.1"
+predicates = "3.1.3"
+tempfile = "3.23"
