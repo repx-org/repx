@@ -1,0 +1,15 @@
+[project]
+name = "repx-py"
+version = "0.1.0"
+description = "A library for analyzing RepX lab results."
+dependencies = [
+    "pandas"
+]
+
+[project.scripts]
+debug-runner = "repx_py.cli.debug_runner:main"
+trace-params = "repx_py.cli.trace_params:main"
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
