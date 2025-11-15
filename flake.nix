@@ -18,10 +18,18 @@
       repx-nix,
       ...
     }:
-    flake-utils.lib.eachDefaultSystem (
+    {
+      overlays.default = final: prev: {
+        repx-runner = self.packages.${prev.system}.default;
+      };
+    }
+    // flake-utils.lib.eachDefaultSystem (
       system:
       let
-        overlays = [ (import rust-overlay) ];
+        overlays = [
+          (import rust-overlay)
+          self.overlays.default
+        ];
         pkgs = import nixpkgs { inherit system overlays; };
 
         repx-runner = (import ./default.nix) {
@@ -30,10 +38,6 @@
       in
       {
         packages.default = repx-runner;
-
-        overlay.default = final: prev: {
-          repx-runner = self.packages.${system}.default;
-        };
 
         devShells.default = pkgs.mkShell {
           EXAMPLE_REPX_LAB = repx-nix.packages.${system}.example-lab;
