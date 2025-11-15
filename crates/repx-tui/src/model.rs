@@ -5,6 +5,7 @@ use serde::Serialize;
 pub struct TuiJob {
     pub full_id: repx_core::model::JobId,
     pub id: String,
+    pub name: String,
     pub run: String,
     pub worker: String,
     pub elapsed: String,

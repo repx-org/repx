@@ -277,9 +277,15 @@ impl App {
             let mut sorted_jobs: Vec<_> = run.jobs.clone();
             sorted_jobs.sort();
             for job_id in sorted_jobs {
+                let short_id = job_id.short_id();
+                let (id_part, name_part) = short_id
+                    .split_once('-')
+                    .map_or((short_id.as_str(), ""), |(id, name)| (id, name));
+
                 let tui_job = TuiJob {
                     full_id: job_id.clone(),
-                    id: job_id.short_id(),
+                    id: id_part.to_string(),
+                    name: name_part.to_string(),
                     run: run_id.to_string(),
                     worker: "-".to_string(),
                     elapsed: "-".to_string(),
@@ -440,9 +446,7 @@ impl App {
                 let new_active_target = target.name.clone();
                 log_info!("Setting new active target: {}", new_active_target);
 
-
                 *self.active_target.lock().unwrap() = new_active_target.clone();
-
 
                 for t in self.targets.iter_mut() {
                     if t.name == new_active_target {
@@ -582,6 +586,7 @@ impl App {
                     };
 
                     let text_match = job.id.to_lowercase().contains(&filter)
+                        || job.name.to_lowercase().contains(&filter)
                         || job.run.to_lowercase().contains(&filter);
 
                     status_match && text_match
@@ -643,7 +648,9 @@ impl App {
                         StatusFilter::All => true,
                         _ => job.status == self.status_filter.to_str(),
                     };
-                    let text_match = filter.is_empty() || job.id.to_lowercase().contains(filter);
+                    let text_match = filter.is_empty()
+                        || job.id.to_lowercase().contains(filter)
+                        || job.name.to_lowercase().contains(filter);
                     status_match && text_match
                 })
                 .map(|job| job.full_id.clone())

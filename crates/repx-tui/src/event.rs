@@ -27,7 +27,6 @@ pub fn handle_key_event(key: KeyEvent, app: &mut App) {
         return;
     }
 
-
     match key.code {
         KeyCode::Char('q') => app.quit(),
         KeyCode::Char(' ') => {

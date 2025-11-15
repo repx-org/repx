@@ -228,7 +228,12 @@ fn draw_context_panel(f: &mut Frame, area: Rect, app: &App) {
             }
         });
     let context_title = if let Some(job) = selected_job {
-        format!("[Job: {}]", job.id)
+        let job_display_id = if job.name.is_empty() {
+            job.id.clone()
+        } else {
+            format!("{}-{}", job.id, job.name)
+        };
+        format!("[Job: {}]", job_display_id)
     } else {
         "[Job: (none)]".to_string()
     };
@@ -428,11 +433,14 @@ fn draw_right_column(f: &mut Frame, area: Rect, app: &mut App) {
         );
 
     let jobs_table = if app.is_tree_view {
-        let header = Row::new(vec!["", "Item:", "Worker:", "Elapsed:", "Status:"])
-            .style(Style::default().add_modifier(Modifier::BOLD));
+        let header = Row::new(vec![
+            "", "jobid:", "Item:", "Worker:", "Elapsed:", "Status:",
+        ])
+        .style(Style::default().add_modifier(Modifier::BOLD));
         let constraints = [
             Constraint::Length(1),
-            Constraint::Min(45),
+            Constraint::Length(8),
+            Constraint::Min(35),
             Constraint::Min(10),
             Constraint::Length(10),
             Constraint::Length(10),
@@ -456,11 +464,14 @@ fn draw_right_column(f: &mut Frame, area: Rect, app: &mut App) {
             })
             .highlight_symbol("")
     } else {
-        let header = Row::new(vec!["", "jobid:", "Run:", "Worker:", "Elapsed:", "Status:"])
-            .style(Style::default().add_modifier(Modifier::BOLD));
+        let header = Row::new(vec![
+            "", "jobid:", "Item:", "Run:", "Worker:", "Elapsed:", "Status:",
+        ])
+        .style(Style::default().add_modifier(Modifier::BOLD));
         let constraints = [
             Constraint::Length(1),
-            Constraint::Min(35),
+            Constraint::Length(8),
+            Constraint::Min(25),
             Constraint::Min(15),
             Constraint::Min(10),
             Constraint::Length(10),
@@ -539,6 +550,7 @@ fn build_flat_rows<'a>(
             Row::new(vec![
                 selector,
                 Cell::from(job.id.clone()),
+                Cell::from(job.name.clone()),
                 Cell::from(job.run.clone()),
                 Cell::from(job.worker.clone()),
                 Cell::from(job.elapsed.clone()),
@@ -589,6 +601,7 @@ fn build_tree_rows<'a>(
 
                 rows.push(Row::new(vec![
                     selector,
+                    Cell::from(""), // jobid
                     Cell::from(Line::from(vec![
                         Span::raw(item_prefix),
                         Span::styled(display_text, item_style),
@@ -635,7 +648,7 @@ fn build_tree_rows<'a>(
 
                 ancestor_is_last_stack.push(row_data.is_last_child);
 
-                let display_text = job.id.clone();
+                let display_text = job.name.clone();
                 let item_style = Style::default();
                 let status_style = match job.status.as_str() {
                     "Succeeded" => Style::default().fg(Color::Green),
@@ -656,6 +669,7 @@ fn build_tree_rows<'a>(
 
                 rows.push(Row::new(vec![
                     selector,
+                    Cell::from(job.id.clone()),
                     Cell::from(Line::from(vec![
                         Span::raw(format!(" {}{}{} ", corrected_prefix, branch, item_marker)),
                         Span::styled(display_text, item_style),
