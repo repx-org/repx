@@ -515,10 +515,13 @@ fn draw_right_column(f: &mut Frame, area: Rect, app: &mut App) {
 
     f.render_stateful_widget(jobs_table, area, &mut app.table_state);
 
+    let viewport_height = area.height.saturating_sub(3) as usize;
+    app.jobs_list_viewport_height = viewport_height;
+
     let mut scrollbar_state = ScrollbarState::default()
         .content_length(filtered_count)
         .position(app.table_state.selected().unwrap_or(0))
-        .viewport_content_length(area.height.saturating_sub(3) as usize);
+        .viewport_content_length(viewport_height);
 
     f.render_stateful_widget(
         Scrollbar::default()

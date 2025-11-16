@@ -1,5 +1,5 @@
 use crate::app::{App, InputMode, PanelFocus};
-use crossterm::event::{self, Event as CrosstermEvent, KeyCode, KeyEvent};
+use crossterm::event::{self, Event as CrosstermEvent, KeyCode, KeyEvent, KeyModifiers};
 use repx_core::log_debug;
 use std::io;
 use std::time::Duration;
@@ -55,6 +55,20 @@ pub fn handle_key_event(key: KeyEvent, app: &mut App) {
 }
 
 fn handle_jobs_panel_key_event(key: KeyEvent, app: &mut App) {
+    if key.modifiers == KeyModifiers::CONTROL {
+        match key.code {
+            KeyCode::Char('d') => {
+                app.scroll_down_half_page();
+                return;
+            }
+            KeyCode::Char('u') => {
+                app.scroll_up_half_page();
+                return;
+            }
+            _ => {}
+        }
+    }
+
     match key.code {
         KeyCode::Down | KeyCode::Char('j') => app.next_job(),
         KeyCode::Up | KeyCode::Char('k') => app.previous_job(),

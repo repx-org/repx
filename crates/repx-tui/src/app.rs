@@ -119,6 +119,7 @@ pub struct App {
     resources: Option<Resources>,
     pub active_target: Arc<Mutex<String>>,
     pub focused_panel: PanelFocus,
+    pub jobs_list_viewport_height: usize,
 }
 
 impl App {
@@ -180,6 +181,7 @@ impl App {
             resources,
             active_target,
             focused_panel: PanelFocus::Jobs,
+            jobs_list_viewport_height: 0,
         };
 
         app.build_initial_job_list();
@@ -408,6 +410,42 @@ impl App {
         }
         let i = match self.table_state.selected() {
             Some(i) => i.saturating_sub(1),
+            None => 0,
+        };
+        self.table_state.select(Some(i));
+        self.on_selection_change();
+    }
+
+    pub fn scroll_down_half_page(&mut self) {
+        if self.jobs_list_viewport_height == 0 {
+            return;
+        }
+        let max_len = self.display_rows.len();
+        if max_len == 0 {
+            self.table_state.select(None);
+            return;
+        }
+        let half_page = self.jobs_list_viewport_height / 2;
+        let i = match self.table_state.selected() {
+            Some(i) => (i + half_page).min(max_len - 1),
+            None => 0,
+        };
+        self.table_state.select(Some(i));
+        self.on_selection_change();
+    }
+
+    pub fn scroll_up_half_page(&mut self) {
+        if self.jobs_list_viewport_height == 0 {
+            return;
+        }
+        let max_len = self.display_rows.len();
+        if max_len == 0 {
+            self.table_state.select(None);
+            return;
+        }
+        let half_page = self.jobs_list_viewport_height / 2;
+        let i = match self.table_state.selected() {
+            Some(i) => i.saturating_sub(half_page),
             None => 0,
         };
         self.table_state.select(Some(i));
