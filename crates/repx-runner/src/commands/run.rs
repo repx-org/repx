@@ -42,6 +42,7 @@ pub fn handle_run(
             run_specs,
             &target_name_clone,
             &scheduler_clone,
+            None,
             resources,
             num_jobs,
             Some(tx),

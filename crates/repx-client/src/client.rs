@@ -220,7 +220,7 @@ impl Client {
         let mut job_statuses = all_outcomes;
 
         for target in self.targets.values() {
-            if target.config().scheduler.as_deref() == Some("slurm") {
+            if target.config().slurm.is_some() {
                 let queued_jobs = target.squeue()?;
                 for (job_id, squeue_info) in queued_jobs {
                     job_statuses.entry(job_id).or_insert(
@@ -275,7 +275,7 @@ impl Client {
             self.save_slurm_map()?;
         }
 
-        if target.config().scheduler.as_deref() == Some("slurm") {
+        if target.config().slurm.is_some() {
             let queued_jobs = target.squeue()?;
             for (job_id, squeue_info) in queued_jobs {
                 job_statuses
@@ -296,6 +296,7 @@ impl Client {
         run_spec: String,
         target_name: &str,
         scheduler: &str,
+        execution_type: Option<&str>,
         resources: Option<Resources>,
         num_jobs: Option<usize>,
         event_sender: Option<Sender<ClientEvent>>,
@@ -304,6 +305,7 @@ impl Client {
             vec![run_spec],
             target_name,
             scheduler,
+            execution_type,
             resources,
             num_jobs,
             event_sender,
@@ -315,6 +317,7 @@ impl Client {
         run_specs: Vec<String>,
         target_name: &str,
         scheduler: &str,
+        execution_type: Option<&str>,
         resources: Option<Resources>,
         num_jobs: Option<usize>,
         event_sender: Option<Sender<ClientEvent>>,
@@ -421,6 +424,7 @@ impl Client {
                 target.clone(),
                 target_name,
                 &remote_repx_binary_path,
+                execution_type,
                 resources,
                 send,
             ),
@@ -431,6 +435,7 @@ impl Client {
                     target.clone(),
                     target_name,
                     &remote_repx_binary_path,
+                    execution_type,
                     resources,
                     num_jobs,
                     send,
@@ -449,6 +454,7 @@ impl Client {
         target: Arc<dyn Target>,
         target_name: &str,
         remote_repx_binary_path: &Path,
+        execution_type_override: Option<&str>,
         resources: Option<Resources>,
         send: impl Fn(ClientEvent),
     ) -> Result<String> {
@@ -471,11 +477,16 @@ impl Client {
         for (job_id, job) in &jobs_to_submit {
             let job_root_on_target = target.base_path().join("outputs").join(&job_id.0);
 
-            let execution_type = target
-                .config()
-                .execution_type
-                .as_deref()
-                .unwrap_or("native");
+            let execution_type = execution_type_override.unwrap_or_else(|| {
+                let scheduler_config = target.config().slurm.as_ref().unwrap();
+                target
+                    .config()
+                    .default_execution_type
+                    .as_deref()
+                    .filter(|&et| scheduler_config.execution_types.contains(&et.to_string()))
+                    .or_else(|| scheduler_config.execution_types.first().map(|s| s.as_str()))
+                    .unwrap_or("native")
+            });
             let image_path_opt = self
                 .lab
                 .runs
@@ -644,6 +655,7 @@ impl Client {
         target: Arc<dyn Target>,
         _target_name: &str,
         repx_binary_path: &Path,
+        execution_type_override: Option<&str>,
         _resources: Option<Resources>,
         num_jobs: usize,
         send: impl Fn(ClientEvent),
@@ -719,11 +731,20 @@ impl Client {
                         let job = jobs_in_batch.get(&job_id).unwrap();
 
                         let stage_type = &job.stage_type;
-                        let execution_type = target
-                            .config()
-                            .execution_type
-                            .as_deref()
-                            .unwrap_or("native");
+                        let execution_type = execution_type_override.unwrap_or_else(|| {
+                            let scheduler_config = target.config().local.as_ref().unwrap();
+                            target
+                                .config()
+                                .default_execution_type
+                                .as_deref()
+                                .filter(|&et| {
+                                    scheduler_config.execution_types.contains(&et.to_string())
+                                })
+                                .or_else(|| {
+                                    scheduler_config.execution_types.first().map(|s| s.as_str())
+                                })
+                                .unwrap_or("native")
+                        });
                         let image_path_opt = self
                             .lab
                             .runs

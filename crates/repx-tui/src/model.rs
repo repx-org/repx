@@ -1,7 +1,8 @@
 use serde::Deserialize;
 use serde::Serialize;
+use std::{collections::HashMap, str::FromStr};
 
-#[derive(Clone, Debug, PartialEq, Copy)]
+#[derive(Clone, Debug, PartialEq, Copy, Eq, Hash)]
 pub enum TuiScheduler {
     Local,
     Slurm,
@@ -16,7 +17,18 @@ impl TuiScheduler {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Copy)]
+impl FromStr for TuiScheduler {
+    type Err = ();
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "local" => Ok(TuiScheduler::Local),
+            "slurm" => Ok(TuiScheduler::Slurm),
+            _ => Err(()),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Copy, Eq, Hash)]
 pub enum TuiExecutor {
     Native,
     Podman,
@@ -31,6 +43,19 @@ impl TuiExecutor {
             TuiExecutor::Podman => "podman",
             TuiExecutor::Docker => "docker",
             TuiExecutor::Bwrap => "bwrap",
+        }
+    }
+}
+
+impl FromStr for TuiExecutor {
+    type Err = ();
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "native" => Ok(TuiExecutor::Native),
+            "podman" => Ok(TuiExecutor::Podman),
+            "docker" => Ok(TuiExecutor::Docker),
+            "bwrap" => Ok(TuiExecutor::Bwrap),
+            _ => Err(()),
         }
     }
 }
@@ -76,6 +101,26 @@ pub struct TuiTarget {
     pub name: String,
     pub state: TargetState,
     pub activity: Vec<f64>,
-    pub scheduler: TuiScheduler,
-    pub executor: TuiExecutor,
+    pub available_schedulers: Vec<TuiScheduler>,
+    pub available_executors: HashMap<TuiScheduler, Vec<TuiExecutor>>,
+    pub selected_scheduler_idx: usize,
+    pub selected_executor_idx: usize,
+}
+
+impl TuiTarget {
+    pub fn get_selected_scheduler(&self) -> TuiScheduler {
+        *self
+            .available_schedulers
+            .get(self.selected_scheduler_idx)
+            .unwrap_or(&TuiScheduler::Local)
+    }
+
+    pub fn get_selected_executor(&self) -> TuiExecutor {
+        let scheduler = self.get_selected_scheduler();
+        self.available_executors
+            .get(&scheduler)
+            .and_then(|execs| execs.get(self.selected_executor_idx))
+            .copied()
+            .unwrap_or(TuiExecutor::Native)
+    }
 }

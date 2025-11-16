@@ -1,4 +1,6 @@
-use crate::model::{TargetState, TuiDisplayRow, TuiJob, TuiRowItem, TuiTarget};
+use crate::model::{
+    TargetState, TuiDisplayRow, TuiExecutor, TuiJob, TuiRowItem, TuiScheduler, TuiTarget,
+};
 use ratatui::widgets::TableState;
 use repx_client::{error::ClientError, Client};
 use repx_core::{
@@ -142,20 +144,50 @@ impl App {
             .targets
             .iter()
             .map(|(name, target_config)| {
-                let scheduler_str = target_config.scheduler.as_deref().unwrap_or("local");
-                let scheduler = if scheduler_str == "slurm" {
-                    crate::model::TuiScheduler::Slurm
-                } else {
-                    crate::model::TuiScheduler::Local
-                };
+                let mut available_schedulers = Vec::new();
+                let mut available_executors = std::collections::HashMap::new();
 
-                let executor_str = target_config.execution_type.as_deref().unwrap_or("native");
-                let executor = match executor_str {
-                    "podman" => crate::model::TuiExecutor::Podman,
-                    "docker" => crate::model::TuiExecutor::Docker,
-                    "bwrap" => crate::model::TuiExecutor::Bwrap,
-                    _ => crate::model::TuiExecutor::Native,
-                };
+                if let Some(conf) = &target_config.local {
+                    available_schedulers.push(TuiScheduler::Local);
+                    let executors: Vec<TuiExecutor> = conf
+                        .execution_types
+                        .iter()
+                        .filter_map(|s| s.parse().ok())
+                        .collect();
+                    available_executors.insert(TuiScheduler::Local, executors);
+                }
+                if let Some(conf) = &target_config.slurm {
+                    available_schedulers.push(TuiScheduler::Slurm);
+                    let executors: Vec<TuiExecutor> = conf
+                        .execution_types
+                        .iter()
+                        .filter_map(|s| s.parse().ok())
+                        .collect();
+                    available_executors.insert(TuiScheduler::Slurm, executors);
+                }
+
+                let default_scheduler: TuiScheduler = target_config
+                    .default_scheduler
+                    .as_deref()
+                    .and_then(|s| s.parse().ok())
+                    .unwrap_or(TuiScheduler::Local);
+
+                let selected_scheduler_idx = available_schedulers
+                    .iter()
+                    .position(|&s| s == default_scheduler)
+                    .unwrap_or(0);
+
+                let default_executor: TuiExecutor = target_config
+                    .default_execution_type
+                    .as_deref()
+                    .and_then(|s| s.parse().ok())
+                    .unwrap_or(TuiExecutor::Native);
+
+                let selected_executor_idx = available_executors
+                    .get(&default_scheduler)
+                    .and_then(|execs| execs.iter().position(|&e| e == default_executor))
+                    .unwrap_or(0);
+
                 TuiTarget {
                     name: name.clone(),
                     state: if name == &initial_active_target {
@@ -164,8 +196,10 @@ impl App {
                         TargetState::Inactive
                     },
                     activity: vec![0.0; 100],
-                    scheduler,
-                    executor,
+                    available_schedulers,
+                    available_executors,
+                    selected_scheduler_idx,
+                    selected_executor_idx,
                 }
             })
             .collect();
@@ -493,18 +527,20 @@ impl App {
             if let Some(target) = self.targets.get_mut(selected_idx) {
                 match self.targets_focused_column {
                     1 => {
-                        target.executor = match target.executor {
-                            crate::model::TuiExecutor::Native => crate::model::TuiExecutor::Podman,
-                            crate::model::TuiExecutor::Podman => crate::model::TuiExecutor::Docker,
-                            crate::model::TuiExecutor::Docker => crate::model::TuiExecutor::Bwrap,
-                            crate::model::TuiExecutor::Bwrap => crate::model::TuiExecutor::Native,
-                        };
+                        let scheduler = target.get_selected_scheduler();
+                        if let Some(executors) = target.available_executors.get(&scheduler) {
+                            if !executors.is_empty() {
+                                target.selected_executor_idx =
+                                    (target.selected_executor_idx + 1) % executors.len();
+                            }
+                        }
                     }
                     2 => {
-                        target.scheduler = match target.scheduler {
-                            crate::model::TuiScheduler::Local => crate::model::TuiScheduler::Slurm,
-                            crate::model::TuiScheduler::Slurm => crate::model::TuiScheduler::Local,
-                        };
+                        if !target.available_schedulers.is_empty() {
+                            target.selected_scheduler_idx = (target.selected_scheduler_idx + 1)
+                                % target.available_schedulers.len();
+                            target.selected_executor_idx = 0;
+                        }
                     }
                     _ => {}
                 }
@@ -517,18 +553,27 @@ impl App {
             if let Some(target) = self.targets.get_mut(selected_idx) {
                 match self.targets_focused_column {
                     1 => {
-                        target.executor = match target.executor {
-                            crate::model::TuiExecutor::Native => crate::model::TuiExecutor::Bwrap,
-                            crate::model::TuiExecutor::Podman => crate::model::TuiExecutor::Native,
-                            crate::model::TuiExecutor::Docker => crate::model::TuiExecutor::Podman,
-                            crate::model::TuiExecutor::Bwrap => crate::model::TuiExecutor::Docker,
-                        };
+                        let scheduler = target.get_selected_scheduler();
+                        if let Some(executors) = target.available_executors.get(&scheduler) {
+                            if !executors.is_empty() {
+                                target.selected_executor_idx = if target.selected_executor_idx == 0
+                                {
+                                    executors.len() - 1
+                                } else {
+                                    target.selected_executor_idx - 1
+                                };
+                            }
+                        }
                     }
                     2 => {
-                        target.scheduler = match target.scheduler {
-                            crate::model::TuiScheduler::Local => crate::model::TuiScheduler::Slurm,
-                            crate::model::TuiScheduler::Slurm => crate::model::TuiScheduler::Local,
-                        };
+                        if !target.available_schedulers.is_empty() {
+                            target.selected_scheduler_idx = if target.selected_scheduler_idx == 0 {
+                                target.available_schedulers.len() - 1
+                            } else {
+                                target.selected_scheduler_idx - 1
+                            };
+                            target.selected_executor_idx = 0;
+                        }
                     }
                     _ => {}
                 }
@@ -1085,24 +1130,27 @@ impl App {
         }
 
         let target_name = self.active_target.lock().unwrap().clone();
+        let active_tui_target = self.targets.iter().find(|t| t.name == target_name).unwrap();
+        let scheduler = active_tui_target
+            .get_selected_scheduler()
+            .to_str()
+            .to_string();
+        let execution_type = active_tui_target
+            .get_selected_executor()
+            .to_str()
+            .to_string();
 
         let config = self.client.config();
-        let target = config.targets.get(&target_name);
-
-        let scheduler = target
-            .and_then(|t| t.scheduler.as_deref())
-            .or(config.default_scheduler.as_deref())
-            .unwrap_or("slurm")
-            .to_string();
+        let target_config = config.targets.get(&target_name).unwrap();
 
         let num_jobs = if scheduler != "local" {
             None
         } else {
-            Some(
-                target
-                    .and_then(|t| t.local_concurrency)
-                    .unwrap_or_else(num_cpus::get),
-            )
+            target_config
+                .local
+                .as_ref()
+                .and_then(|c| c.local_concurrency)
+                .or_else(|| Some(num_cpus::get()))
         };
 
         let client_clone = self.client.clone();
@@ -1121,6 +1169,7 @@ impl App {
                 run_specs_to_submit.clone(),
                 &target_name,
                 &scheduler,
+                Some(&execution_type),
                 resources_clone,
                 num_jobs,
                 None,

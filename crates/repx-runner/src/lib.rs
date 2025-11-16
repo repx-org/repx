@@ -120,7 +120,7 @@ pub fn run() -> Result<(), AppError> {
             let scheduler = cli
                 .scheduler
                 .as_deref()
-                .or(target_config.scheduler.as_deref())
+                .or(target_config.default_scheduler.as_deref())
                 .or(config.default_scheduler.as_deref())
                 .unwrap_or("slurm")
                 .to_string();
@@ -128,7 +128,12 @@ pub fn run() -> Result<(), AppError> {
             let num_jobs = if scheduler == "local" {
                 Some(
                     args.jobs
-                        .or(target_config.local_concurrency)
+                        .or_else(|| {
+                            target_config
+                                .local
+                                .as_ref()
+                                .and_then(|c| c.local_concurrency)
+                        })
                         .unwrap_or_else(num_cpus::get),
                 )
             } else {

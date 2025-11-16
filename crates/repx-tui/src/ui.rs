@@ -241,13 +241,13 @@ fn draw_targets(f: &mut Frame, area: Rect, app: &mut App, border_style: Style) {
                     TargetState::Down => ("[DOWN]", Style::default().add_modifier(Modifier::DIM)),
                 };
 
-                let mut executor_text = target.executor.to_str().to_string();
+                let mut executor_text = target.get_selected_executor().to_str().to_string();
                 if is_selected_row && app.targets_focused_column == 1 && app.is_editing_target_cell
                 {
                     executor_text = format!("← {} →", executor_text);
                 }
 
-                let mut scheduler_text = target.scheduler.to_str().to_string();
+                let mut scheduler_text = target.get_selected_scheduler().to_str().to_string();
                 if is_selected_row && app.targets_focused_column == 2 && app.is_editing_target_cell
                 {
                     scheduler_text = format!("← {} →", scheduler_text);

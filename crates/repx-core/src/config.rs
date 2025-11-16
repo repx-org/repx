@@ -35,16 +35,21 @@ default_scheduler = "local"
   [targets.local]
   # The base path for the shared path on the target. Tilde expansion (~) is supported.
   base_path = "~/Desktop/repx-store"
-  # The scheduler to use for this target. For 'local' targets, this can be
-  # "slurm" (if you have SLURM client tools) or "local" (to run directly).
-  scheduler = "local"
-  # The maximum number of jobs to run in parallel on this machine.
-  # If not set, it defaults to the number of available CPU cores.
-  # local_concurrency = 4
-  # Execution type. Can be "native", "podman", "docker", or "bwrap".
-  # If unset, defaults to "native".
-  # The corresponding runtime must be installed on the target machine.
-  execution_type = "native"
+  # Optional: set the default scheduler and execution type for this target.
+  default_scheduler = "local"
+  default_execution_type = "native"
+
+    # Configuration for when the 'local' scheduler is used.
+    [targets.local.local]
+    # List of execution types supported by this scheduler on this target.
+    execution_types = ["native", "bwrap"]
+    # The maximum number of jobs to run in parallel.
+    # If not set, it defaults to the number of available CPU cores.
+    local_concurrency = 4
+
+    # Configuration for when the 'slurm' scheduler is used (if supported).
+    # [targets.local.slurm]
+    # execution_types = ["podman"]
 
   # Example of a remote SSH target for a SLURM HPC cluster.
   # [targets.safari]
@@ -52,10 +57,11 @@ default_scheduler = "local"
   # address = "safari"
   # # The base path for the shared path on the target.
   # base_path = "/mnt/galactica/demirlie/Desktop/repx-store"
-  # # This target uses the SLURM scheduler.
-  # scheduler = "slurm"
-  # # Use podman for execution on this target.
-  # execution_type = "podman"
+  # default_scheduler = "slurm"
+  # default_execution_type = "podman"
+  #
+  #   [targets.safari.slurm]
+  #   execution_types = ["podman", "native"]
 "#;
 
 const DEFAULT_RESOURCES_CONTENT: &str = r#"# Repx Resource Configuration File
@@ -93,14 +99,25 @@ const DEFAULT_RESOURCES_CONTENT: &str = r#"# Repx Resource Configuration File
 #   time = "02:00:00"
 "#;
 
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
+#[serde(deny_unknown_fields)]
+pub struct SchedulerConfig {
+    #[serde(default)]
+    pub execution_types: Vec<String>,
+    pub local_concurrency: Option<usize>,
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(deny_unknown_fields)]
 pub struct Target {
     pub address: Option<String>,
     pub base_path: PathBuf,
-    pub scheduler: Option<String>,
-    pub execution_type: Option<String>,
-    pub local_concurrency: Option<usize>,
+    pub default_scheduler: Option<String>,
+    pub default_execution_type: Option<String>,
+    #[serde(default)]
+    pub local: Option<SchedulerConfig>,
+    #[serde(default)]
+    pub slurm: Option<SchedulerConfig>,
 }
 
 const TUI_DEFAULT_TICK_RATE_MS: u64 = 1000;
