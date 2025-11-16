@@ -1,10 +1,10 @@
 {
   pkgs,
-  revision,
+  gitHash,
   runs,
 }:
 let
-  lib-lab-internal = (import ./lib-lab-internal.nix) { inherit pkgs revision; };
+  lib-lab-internal = (import ./lib-lab-internal.nix) { inherit pkgs gitHash; };
 in
 lib-lab-internal.runs2Lab runs
 // lib-lab-internal.runs2labUnified runs

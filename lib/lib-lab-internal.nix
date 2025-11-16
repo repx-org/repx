@@ -1,6 +1,6 @@
 {
   pkgs,
-  revision,
+  gitHash,
 }:
 let
   mkHostTools =
@@ -57,7 +57,7 @@ let
       );
 
       metadata = (import ./metadata.nix) {
-        inherit pkgs revision includeImages;
+        inherit pkgs gitHash includeImages;
       } runs runsAsAttrSet jobDerivations;
 
       jobs =

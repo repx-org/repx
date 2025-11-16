@@ -23,7 +23,7 @@
       exampleLabOutputs = (import ./examples/combined/default.nix) {
         inherit pkgs;
         repx-lib = repxLib;
-        revision = "1.0";
+        gitHash = self.rev or self.dirtyRev or "unknown";
       };
     in
     {

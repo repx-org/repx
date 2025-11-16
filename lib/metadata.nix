@@ -1,6 +1,6 @@
 {
   pkgs,
-  revision,
+  gitHash,
   includeImages ? true,
 }:
 runDefinitions: runsAttrSet: jobs:
@@ -67,7 +67,7 @@ let
 
   finalMetadata = {
     schema_version = "1.0";
-    inherit revision;
+    inherit gitHash;
     runs = runsAttrSetForJson;
     jobs = jobsAttrSet;
   };
