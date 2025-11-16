@@ -22,6 +22,7 @@ use repx_core::{
     error::AppError,
     log_debug,
     model::JobId,
+    theme,
 };
 use std::{
     fs,
@@ -96,6 +97,7 @@ fn main() -> Result<(), AppError> {
         source: e,
     })?;
     let config = config::load_config()?;
+    let theme = theme::load_theme(&config)?;
     let resources = load_resources_config()?;
     let client = Client::new(config.clone(), lab_path).map_err(|e| AppError::ExecutionFailed {
         message: "TUI failed to initialize client".to_string(),
@@ -184,6 +186,7 @@ fn main() -> Result<(), AppError> {
 
     let mut app = App::new(
         client,
+        theme,
         status_rx,
         log_cmd_tx,
         log_result_rx,
@@ -232,6 +235,7 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<Stdout>>, app: &mut App) -> 
         }
 
         if last_tick.elapsed() >= app.tick_rate {
+            app.on_tick();
             app.check_for_updates();
             app.check_for_log_updates();
             app.check_for_submission_updates();

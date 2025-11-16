@@ -2,6 +2,19 @@ use serde::Deserialize;
 use serde::Serialize;
 use std::{collections::HashMap, str::FromStr};
 
+#[derive(Clone, Debug, Default)]
+pub struct StatusCounts {
+    pub succeeded: usize,
+    pub failed: usize,
+    pub running: usize,
+    pub pending: usize,
+    pub queued: usize,
+    pub blocked: usize,
+    pub submitting: usize,
+    pub unknown: usize,
+    pub total: usize,
+}
+
 #[derive(Clone, Debug, PartialEq, Copy, Eq, Hash)]
 pub enum TuiScheduler {
     Local,

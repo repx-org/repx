@@ -1,7 +1,7 @@
 use crate::{
     app::{App, InputMode, PanelFocus},
     model::{TargetState, TuiDisplayRow, TuiRowItem},
-    widgets::{BrailleGraph, GraphDirection},
+    widgets::{color, BrailleGraph, GraphDirection, StackedBarChart},
 };
 use chrono::Local;
 use ratatui::{
@@ -12,7 +12,32 @@ use ratatui::{
     },
 };
 use repx_core::model::Lab;
-use std::collections::{HashSet, VecDeque};
+use repx_core::theme::ElementStyle;
+use std::collections::{BTreeMap, HashSet};
+use std::str::FromStr;
+
+fn get_color(app: &App, name: &str) -> Color {
+    app.theme
+        .palette
+        .get(name)
+        .and_then(|hex| Color::from_str(hex).ok())
+        .unwrap_or(Color::Reset)
+}
+
+fn get_style(app: &App, element: &ElementStyle) -> Style {
+    let color = get_color(app, &element.color);
+    let mut style = Style::default().fg(color);
+    for s in &element.styles {
+        style = match s.as_str() {
+            "bold" => style.add_modifier(Modifier::BOLD),
+            "dimmed" => style.add_modifier(Modifier::DIM),
+            "italic" => style.add_modifier(Modifier::ITALIC),
+            "underlined" => style.add_modifier(Modifier::UNDERLINED),
+            _ => style,
+        }
+    }
+    style
+}
 
 pub fn draw(f: &mut Frame, app: &mut App) {
     let main_chunks = Layout::default()
@@ -31,15 +56,15 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     draw_right_column(f, bottom_chunks[1], app);
 
     if app.input_mode == InputMode::SpaceMenu {
-        draw_space_menu_popup(f, f.area());
+        draw_space_menu_popup(f, f.area(), app);
     } else if app.input_mode == InputMode::GMenu {
-        draw_g_menu_popup(f, f.area());
+        draw_g_menu_popup(f, f.area(), app);
     }
 }
 
 fn draw_overview_panel(f: &mut Frame, area: Rect, app: &mut App) {
-    let overview_border_style = Style::default().fg(Color::Magenta);
-    let targets_border_style = Style::default().fg(Color::DarkGray);
+    let overview_border_style = get_style(app, &app.theme.elements.panels.overview);
+    let targets_border_style = get_style(app, &app.theme.elements.panels.targets);
     let loading_indicator = if app.is_loading { " [Updating...]" } else { "" };
     let store_path_str = {
         let active_target_name = app.active_target.lock().unwrap();
@@ -119,68 +144,87 @@ fn draw_overview_panel(f: &mut Frame, area: Rect, app: &mut App) {
 }
 
 fn draw_graphs(f: &mut Frame, area: Rect, app: &App) {
-    let graph_chunks = Layout::default()
-        .direction(Direction::Vertical)
+    let chunks = Layout::default()
+        .direction(Direction::Horizontal)
         .constraints([
-            Constraint::Percentage(50),
+            Constraint::Percentage(50), // Job Status History
             Constraint::Length(1),
-            Constraint::Percentage(50),
+            Constraint::Min(0), // Job Completion Rate
         ])
         .split(area);
 
-    let progress_area = graph_chunks[0];
-    let divider_area = graph_chunks[1];
-    let throughput_area = graph_chunks[2];
+    let left_area = chunks[0];
+    let separator_area = chunks[1];
+    let right_area = chunks[2];
 
-    let graph_width_in_cells = area.width as usize;
-    let data_points_to_render = graph_width_in_cells * 2;
+    let status_chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(0), Constraint::Length(1)])
+        .split(left_area);
+    let rate_chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(0), Constraint::Length(1)])
+        .split(right_area);
 
-    let create_padded_slice = |data: &VecDeque<f64>| -> Vec<f64> {
-        let current_data_len = data.len();
-        let padding = data_points_to_render.saturating_sub(current_data_len);
-        let data_slice = data
-            .iter()
-            .skip(current_data_len.saturating_sub(data_points_to_render));
-        std::iter::repeat(0.0)
-            .take(padding)
-            .chain(data_slice.copied())
-            .collect()
+    // Left plot: Job Status History
+    let bg = get_color(app, &app.theme.elements.graphs.background.color);
+    let status_styles = &app.theme.elements.job_status;
+    let status_colors: BTreeMap<&'static str, Color> = [
+        ("Succeeded", get_color(app, &status_styles.succeeded.color)),
+        ("Failed", get_color(app, &status_styles.failed.color)),
+        ("Running", get_color(app, &status_styles.running.color)),
+        ("Pending", get_color(app, &status_styles.pending.color)),
+        ("Queued", get_color(app, &status_styles.queued.color)),
+        ("Blocked", get_color(app, &status_styles.blocked.color)),
+        (
+            "Submitting...",
+            get_color(app, &status_styles.submitting.color),
+        ),
+        ("Unknown", get_color(app, &status_styles.unknown.color)),
+    ]
+    .iter()
+    .map(|(k, v)| (*k, color::muted(*v, bg)))
+    .collect();
+
+    let data: Vec<_> = app.status_history.iter().cloned().collect();
+    let status_chart = StackedBarChart {
+        data: &data,
+        status_colors: &status_colors,
     };
+    f.render_widget(status_chart, status_chunks[0]);
+    f.render_widget(
+        Paragraph::new("Job Status History")
+            .style(Style::default().add_modifier(Modifier::DIM))
+            .alignment(Alignment::Center),
+        status_chunks[1],
+    );
 
-    let progress_data_slice = create_padded_slice(&app.progress_data);
-    let throughput_data_slice = create_padded_slice(&app.throughput_data);
+    // Separator
+    let separator = Paragraph::new("│").style(Style::default().add_modifier(Modifier::DIM));
+    f.render_widget(separator, separator_area);
 
-    let progress_graph = BrailleGraph {
-        data: &progress_data_slice,
-        max_value: 100.0,
-        low_color: Color::Rgb(0, 150, 0),
-        high_color: Color::Rgb(100, 255, 100),
+    // Right plot: Job Completion Rate
+    let rate_data: Vec<f64> = app.completion_rate_history.iter().copied().collect();
+    let max_rate = rate_data
+        .iter()
+        .fold(0.0, |max, &val| val.max(max))
+        .max(1.0);
+
+    let rate_graph = BrailleGraph {
+        data: &rate_data,
+        max_value: max_rate,
+        low_color: get_color(app, &app.theme.elements.graphs.rate_low.color),
+        high_color: get_color(app, &app.theme.elements.graphs.rate_high.color),
         direction: GraphDirection::Upwards,
     };
-    f.render_widget(progress_graph, progress_area);
+    f.render_widget(rate_graph, rate_chunks[0]);
 
-    let throughput_graph = BrailleGraph {
-        data: &throughput_data_slice,
-        max_value: 100.0,
-        low_color: Color::Rgb(255, 160, 0),
-        high_color: Color::Rgb(255, 255, 100),
-        direction: GraphDirection::Downwards,
-    };
-    f.render_widget(throughput_graph, throughput_area);
-
-    let label_style = Style::default().add_modifier(Modifier::DIM);
-    let text = "througput─▼▲─progress";
-    let text_width = text.len();
-    let line_width = divider_area.width.saturating_sub(text_width as u16);
-    let left_line_width = line_width / 2;
-    let right_line_width = line_width - left_line_width;
-
-    let divider = Paragraph::new(Line::from(vec![
-        Span::styled("─".repeat(left_line_width as usize), label_style),
-        Span::styled(text, label_style),
-        Span::styled("─".repeat(right_line_width as usize), label_style),
-    ]));
-    f.render_widget(divider, divider_area);
+    f.render_widget(
+        Paragraph::new("Job Completion Rate")
+            .style(Style::default().add_modifier(Modifier::DIM))
+            .alignment(Alignment::Center),
+        rate_chunks[1],
+    );
 }
 
 fn draw_targets(f: &mut Frame, area: Rect, app: &mut App, border_style: Style) {
@@ -209,16 +253,19 @@ fn draw_targets(f: &mut Frame, area: Rect, app: &mut App, border_style: Style) {
         let selected_row_idx = app.targets_table_state.selected();
 
         let row_highlight_style = if app.focused_panel == PanelFocus::Targets {
-            Style::default()
-                .bg(border_style.fg.unwrap_or(Color::Cyan))
-                .fg(Color::Black)
-                .add_modifier(Modifier::BOLD)
+            get_style(app, &app.theme.elements.tables.row_highlight_fg).bg(get_color(
+                app,
+                &app.theme.elements.tables.row_highlight_bg.color,
+            ))
         } else {
             Style::default()
         };
 
         let cell_highlight_style = if app.focused_panel == PanelFocus::Targets {
-            Style::default().bg(Color::LightYellow).fg(Color::Black)
+            get_style(app, &app.theme.elements.tables.cell_highlight_fg).bg(get_color(
+                app,
+                &app.theme.elements.tables.cell_highlight_bg.color,
+            ))
         } else {
             Style::default()
         };
@@ -233,11 +280,12 @@ fn draw_targets(f: &mut Frame, area: Rect, app: &mut App, border_style: Style) {
                 let (state_text, state_style) = match target.state {
                     TargetState::Active => (
                         "[ACTIVE]",
-                        Style::default()
-                            .fg(Color::Green)
-                            .add_modifier(Modifier::BOLD),
+                        get_style(app, &app.theme.elements.target_states.active),
                     ),
-                    TargetState::Inactive => ("[INACTIVE]", Style::default().fg(Color::Yellow)),
+                    TargetState::Inactive => (
+                        "[INACTIVE]",
+                        get_style(app, &app.theme.elements.target_states.inactive),
+                    ),
                     TargetState::Down => ("[DOWN]", Style::default().add_modifier(Modifier::DIM)),
                 };
 
@@ -305,7 +353,7 @@ fn draw_left_column(f: &mut Frame, area: Rect, app: &App) {
 }
 
 fn draw_context_panel(f: &mut Frame, area: Rect, app: &App) {
-    let context_border_style = Style::default().fg(Color::Green);
+    let context_border_style = get_style(app, &app.theme.elements.panels.context);
     let selected_job = app
         .table_state
         .selected()
@@ -380,7 +428,7 @@ fn draw_context_panel(f: &mut Frame, area: Rect, app: &App) {
 }
 
 fn draw_logs_panel(f: &mut Frame, area: Rect, app: &App) {
-    let logs_border_style = Style::default().fg(Color::Red);
+    let logs_border_style = get_style(app, &app.theme.elements.panels.logs);
     let selected_job = app
         .table_state
         .selected()
@@ -424,7 +472,7 @@ fn draw_logs_panel(f: &mut Frame, area: Rect, app: &App) {
 }
 
 fn draw_right_column(f: &mut Frame, area: Rect, app: &mut App) {
-    let runs_jobs_border_style = Style::default().fg(Color::Cyan);
+    let runs_jobs_border_style = get_style(app, &app.theme.elements.panels.runs_jobs);
     let filtered_count = app.display_rows.len();
     let counter_text = if filtered_count > 0 {
         let selected_index = app.table_state.selected().unwrap_or(0);
@@ -619,6 +667,7 @@ fn draw_right_column(f: &mut Frame, area: Rect, app: &mut App) {
             Constraint::Length(10),
         ];
         let rows = build_tree_rows(
+            app,
             &app.display_rows,
             &app.selected_jobs,
             &app.collapsed_nodes,
@@ -627,10 +676,10 @@ fn draw_right_column(f: &mut Frame, area: Rect, app: &mut App) {
         Table::new(rows, constraints)
             .header(header.height(1))
             .row_highlight_style(if app.focused_panel == PanelFocus::Jobs {
-                Style::default()
-                    .bg(runs_jobs_border_style.fg.unwrap_or(Color::Cyan))
-                    .fg(Color::Black)
-                    .add_modifier(Modifier::BOLD)
+                get_style(app, &app.theme.elements.tables.row_highlight_fg).bg(get_color(
+                    app,
+                    &app.theme.elements.tables.row_highlight_bg.color,
+                ))
             } else {
                 Style::default()
             })
@@ -649,14 +698,14 @@ fn draw_right_column(f: &mut Frame, area: Rect, app: &mut App) {
             Constraint::Length(10),
             Constraint::Length(10),
         ];
-        let rows = build_flat_rows(&app.display_rows, &app.selected_jobs);
+        let rows = build_flat_rows(app, &app.display_rows, &app.selected_jobs);
         Table::new(rows, constraints)
             .header(header.height(1))
             .row_highlight_style(if app.focused_panel == PanelFocus::Jobs {
-                Style::default()
-                    .bg(runs_jobs_border_style.fg.unwrap_or(Color::Cyan))
-                    .fg(Color::Black)
-                    .add_modifier(Modifier::BOLD)
+                get_style(app, &app.theme.elements.tables.row_highlight_fg).bg(get_color(
+                    app,
+                    &app.theme.elements.tables.row_highlight_bg.color,
+                ))
             } else {
                 Style::default()
             })
@@ -686,6 +735,7 @@ fn draw_right_column(f: &mut Frame, area: Rect, app: &mut App) {
 }
 
 fn build_flat_rows<'a>(
+    app: &App,
     display_rows: &'a [TuiDisplayRow],
     selected_jobs: &HashSet<String>,
 ) -> Vec<Row<'a>> {
@@ -699,22 +749,20 @@ fn build_flat_rows<'a>(
             };
 
             let selector = if is_selected {
-                Cell::from("█").style(Style::default().fg(Color::Yellow))
+                Cell::from("█").style(get_style(app, &app.theme.elements.tables.selector))
             } else {
                 Cell::from(" ")
             };
             let status_style = match job.status.as_str() {
-                "Succeeded" => Style::default().fg(Color::Green),
-                "Failed" => Style::default().fg(Color::Red),
-                "Submit Failed" => Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
-                "Pending" => Style::default().fg(Color::Yellow),
-                "Running" => Style::default().fg(Color::Cyan),
-                "Queued" => Style::default().fg(Color::Rgb(189, 147, 249)),
-                "Blocked" => Style::default().fg(Color::Magenta),
-                "Submitting..." => Style::default()
-                    .fg(Color::Blue)
-                    .add_modifier(Modifier::BOLD),
-                _ => Style::default(),
+                "Succeeded" => get_style(app, &app.theme.elements.job_status.succeeded),
+                "Failed" => get_style(app, &app.theme.elements.job_status.failed),
+                "Submit Failed" => get_style(app, &app.theme.elements.job_status.submit_failed),
+                "Pending" => get_style(app, &app.theme.elements.job_status.pending),
+                "Running" => get_style(app, &app.theme.elements.job_status.running),
+                "Queued" => get_style(app, &app.theme.elements.job_status.queued),
+                "Blocked" => get_style(app, &app.theme.elements.job_status.blocked),
+                "Submitting..." => get_style(app, &app.theme.elements.job_status.submitting),
+                _ => get_style(app, &app.theme.elements.job_status.unknown),
             };
             let status_cell = Cell::from(Span::styled(job.status.clone(), status_style));
 
@@ -732,6 +780,7 @@ fn build_flat_rows<'a>(
 }
 
 fn build_tree_rows<'a>(
+    app: &App,
     display_rows: &'a [TuiDisplayRow],
     selected_jobs: &HashSet<String>,
     collapsed_nodes: &HashSet<String>,
@@ -743,7 +792,7 @@ fn build_tree_rows<'a>(
     for row_data in display_rows.iter() {
         let is_selected_for_action = selected_jobs.contains(&row_data.id);
         let selector = if is_selected_for_action {
-            Cell::from("█").style(Style::default().fg(Color::Yellow))
+            Cell::from("█").style(get_style(app, &app.theme.elements.tables.selector))
         } else {
             Cell::from(" ")
         };
@@ -822,17 +871,15 @@ fn build_tree_rows<'a>(
                 let display_text = job.name.clone();
                 let item_style = Style::default();
                 let status_style = match job.status.as_str() {
-                    "Succeeded" => Style::default().fg(Color::Green),
-                    "Failed" => Style::default().fg(Color::Red),
-                    "Submit Failed" => Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
-                    "Pending" => Style::default().fg(Color::Yellow),
-                    "Running" => Style::default().fg(Color::Cyan),
-                    "Queued" => Style::default().fg(Color::Rgb(189, 147, 249)),
-                    "Blocked" => Style::default().fg(Color::Magenta),
-                    "Submitting..." => Style::default()
-                        .fg(Color::Blue)
-                        .add_modifier(Modifier::BOLD),
-                    _ => Style::default(),
+                    "Succeeded" => get_style(app, &app.theme.elements.job_status.succeeded),
+                    "Failed" => get_style(app, &app.theme.elements.job_status.failed),
+                    "Submit Failed" => get_style(app, &app.theme.elements.job_status.submit_failed),
+                    "Pending" => get_style(app, &app.theme.elements.job_status.pending),
+                    "Running" => get_style(app, &app.theme.elements.job_status.running),
+                    "Queued" => get_style(app, &app.theme.elements.job_status.queued),
+                    "Blocked" => get_style(app, &app.theme.elements.job_status.blocked),
+                    "Submitting..." => get_style(app, &app.theme.elements.job_status.submitting),
+                    _ => get_style(app, &app.theme.elements.job_status.unknown),
                 };
                 let worker = Cell::from(job.worker.clone());
                 let elapsed = Cell::from(job.elapsed.clone());
@@ -855,7 +902,7 @@ fn build_tree_rows<'a>(
     rows
 }
 
-fn draw_space_menu_popup(f: &mut Frame, area: Rect) {
+fn draw_space_menu_popup(f: &mut Frame, area: Rect, app: &App) {
     let popup_height = 10;
     let horizontal_padding = 2;
     let bottom_padding = 1;
@@ -874,7 +921,7 @@ fn draw_space_menu_popup(f: &mut Frame, area: Rect) {
         .title(" Quick Actions ")
         .borders(Borders::ALL)
         .border_type(BorderType::Double)
-        .border_style(Style::default().fg(Color::Yellow));
+        .border_style(get_style(app, &app.theme.elements.popups.border));
 
     let inner_area = block.inner(popup_area);
 
@@ -895,10 +942,8 @@ fn draw_space_menu_popup(f: &mut Frame, area: Rect) {
                 Cell::from(Line::from(vec![
                     Span::styled(
                         format!(" {} ", key),
-                        Style::default()
-                            .fg(Color::Black)
-                            .bg(Color::Yellow)
-                            .add_modifier(Modifier::BOLD),
+                        get_style(app, &app.theme.elements.popups.key_fg)
+                            .bg(get_color(app, &app.theme.elements.popups.key_bg.color)),
                     ),
                     Span::raw(format!(" {}", desc)),
                 ]))
@@ -926,7 +971,7 @@ fn draw_space_menu_popup(f: &mut Frame, area: Rect) {
     f.render_widget(table, inner_area);
 }
 
-fn draw_g_menu_popup(f: &mut Frame, area: Rect) {
+fn draw_g_menu_popup(f: &mut Frame, area: Rect, app: &App) {
     let popup_height = 6;
     let horizontal_padding = 2;
     let bottom_padding = 1;
@@ -945,7 +990,7 @@ fn draw_g_menu_popup(f: &mut Frame, area: Rect) {
         .title(" Go To ")
         .borders(Borders::ALL)
         .border_type(BorderType::Double)
-        .border_style(Style::default().fg(Color::Yellow));
+        .border_style(get_style(app, &app.theme.elements.popups.border));
 
     let inner_area = block.inner(popup_area);
 
@@ -963,10 +1008,8 @@ fn draw_g_menu_popup(f: &mut Frame, area: Rect) {
                 Cell::from(Line::from(vec![
                     Span::styled(
                         format!(" {} ", key),
-                        Style::default()
-                            .fg(Color::Black)
-                            .bg(Color::Yellow)
-                            .add_modifier(Modifier::BOLD),
+                        get_style(app, &app.theme.elements.popups.key_fg)
+                            .bg(get_color(app, &app.theme.elements.popups.key_bg.color)),
                     ),
                     Span::raw(format!(" {}", desc)),
                 ]))

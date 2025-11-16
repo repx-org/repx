@@ -16,10 +16,13 @@ pub struct ElementStyle {
 pub struct JobStatusStyles {
     pub succeeded: ElementStyle,
     pub failed: ElementStyle,
+    pub submit_failed: ElementStyle,
     pub pending: ElementStyle,
     pub queued: ElementStyle,
     pub blocked: ElementStyle,
     pub running: ElementStyle,
+    pub submitting: ElementStyle,
+    pub unknown: ElementStyle,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -42,11 +45,54 @@ pub struct SummaryStyles {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PanelStyles {
+    pub overview: ElementStyle,
+    pub targets: ElementStyle,
+    pub context: ElementStyle,
+    pub logs: ElementStyle,
+    pub runs_jobs: ElementStyle,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GraphStyles {
+    pub background: ElementStyle,
+    pub rate_low: ElementStyle,
+    pub rate_high: ElementStyle,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TableStyles {
+    pub row_highlight_fg: ElementStyle,
+    pub row_highlight_bg: ElementStyle,
+    pub cell_highlight_fg: ElementStyle,
+    pub cell_highlight_bg: ElementStyle,
+    pub selector: ElementStyle,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TargetStateStyles {
+    pub active: ElementStyle,
+    pub inactive: ElementStyle,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PopupStyles {
+    pub border: ElementStyle,
+    pub key_fg: ElementStyle,
+    pub key_bg: ElementStyle,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Elements {
     pub job_status: JobStatusStyles,
     pub identifiers: IdentifierStyles,
     pub structure: StructureStyles,
     pub summary: SummaryStyles,
+    pub panels: PanelStyles,
+    pub graphs: GraphStyles,
+    pub tables: TableStyles,
+    pub target_states: TargetStateStyles,
+    pub popups: PopupStyles,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -71,6 +117,7 @@ fn dracula_theme() -> Theme {
         name: "Dracula".to_string(),
         palette: BTreeMap::from([
             ("background".to_string(), "#282a36".to_string()),
+            ("black".to_string(), "#000000".to_string()),
             ("current_line".to_string(), "#44475a".to_string()),
             ("selection".to_string(), "#44475a".to_string()),
             ("foreground".to_string(), "#f8f8f2".to_string()),
@@ -93,6 +140,10 @@ fn dracula_theme() -> Theme {
                     color: "red".to_string(),
                     styles: vec![],
                 },
+                submit_failed: ElementStyle {
+                    color: "red".to_string(),
+                    styles: vec!["bold".to_string()],
+                },
                 pending: ElementStyle {
                     color: "yellow".to_string(),
                     styles: vec![],
@@ -107,6 +158,14 @@ fn dracula_theme() -> Theme {
                 },
                 running: ElementStyle {
                     color: "cyan".to_string(),
+                    styles: vec![],
+                },
+                submitting: ElementStyle {
+                    color: "pink".to_string(),
+                    styles: vec!["bold".to_string()],
+                },
+                unknown: ElementStyle {
+                    color: "comment".to_string(),
                     styles: vec![],
                 },
             },
@@ -141,6 +200,88 @@ fn dracula_theme() -> Theme {
                 },
                 info: ElementStyle {
                     color: "foreground".to_string(),
+                    styles: vec![],
+                },
+            },
+            panels: PanelStyles {
+                overview: ElementStyle {
+                    color: "pink".to_string(),
+                    styles: vec![],
+                },
+                targets: ElementStyle {
+                    color: "comment".to_string(),
+                    styles: vec![],
+                },
+                context: ElementStyle {
+                    color: "green".to_string(),
+                    styles: vec![],
+                },
+                logs: ElementStyle {
+                    color: "red".to_string(),
+                    styles: vec![],
+                },
+                runs_jobs: ElementStyle {
+                    color: "cyan".to_string(),
+                    styles: vec![],
+                },
+            },
+            graphs: GraphStyles {
+                background: ElementStyle {
+                    color: "background".to_string(),
+                    styles: vec![],
+                },
+                rate_low: ElementStyle {
+                    color: "orange".to_string(),
+                    styles: vec![],
+                },
+                rate_high: ElementStyle {
+                    color: "yellow".to_string(),
+                    styles: vec![],
+                },
+            },
+            tables: TableStyles {
+                row_highlight_fg: ElementStyle {
+                    color: "black".to_string(),
+                    styles: vec!["bold".to_string()],
+                },
+                row_highlight_bg: ElementStyle {
+                    color: "cyan".to_string(),
+                    styles: vec![],
+                },
+                cell_highlight_fg: ElementStyle {
+                    color: "black".to_string(),
+                    styles: vec![],
+                },
+                cell_highlight_bg: ElementStyle {
+                    color: "yellow".to_string(),
+                    styles: vec![],
+                },
+                selector: ElementStyle {
+                    color: "yellow".to_string(),
+                    styles: vec![],
+                },
+            },
+            target_states: TargetStateStyles {
+                active: ElementStyle {
+                    color: "green".to_string(),
+                    styles: vec!["bold".to_string()],
+                },
+                inactive: ElementStyle {
+                    color: "yellow".to_string(),
+                    styles: vec![],
+                },
+            },
+            popups: PopupStyles {
+                border: ElementStyle {
+                    color: "yellow".to_string(),
+                    styles: vec![],
+                },
+                key_fg: ElementStyle {
+                    color: "black".to_string(),
+                    styles: vec!["bold".to_string()],
+                },
+                key_bg: ElementStyle {
+                    color: "yellow".to_string(),
                     styles: vec![],
                 },
             },

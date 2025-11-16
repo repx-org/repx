@@ -51,22 +51,51 @@ pub struct BrailleGraph<'a> {
 
 impl<'a> Widget for BrailleGraph<'a> {
     fn render(self, area: Rect, buf: &mut Buffer) {
-        if area.width < 1 || area.height == 0 || self.max_value == 0.0 {
+        if area.width < 1 || area.height == 0 || self.max_value == 0.0 || self.data.is_empty() {
             return;
         }
+
+        let width = area.width as usize;
+        let num_points = width * 2;
+        let data_len = self.data.len();
+
+        let resampled_data: Vec<f64> = if data_len > num_points {
+            // Down-sample by binning and averaging
+            let mut bins = vec![(0.0, 0); num_points]; // (sum, count)
+            for (i, &value) in self.data.iter().enumerate() {
+                let bin_index = (i * num_points) / data_len;
+                bins[bin_index].0 += value;
+                bins[bin_index].1 += 1;
+            }
+            bins.iter()
+                .map(|&(sum, count)| if count > 0 { sum / count as f64 } else { 0.0 })
+                .collect()
+        } else {
+            // Stretch or use as-is
+            let mut stretched = Vec::with_capacity(num_points);
+            for i in 0..num_points {
+                let original_index = (i * data_len) / num_points;
+                stretched.push(self.data.get(original_index).copied().unwrap_or(0.0));
+            }
+            stretched
+        };
 
         const DOTS_PER_ROW: usize = 4;
         let total_dots_height = area.height as usize * DOTS_PER_ROW;
 
-        for (chunk, column_x) in self.data.chunks(2).zip(area.left()..area.right()) {
+        for (chunk, column_x) in resampled_data.chunks(2).zip(area.left()..area.right()) {
             let left_value = chunk.get(0).copied().unwrap_or(0.0);
             let right_value = chunk.get(1).copied().unwrap_or(0.0);
 
             let left_normalized = (left_value / self.max_value).clamp(0.0, 1.0);
             let right_normalized = (right_value / self.max_value).clamp(0.0, 1.0);
 
-            let left_total_dots = (left_normalized * total_dots_height as f64).round() as usize;
-            let right_total_dots = (right_normalized * total_dots_height as f64).round() as usize;
+            let left_total_dots = (left_normalized * (total_dots_height.saturating_sub(1)) as f64
+                + 1.0)
+                .round() as usize;
+            let right_total_dots = (right_normalized * (total_dots_height.saturating_sub(1)) as f64
+                + 1.0)
+                .round() as usize;
 
             let column_height =
                 (left_total_dots.max(right_total_dots) as f64 / DOTS_PER_ROW as f64).ceil() as u16;

@@ -1,5 +1,6 @@
 use crate::model::{
-    TargetState, TuiDisplayRow, TuiExecutor, TuiJob, TuiRowItem, TuiScheduler, TuiTarget,
+    StatusCounts, TargetState, TuiDisplayRow, TuiExecutor, TuiJob, TuiRowItem, TuiScheduler,
+    TuiTarget,
 };
 use ratatui::widgets::TableState;
 use repx_client::{error::ClientError, Client};
@@ -7,14 +8,13 @@ use repx_core::{
     config::Resources,
     engine, log_info, log_warn,
     model::{JobId, Lab},
+    theme::Theme,
 };
 use std::collections::{HashSet, VecDeque};
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::Duration;
-
-const MAX_GRAPH_HISTORY: usize = 1000;
+use std::time::{Duration, Instant};
 
 #[derive(Debug, PartialEq, Clone, Copy)]
 pub enum PanelFocus {
@@ -95,14 +95,16 @@ pub enum SubmissionResult {
 
 pub struct App {
     pub client: Arc<Client>,
+    pub theme: Theme,
     pub lab: Lab,
     pub table_state: TableState,
     pub targets_table_state: TableState,
     jobs: Vec<TuiJob>,
     pub display_rows: Vec<TuiDisplayRow>,
     pub targets: Vec<TuiTarget>,
-    pub progress_data: VecDeque<f64>,
-    pub throughput_data: VecDeque<f64>,
+    pub status_history: VecDeque<StatusCounts>,
+    pub completion_rate_history: VecDeque<f64>,
+    last_completed_count: usize,
     pub tick_rate: Duration,
     pub should_quit: bool,
     pub input_mode: InputMode,
@@ -129,6 +131,7 @@ pub struct App {
 impl App {
     pub fn new(
         client: Client,
+        theme: Theme,
         status_rx: Receiver<TargetPollUpdate>,
         log_cmd_tx: Sender<LogPollerCommand>,
         log_result_rx: Receiver<LogUpdate>,
@@ -209,14 +212,16 @@ impl App {
 
         let mut app = Self {
             client: Arc::new(client),
+            theme,
             lab,
             table_state: TableState::default(),
             targets_table_state: TableState::default(),
             jobs: Vec::new(),
             display_rows: Vec::new(),
             targets,
-            progress_data: VecDeque::with_capacity(MAX_GRAPH_HISTORY),
-            throughput_data: VecDeque::with_capacity(MAX_GRAPH_HISTORY),
+            status_history: VecDeque::new(),
+            completion_rate_history: VecDeque::new(),
+            last_completed_count: 0,
             tick_rate,
             should_quit: false,
             input_mode: InputMode::Normal,
@@ -262,11 +267,16 @@ impl App {
 
     pub fn check_for_updates(&mut self) {
         if let Ok(update_result) = self.status_rx.try_recv() {
+            let was_loading = self.is_loading;
             self.is_loading = false;
             match update_result {
                 Ok((_target_name, job_statuses)) => {
                     log_info!("Received status update. Applying new statuses.");
                     self.apply_statuses(job_statuses);
+                    if was_loading {
+                        let (_, current_completed_count) = self.calculate_current_counts();
+                        self.last_completed_count = current_completed_count;
+                    }
                     self.rebuild_display_list();
                 }
                 Err(e) => {
@@ -391,30 +401,55 @@ impl App {
         }
     }
 
-    pub fn update_progress_graph(&mut self) {
-        self.progress_data.clear();
-        let job_rows: Vec<_> = self
-            .display_rows
-            .iter()
-            .filter(|row| matches!(row.item, TuiRowItem::Job { .. }))
-            .collect();
-        if job_rows.is_empty() {
-            self.progress_data.resize(MAX_GRAPH_HISTORY, 0.0);
+    pub fn on_tick(&mut self) {
+        if !self.is_loading {
+            self.update_history_data();
+        }
+    }
+
+    fn calculate_current_counts(&self) -> (StatusCounts, usize) {
+        let mut counts = StatusCounts::default();
+        let mut current_completed_count: usize = 0;
+
+        if self.jobs.is_empty() {
+            return (counts, current_completed_count);
+        }
+
+        for job in &self.jobs {
+            counts.total += 1;
+            match job.status.as_str() {
+                "Succeeded" => {
+                    counts.succeeded += 1;
+                    current_completed_count += 1;
+                }
+                "Failed" | "Submit Failed" => {
+                    counts.failed += 1;
+                    current_completed_count += 1;
+                }
+                "Running" => counts.running += 1,
+                "Pending" => counts.pending += 1,
+                "Queued" => counts.queued += 1,
+                "Blocked" => counts.blocked += 1,
+                "Submitting..." => counts.submitting += 1,
+                _ => counts.unknown += 1,
+            }
+        }
+        (counts, current_completed_count)
+    }
+
+    fn update_history_data(&mut self) {
+        let (counts, current_completed_count) = self.calculate_current_counts();
+        if counts.total == 0 {
             return;
         }
-        let completed_count = job_rows
-            .iter()
-            .filter(|&&row| {
-                if let TuiRowItem::Job { job } = &row.item {
-                    job.status == "Succeeded"
-                } else {
-                    false
-                }
-            })
-            .count();
-        let progress = (completed_count as f64 / job_rows.len() as f64) * 100.0;
 
-        self.progress_data.resize(MAX_GRAPH_HISTORY, progress);
+        let newly_completed = current_completed_count.saturating_sub(self.last_completed_count);
+        self.last_completed_count = current_completed_count;
+
+        self.status_history.push_back(counts);
+
+        self.completion_rate_history
+            .push_back(newly_completed as f64);
     }
 
     pub fn on_selection_change(&mut self) {
@@ -797,7 +832,6 @@ impl App {
         }
 
         self.on_selection_change();
-        self.update_progress_graph();
     }
 
     fn build_tree_view(&mut self, filter: &str) {
