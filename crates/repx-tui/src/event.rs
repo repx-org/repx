@@ -80,7 +80,7 @@ fn handle_jobs_panel_key_event(key: KeyEvent, app: &mut App) {
         KeyCode::Esc => {
             app.clear_selection();
         }
-        KeyCode::Char('/') => {
+        KeyCode::Char('/') | KeyCode::Char('f') => {
             app.input_mode = InputMode::Editing;
         }
         KeyCode::Char('l') => app.next_status_filter(),

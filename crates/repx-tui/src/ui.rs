@@ -52,7 +52,7 @@ fn draw_overview_panel(f: &mut Frame, area: Rect, app: &mut App) {
     };
     let githash_short = app.lab.git_hash.chars().take(7).collect::<String>();
 
-    let rate_display = format!("- {}ms +", app.tick_rate.as_millis());
+    let rate_text = format!("{}ms", app.tick_rate.as_millis());
     let current_time = Local::now().format("%H:%M:%S").to_string();
     let overview_block = Block::default()
         .borders(Borders::ALL)
@@ -61,15 +61,23 @@ fn draw_overview_panel(f: &mut Frame, area: Rect, app: &mut App) {
         .title_top(
             Line::from(vec![
                 Span::styled("─┐", overview_border_style),
-                Span::styled("¹OVERVIEW", Style::default().add_modifier(Modifier::BOLD)),
-                Span::styled("┌┐", overview_border_style),
+                Span::styled("¹", Style::default().add_modifier(Modifier::DIM)),
                 Span::styled(
-                    format!("store: {} ", store_path_str),
+                    "OVERVIEW",
+                    Style::default()
+                        .fg(Color::White)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled("┌┐", overview_border_style),
+                Span::styled("store: ", Style::default().fg(Color::White)),
+                Span::styled(
+                    format!("{} ", store_path_str),
                     Style::default().add_modifier(Modifier::DIM),
                 ),
                 Span::styled("┌─┐", overview_border_style),
+                Span::styled("githash: ", Style::default().fg(Color::White)),
                 Span::styled(
-                    format!("githash: {}{}", githash_short, loading_indicator),
+                    format!("{}{}", githash_short, loading_indicator),
                     Style::default().add_modifier(Modifier::DIM),
                 ),
                 Span::styled("┌", overview_border_style),
@@ -87,7 +95,12 @@ fn draw_overview_panel(f: &mut Frame, area: Rect, app: &mut App) {
         .title_top(
             Line::from(vec![
                 Span::styled("┐", overview_border_style),
-                Span::styled(rate_display, Style::default().add_modifier(Modifier::DIM)),
+                Span::styled("-", Style::default().add_modifier(Modifier::DIM)),
+                Span::styled(
+                    format!(" {} ", rate_text),
+                    Style::default().fg(Color::White),
+                ),
+                Span::styled("+", Style::default().add_modifier(Modifier::DIM)),
                 Span::styled("┌─", overview_border_style),
             ])
             .alignment(Alignment::Right),
@@ -178,7 +191,13 @@ fn draw_targets(f: &mut Frame, area: Rect, app: &mut App, border_style: Style) {
         .title_top(
             Line::from(vec![
                 Span::styled("─┐", border_style),
-                Span::styled("⁴TARGETS", Style::default().add_modifier(Modifier::BOLD)),
+                Span::styled("⁴", Style::default().add_modifier(Modifier::DIM)),
+                Span::styled(
+                    "TARGETS",
+                    Style::default()
+                        .fg(Color::White)
+                        .add_modifier(Modifier::BOLD),
+                ),
                 Span::styled("┌─", border_style),
             ])
             .alignment(Alignment::Left),
@@ -266,9 +285,24 @@ fn draw_context_panel(f: &mut Frame, area: Rect, app: &App) {
         .title_top(
             Line::from(vec![
                 Span::styled("─┐", context_border_style),
-                Span::styled("³CONTEXT", Style::default().add_modifier(Modifier::BOLD)),
+                Span::styled("³", Style::default().add_modifier(Modifier::DIM)),
+                Span::styled(
+                    "CONTEXT",
+                    Style::default()
+                        .fg(Color::White)
+                        .add_modifier(Modifier::BOLD),
+                ),
                 Span::styled("┌─┐", context_border_style),
-                Span::styled(context_title, Style::default().add_modifier(Modifier::DIM)),
+                Span::styled("[Job: ", Style::default().fg(Color::White)),
+                Span::styled(
+                    context_title
+                        .strip_prefix("[Job: ")
+                        .unwrap()
+                        .strip_suffix(']')
+                        .unwrap(),
+                    Style::default().add_modifier(Modifier::DIM),
+                ),
+                Span::styled("]", Style::default().add_modifier(Modifier::DIM)),
                 Span::styled("┌", context_border_style),
             ])
             .alignment(Alignment::Left),
@@ -314,9 +348,12 @@ fn draw_logs_panel(f: &mut Frame, area: Rect, app: &App) {
         .border_style(logs_border_style)
         .title_top(Line::from(vec![
             Span::styled("─┐", logs_border_style),
+            Span::styled("⁵", Style::default().add_modifier(Modifier::DIM)),
             Span::styled(
-                "⁵LOG PREVIEW",
-                Style::default().add_modifier(Modifier::BOLD),
+                "LOG PREVIEW",
+                Style::default()
+                    .fg(Color::White)
+                    .add_modifier(Modifier::BOLD),
             ),
             Span::styled("┌─", logs_border_style),
         ]));
@@ -346,85 +383,118 @@ fn draw_right_column(f: &mut Frame, area: Rect, app: &mut App) {
         "0/0".to_string()
     };
 
-    let status_filter_text = format!("← {} →", app.status_filter.to_str());
-    let reverse_style = if app.is_reversed {
-        Style::default().add_modifier(Modifier::BOLD)
-    } else {
-        Style::default().add_modifier(Modifier::DIM)
-    };
-    let tree_style = if app.is_tree_view {
-        Style::default().add_modifier(Modifier::BOLD)
-    } else {
-        Style::default().add_modifier(Modifier::DIM)
-    };
-
+    let status_filter_text = app.status_filter.to_str();
     let right_title_content = format!("┐reverse┌┐tree┌┐{}┌─", status_filter_text);
     let right_title_width = right_title_content.chars().count() as u16 + 1;
-    let left_title_prefix = "─┐²RUNS & JOBS┌─┐";
+    let left_title_prefix = "─┐";
+    let left_title_key = "²";
+    let left_title_text = "RUNS & JOBS";
+    let left_title_border2 = "┌─┐";
     let left_title_suffix = "┌";
-    let left_title_fixed_width =
-        (left_title_prefix.chars().count() + left_title_suffix.chars().count()) as u16;
+    let left_title_fixed_width = (left_title_prefix.chars().count()
+        + left_title_key.chars().count()
+        + left_title_text.chars().count()
+        + left_title_border2.chars().count()
+        + left_title_suffix.chars().count()) as u16;
     let max_filter_width = area
         .width
         .saturating_sub(left_title_fixed_width)
         .saturating_sub(right_title_width)
         .saturating_sub(2);
 
-    let (filter_display_text, filter_style) = match app.input_mode {
-        InputMode::Editing => (format!("{}_", app.filter_text), Style::default()),
+    let mut left_title_spans = vec![
+        Span::styled(left_title_prefix, runs_jobs_border_style),
+        Span::styled(left_title_key, Style::default().add_modifier(Modifier::DIM)),
+        Span::styled(
+            left_title_text,
+            Style::default()
+                .fg(Color::White)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(left_title_border2, runs_jobs_border_style),
+    ];
+
+    match app.input_mode {
+        InputMode::Editing => {
+            let mut text_to_truncate = format!("{}_", app.filter_text);
+            if text_to_truncate.len() < "filter".len() {
+                text_to_truncate = format!("{:<width$}", text_to_truncate, width = "filter".len());
+            }
+
+            let truncated_filter_text = if text_to_truncate.len() > max_filter_width as usize {
+                let start_index = text_to_truncate.len() - max_filter_width as usize;
+                text_to_truncate[start_index..].to_string()
+            } else {
+                text_to_truncate
+            };
+            left_title_spans.push(Span::styled(truncated_filter_text, Style::default()));
+        }
         InputMode::Normal | InputMode::SpaceMenu | InputMode::GMenu => {
             if !app.filter_text.is_empty() {
-                (app.filter_text.clone(), Style::default())
-            } else {
-                (
-                    "filter".to_string(),
-                    Style::default().add_modifier(Modifier::DIM),
-                )
+                let text_to_truncate = &app.filter_text;
+                let truncated_filter_text = if text_to_truncate.len() > max_filter_width as usize {
+                    let start_index = text_to_truncate.len() - max_filter_width as usize;
+                    &text_to_truncate[start_index..]
+                } else {
+                    text_to_truncate
+                };
+                left_title_spans.push(Span::styled(truncated_filter_text, Style::default()));
+            } else if "filter".len() <= max_filter_width as usize {
+                left_title_spans.extend(vec![
+                    Span::styled(
+                        "f",
+                        Style::default()
+                            .fg(Color::White)
+                            .add_modifier(Modifier::DIM),
+                    ),
+                    Span::styled("ilter", Style::default().fg(Color::White)),
+                ]);
             }
         }
     };
-
-    let text_to_truncate =
-        if app.input_mode == InputMode::Editing && filter_display_text.len() < "filter".len() {
-            format!("{:<width$}", filter_display_text, width = "filter".len())
-        } else {
-            filter_display_text
-        };
-
-    let truncated_filter_text = if text_to_truncate.len() > max_filter_width as usize {
-        let start_index = text_to_truncate.len() - max_filter_width as usize;
-        &text_to_truncate[start_index..]
-    } else {
-        &text_to_truncate
-    };
-    let filter_span = Span::styled(truncated_filter_text, filter_style);
+    left_title_spans.push(Span::styled(left_title_suffix, runs_jobs_border_style));
 
     let block = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .border_style(runs_jobs_border_style)
-        .title_top(
-            Line::from(vec![
-                Span::styled(left_title_prefix, runs_jobs_border_style),
-                filter_span,
-                Span::styled(left_title_suffix, runs_jobs_border_style),
-            ])
-            .alignment(Alignment::Left),
-        )
+        .title_top(Line::from(left_title_spans).alignment(Alignment::Left))
         .title_top(
             Line::from(vec![
                 Span::styled("┐", runs_jobs_border_style),
-                Span::styled("r", reverse_style),
-                Span::styled("everse", Style::default().add_modifier(Modifier::DIM)),
-                Span::styled("┌", runs_jobs_border_style),
-                Span::styled("┐", runs_jobs_border_style),
-                Span::styled("t", tree_style),
-                Span::styled("ree", Style::default().add_modifier(Modifier::DIM)),
+                Span::styled(
+                    "r",
+                    Style::default()
+                        .fg(Color::White)
+                        .add_modifier(Modifier::DIM),
+                ),
+                Span::styled("everse", Style::default().fg(Color::White)),
                 Span::styled("┌", runs_jobs_border_style),
                 Span::styled("┐", runs_jobs_border_style),
                 Span::styled(
-                    status_filter_text,
-                    Style::default().add_modifier(Modifier::DIM),
+                    "t",
+                    Style::default()
+                        .fg(Color::White)
+                        .add_modifier(Modifier::DIM),
+                ),
+                Span::styled("ree", Style::default().fg(Color::White)),
+                Span::styled("┌", runs_jobs_border_style),
+                Span::styled("┐", runs_jobs_border_style),
+                Span::styled(
+                    "←",
+                    Style::default()
+                        .fg(Color::White)
+                        .add_modifier(Modifier::DIM),
+                ),
+                Span::styled(
+                    format!(" {} ", status_filter_text),
+                    Style::default().fg(Color::White),
+                ),
+                Span::styled(
+                    "→",
+                    Style::default()
+                        .fg(Color::White)
+                        .add_modifier(Modifier::DIM),
                 ),
                 Span::styled("┌─", runs_jobs_border_style),
             ])
@@ -433,13 +503,35 @@ fn draw_right_column(f: &mut Frame, area: Rect, app: &mut App) {
         .title_bottom(
             Line::from(vec![
                 Span::styled("─┘", runs_jobs_border_style),
-                Span::styled("j ", Style::default().add_modifier(Modifier::BOLD)),
-                Span::styled("select ", Style::default().add_modifier(Modifier::DIM)),
-                Span::styled("k ", Style::default().add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    "↑",
+                    Style::default()
+                        .fg(Color::White)
+                        .add_modifier(Modifier::DIM),
+                ),
+                Span::styled(" select ", Style::default().fg(Color::White)),
+                Span::styled(
+                    "↓",
+                    Style::default()
+                        .fg(Color::White)
+                        .add_modifier(Modifier::DIM),
+                ),
                 Span::styled("└┘", runs_jobs_border_style),
-                Span::styled("cancel", Style::default().add_modifier(Modifier::DIM)),
+                Span::styled(
+                    "c",
+                    Style::default()
+                        .fg(Color::White)
+                        .add_modifier(Modifier::DIM),
+                ),
+                Span::styled("ancel ", Style::default().fg(Color::White)),
                 Span::styled("└┘", runs_jobs_border_style),
-                Span::styled("debug", Style::default().add_modifier(Modifier::DIM)),
+                Span::styled(
+                    "d",
+                    Style::default()
+                        .fg(Color::White)
+                        .add_modifier(Modifier::DIM),
+                ),
+                Span::styled("ebug", Style::default().fg(Color::White)),
                 Span::styled("└", runs_jobs_border_style),
             ])
             .alignment(Alignment::Left),
@@ -447,7 +539,7 @@ fn draw_right_column(f: &mut Frame, area: Rect, app: &mut App) {
         .title_bottom(
             Line::from(vec![
                 Span::styled("┘", runs_jobs_border_style),
-                Span::styled(counter_text, Style::default().add_modifier(Modifier::DIM)),
+                Span::styled(counter_text, Style::default().fg(Color::White)),
                 Span::styled("└─", runs_jobs_border_style),
             ])
             .alignment(Alignment::Right),
