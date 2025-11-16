@@ -206,15 +206,30 @@ fn draw_targets(f: &mut Frame, area: Rect, app: &mut App, border_style: Style) {
     f.render_widget(targets_block, area);
 
     if !app.targets.is_empty() {
-        let highlight_style = Style::default()
-            .bg(border_style.fg.unwrap_or(Color::Cyan))
-            .fg(Color::Black)
-            .add_modifier(Modifier::BOLD);
+        let selected_row_idx = app.targets_table_state.selected();
+
+        let row_highlight_style = if app.focused_panel == PanelFocus::Targets {
+            Style::default()
+                .bg(border_style.fg.unwrap_or(Color::Cyan))
+                .fg(Color::Black)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default()
+        };
+
+        let cell_highlight_style = if app.focused_panel == PanelFocus::Targets {
+            Style::default().bg(Color::LightYellow).fg(Color::Black)
+        } else {
+            Style::default()
+        };
 
         let target_rows: Vec<Row> = app
             .targets
             .iter()
-            .map(|target| {
+            .enumerate()
+            .map(|(i, target)| {
+                let is_selected_row = selected_row_idx == Some(i);
+
                 let (state_text, state_style) = match target.state {
                     TargetState::Active => (
                         "[ACTIVE]",
@@ -226,19 +241,54 @@ fn draw_targets(f: &mut Frame, area: Rect, app: &mut App, border_style: Style) {
                     TargetState::Down => ("[DOWN]", Style::default().add_modifier(Modifier::DIM)),
                 };
 
-                Row::new(vec![
-                    Cell::from(target.name.clone()).style(Style::default()),
-                    Cell::from(state_text).style(state_style),
-                ])
+                let mut executor_text = target.executor.to_str().to_string();
+                if is_selected_row && app.targets_focused_column == 1 && app.is_editing_target_cell
+                {
+                    executor_text = format!("← {} →", executor_text);
+                }
+
+                let mut scheduler_text = target.scheduler.to_str().to_string();
+                if is_selected_row && app.targets_focused_column == 2 && app.is_editing_target_cell
+                {
+                    scheduler_text = format!("← {} →", scheduler_text);
+                }
+
+                let mut cells = vec![
+                    Cell::from(target.name.clone()),
+                    Cell::from(executor_text),
+                    Cell::from(scheduler_text),
+                    Cell::from(Span::styled(state_text, state_style)),
+                ];
+
+                if is_selected_row {
+                    for (col_idx, cell) in cells.iter_mut().enumerate() {
+                        let style = if col_idx == app.targets_focused_column {
+                            cell_highlight_style
+                        } else {
+                            row_highlight_style
+                        };
+                        *cell = cell.clone().style(style);
+                    }
+                }
+
+                Row::new(cells)
             })
             .collect();
 
-        let table = Table::new(target_rows, [Constraint::Min(0), Constraint::Length(12)])
-            .row_highlight_style(if app.focused_panel == PanelFocus::Targets {
-                highlight_style
-            } else {
-                Style::default()
-            });
+        let header = Row::new(vec!["Target", "Executor", "Scheduler", "Status"])
+            .style(Style::default().add_modifier(Modifier::BOLD));
+
+        let table = Table::new(
+            target_rows,
+            [
+                Constraint::Percentage(25),
+                Constraint::Percentage(25),
+                Constraint::Percentage(25),
+                Constraint::Percentage(25),
+            ],
+        )
+        .header(header)
+        .highlight_symbol("");
 
         f.render_stateful_widget(table, targets_inner_area, &mut app.targets_table_state);
     }
@@ -502,7 +552,7 @@ fn draw_right_column(f: &mut Frame, area: Rect, app: &mut App) {
         )
         .title_bottom(
             Line::from(vec![
-                Span::styled("─┘", runs_jobs_border_style),
+                Span::styled("┘", runs_jobs_border_style),
                 Span::styled(
                     "↑",
                     Style::default()
@@ -516,7 +566,7 @@ fn draw_right_column(f: &mut Frame, area: Rect, app: &mut App) {
                         .fg(Color::White)
                         .add_modifier(Modifier::DIM),
                 ),
-                Span::styled("└┘", runs_jobs_border_style),
+                Span::styled("└─┘", runs_jobs_border_style),
                 Span::styled(
                     "c",
                     Style::default()

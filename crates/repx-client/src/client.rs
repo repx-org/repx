@@ -952,9 +952,6 @@ impl Client {
             slurm_map_guard.get(&job_id).cloned()
         };
 
-
-
-
         if let Some((slurm_target_name, slurm_id)) = slurm_info {
             if slurm_target_name == target_name {
                 let log_path = target

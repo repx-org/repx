@@ -120,6 +120,8 @@ pub struct App {
     pub active_target: Arc<Mutex<String>>,
     pub focused_panel: PanelFocus,
     pub jobs_list_viewport_height: usize,
+    pub targets_focused_column: usize,
+    pub is_editing_target_cell: bool,
 }
 
 impl App {
@@ -139,14 +141,32 @@ impl App {
             .config()
             .targets
             .iter()
-            .map(|(name, _target)| TuiTarget {
-                name: name.clone(),
-                state: if name == &initial_active_target {
-                    TargetState::Active
+            .map(|(name, target_config)| {
+                let scheduler_str = target_config.scheduler.as_deref().unwrap_or("local");
+                let scheduler = if scheduler_str == "slurm" {
+                    crate::model::TuiScheduler::Slurm
                 } else {
-                    TargetState::Inactive
-                },
-                activity: vec![0.0; 100],
+                    crate::model::TuiScheduler::Local
+                };
+
+                let executor_str = target_config.execution_type.as_deref().unwrap_or("native");
+                let executor = match executor_str {
+                    "podman" => crate::model::TuiExecutor::Podman,
+                    "docker" => crate::model::TuiExecutor::Docker,
+                    "bwrap" => crate::model::TuiExecutor::Bwrap,
+                    _ => crate::model::TuiExecutor::Native,
+                };
+                TuiTarget {
+                    name: name.clone(),
+                    state: if name == &initial_active_target {
+                        TargetState::Active
+                    } else {
+                        TargetState::Inactive
+                    },
+                    activity: vec![0.0; 100],
+                    scheduler,
+                    executor,
+                }
             })
             .collect();
 
@@ -182,6 +202,8 @@ impl App {
             active_target,
             focused_panel: PanelFocus::Jobs,
             jobs_list_viewport_height: 0,
+            targets_focused_column: 1,
+            is_editing_target_cell: false,
         };
 
         app.build_initial_job_list();
@@ -450,6 +472,68 @@ impl App {
         };
         self.table_state.select(Some(i));
         self.on_selection_change();
+    }
+
+    pub fn next_target_cell(&mut self) {
+        self.targets_focused_column = (self.targets_focused_column + 1).min(3);
+    }
+
+    pub fn previous_target_cell(&mut self) {
+        self.targets_focused_column = self.targets_focused_column.saturating_sub(1).max(1);
+    }
+
+    pub fn toggle_target_cell_edit(&mut self) {
+        if self.targets_focused_column == 1 || self.targets_focused_column == 2 {
+            self.is_editing_target_cell = !self.is_editing_target_cell;
+        }
+    }
+
+    pub fn next_target_cell_value(&mut self) {
+        if let Some(selected_idx) = self.targets_table_state.selected() {
+            if let Some(target) = self.targets.get_mut(selected_idx) {
+                match self.targets_focused_column {
+                    1 => {
+                        target.executor = match target.executor {
+                            crate::model::TuiExecutor::Native => crate::model::TuiExecutor::Podman,
+                            crate::model::TuiExecutor::Podman => crate::model::TuiExecutor::Docker,
+                            crate::model::TuiExecutor::Docker => crate::model::TuiExecutor::Bwrap,
+                            crate::model::TuiExecutor::Bwrap => crate::model::TuiExecutor::Native,
+                        };
+                    }
+                    2 => {
+                        target.scheduler = match target.scheduler {
+                            crate::model::TuiScheduler::Local => crate::model::TuiScheduler::Slurm,
+                            crate::model::TuiScheduler::Slurm => crate::model::TuiScheduler::Local,
+                        };
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    pub fn previous_target_cell_value(&mut self) {
+        if let Some(selected_idx) = self.targets_table_state.selected() {
+            if let Some(target) = self.targets.get_mut(selected_idx) {
+                match self.targets_focused_column {
+                    1 => {
+                        target.executor = match target.executor {
+                            crate::model::TuiExecutor::Native => crate::model::TuiExecutor::Bwrap,
+                            crate::model::TuiExecutor::Podman => crate::model::TuiExecutor::Native,
+                            crate::model::TuiExecutor::Docker => crate::model::TuiExecutor::Podman,
+                            crate::model::TuiExecutor::Bwrap => crate::model::TuiExecutor::Docker,
+                        };
+                    }
+                    2 => {
+                        target.scheduler = match target.scheduler {
+                            crate::model::TuiScheduler::Local => crate::model::TuiScheduler::Slurm,
+                            crate::model::TuiScheduler::Slurm => crate::model::TuiScheduler::Local,
+                        };
+                    }
+                    _ => {}
+                }
+            }
+        }
     }
 
     pub fn next_target(&mut self) {

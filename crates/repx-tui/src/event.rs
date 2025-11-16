@@ -92,10 +92,26 @@ fn handle_jobs_panel_key_event(key: KeyEvent, app: &mut App) {
 }
 
 fn handle_targets_panel_key_event(key: KeyEvent, app: &mut App) {
+    if app.is_editing_target_cell {
+        match key.code {
+            KeyCode::Right | KeyCode::Char('l') => app.next_target_cell_value(),
+            KeyCode::Left | KeyCode::Char('h') => app.previous_target_cell_value(),
+            KeyCode::Enter | KeyCode::Esc => app.toggle_target_cell_edit(),
+            _ => {}
+        }
+        return;
+    }
+
     match key.code {
         KeyCode::Down | KeyCode::Char('j') => app.next_target(),
         KeyCode::Up | KeyCode::Char('k') => app.previous_target(),
-        KeyCode::Enter => app.set_active_target(),
+        KeyCode::Right | KeyCode::Char('l') => app.next_target_cell(),
+        KeyCode::Left | KeyCode::Char('h') => app.previous_target_cell(),
+        KeyCode::Enter => match app.targets_focused_column {
+            1 | 2 => app.toggle_target_cell_edit(),
+            3 => app.set_active_target(),
+            _ => {}
+        },
         _ => {}
     }
 }

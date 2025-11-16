@@ -1,6 +1,40 @@
 use serde::Deserialize;
 use serde::Serialize;
 
+#[derive(Clone, Debug, PartialEq, Copy)]
+pub enum TuiScheduler {
+    Local,
+    Slurm,
+}
+
+impl TuiScheduler {
+    pub fn to_str(&self) -> &'static str {
+        match self {
+            TuiScheduler::Local => "local",
+            TuiScheduler::Slurm => "slurm",
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Copy)]
+pub enum TuiExecutor {
+    Native,
+    Podman,
+    Docker,
+    Bwrap,
+}
+
+impl TuiExecutor {
+    pub fn to_str(&self) -> &'static str {
+        match self {
+            TuiExecutor::Native => "native",
+            TuiExecutor::Podman => "podman",
+            TuiExecutor::Docker => "docker",
+            TuiExecutor::Bwrap => "bwrap",
+        }
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct TuiJob {
     pub full_id: repx_core::model::JobId,
@@ -42,4 +76,6 @@ pub struct TuiTarget {
     pub name: String,
     pub state: TargetState,
     pub activity: Vec<f64>,
+    pub scheduler: TuiScheduler,
+    pub executor: TuiExecutor,
 }
