@@ -453,6 +453,16 @@ fn draw_right_column(f: &mut Frame, area: Rect, app: &mut App) {
             .alignment(Alignment::Right),
         );
 
+    f.render_widget(&block, area);
+    let inner_area = block.inner(area);
+
+    let right_chunks = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Min(0), Constraint::Length(1)])
+        .split(inner_area);
+    let table_area = right_chunks[0];
+    let scrollbar_area = right_chunks[1];
+
     let jobs_table = if app.is_tree_view {
         let header = Row::new(vec![
             "", "jobid:", "Item:", "Worker:", "Elapsed:", "Status:",
@@ -474,7 +484,6 @@ fn draw_right_column(f: &mut Frame, area: Rect, app: &mut App) {
         );
         Table::new(rows, constraints)
             .header(header.height(1))
-            .block(block)
             .row_highlight_style(if app.focused_panel == PanelFocus::Jobs {
                 Style::default()
                     .bg(runs_jobs_border_style.fg.unwrap_or(Color::Cyan))
@@ -501,7 +510,6 @@ fn draw_right_column(f: &mut Frame, area: Rect, app: &mut App) {
         let rows = build_flat_rows(&app.display_rows, &app.selected_jobs);
         Table::new(rows, constraints)
             .header(header.height(1))
-            .block(block)
             .row_highlight_style(if app.focused_panel == PanelFocus::Jobs {
                 Style::default()
                     .bg(runs_jobs_border_style.fg.unwrap_or(Color::Cyan))
@@ -513,9 +521,9 @@ fn draw_right_column(f: &mut Frame, area: Rect, app: &mut App) {
             .highlight_symbol("")
     };
 
-    f.render_stateful_widget(jobs_table, area, &mut app.table_state);
+    f.render_stateful_widget(jobs_table, table_area, &mut app.table_state);
 
-    let viewport_height = area.height.saturating_sub(3) as usize;
+    let viewport_height = table_area.height.saturating_sub(1) as usize;
     app.jobs_list_viewport_height = viewport_height;
 
     let mut scrollbar_state = ScrollbarState::default()
@@ -530,10 +538,7 @@ fn draw_right_column(f: &mut Frame, area: Rect, app: &mut App) {
             .end_symbol(Some("▼"))
             .thumb_symbol("█")
             .track_style(Style::default().fg(Color::DarkGray)),
-        area.inner(Margin {
-            vertical: 1,
-            horizontal: 0,
-        }),
+        scrollbar_area,
         &mut scrollbar_state,
     );
 }
