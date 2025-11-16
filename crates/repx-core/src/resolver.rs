@@ -153,7 +153,7 @@ mod tests {
     fn test_lab() -> Lab {
         Lab {
             schema_version: "1".into(),
-            revision: "test".into(),
+            git_hash: "test".into(),
             content_hash: "test-hash".to_string(),
             runs: HashMap::from([
                 (

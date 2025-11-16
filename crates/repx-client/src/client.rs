@@ -171,6 +171,10 @@ impl Client {
         Ok(&self.lab)
     }
 
+    pub fn lab_path(&self) -> &Path {
+        &self.lab_path
+    }
+
     fn save_slurm_map(&self) -> Result<()> {
         let xdg_dirs = xdg::BaseDirectories::with_prefix("repx");
         let map_path = xdg_dirs

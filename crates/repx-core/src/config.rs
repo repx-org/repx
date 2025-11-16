@@ -25,7 +25,7 @@ submission_target = "local"
 
 # The default scheduler to use if not specified in a target or via the CLI.
 # Can be "slurm" or "local".
-default_scheduler = "slurm"
+default_scheduler = "local"
 
 # --- Execution Targets ---
 # Defines the machines (local or remote) where jobs can be submitted.

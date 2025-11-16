@@ -92,8 +92,8 @@ pub enum SubmissionResult {
 }
 
 pub struct App {
-    client: Arc<Client>,
-    lab: Lab,
+    pub client: Arc<Client>,
+    pub lab: Lab,
     pub table_state: TableState,
     pub targets_table_state: TableState,
     jobs: Vec<TuiJob>,

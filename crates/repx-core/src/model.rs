@@ -117,7 +117,8 @@ pub struct Run {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Lab {
     pub schema_version: String,
-    pub revision: String,
+    #[serde(rename = "gitHash")]
+    pub git_hash: String,
     #[serde(default, skip_serializing)]
     pub content_hash: String,
     pub runs: HashMap<RunId, Run>,

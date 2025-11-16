@@ -91,9 +91,13 @@ fn main() -> Result<(), AppError> {
     repx_core::log_info!("--- Repx TUI Started ---");
 
     let args = TuiArgs::parse();
+    let lab_path = fs::canonicalize(&args.lab).map_err(|e| AppError::PathIo {
+        path: args.lab.clone(),
+        source: e,
+    })?;
     let config = config::load_config()?;
     let resources = load_resources_config()?;
-    let client = Client::new(config.clone(), args.lab).map_err(|e| AppError::ExecutionFailed {
+    let client = Client::new(config.clone(), lab_path).map_err(|e| AppError::ExecutionFailed {
         message: "TUI failed to initialize client".to_string(),
         log_path: None,
         log_summary: e.to_string(),

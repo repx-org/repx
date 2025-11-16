@@ -1,8 +1,9 @@
 use crate::{
     app::{App, InputMode, PanelFocus},
     model::{TargetState, TuiDisplayRow, TuiRowItem},
-    widgets::{BrailleGraph, BrailleSparkline, GraphDirection},
+    widgets::{BrailleGraph, GraphDirection},
 };
+use chrono::Local;
 use ratatui::{
     prelude::*,
     widgets::{
@@ -40,8 +41,19 @@ fn draw_overview_panel(f: &mut Frame, area: Rect, app: &mut App) {
     let overview_border_style = Style::default().fg(Color::Magenta);
     let targets_border_style = Style::default().fg(Color::DarkGray);
     let loading_indicator = if app.is_loading { " [Updating...]" } else { "" };
+    let store_path_str = {
+        let active_target_name = app.active_target.lock().unwrap();
+        app.client
+            .config()
+            .targets
+            .get(&*active_target_name)
+            .map(|t| t.base_path.display().to_string())
+            .unwrap_or_else(|| "[unknown]".to_string())
+    };
+    let githash_short = app.lab.git_hash.chars().take(7).collect::<String>();
 
     let rate_display = format!("- {}ms +", app.tick_rate.as_millis());
+    let current_time = Local::now().format("%H:%M:%S").to_string();
     let overview_block = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
@@ -50,9 +62,14 @@ fn draw_overview_panel(f: &mut Frame, area: Rect, app: &mut App) {
             Line::from(vec![
                 Span::styled("─┐", overview_border_style),
                 Span::styled("¹OVERVIEW", Style::default().add_modifier(Modifier::BOLD)),
+                Span::styled("┌┐", overview_border_style),
+                Span::styled(
+                    format!("store: {} ", store_path_str),
+                    Style::default().add_modifier(Modifier::DIM),
+                ),
                 Span::styled("┌─┐", overview_border_style),
                 Span::styled(
-                    format!("[Lab: ./result-lab (rev: test-rev)]{}", loading_indicator),
+                    format!("githash: {}{}", githash_short, loading_indicator),
                     Style::default().add_modifier(Modifier::DIM),
                 ),
                 Span::styled("┌", overview_border_style),
@@ -62,9 +79,13 @@ fn draw_overview_panel(f: &mut Frame, area: Rect, app: &mut App) {
         .title_top(
             Line::from(vec![
                 Span::styled("┐", overview_border_style),
-                Span::styled("18:35:12", Style::default().add_modifier(Modifier::DIM)),
+                Span::styled(current_time, Style::default().add_modifier(Modifier::DIM)),
                 Span::styled("┌", overview_border_style),
-                Span::styled("─", overview_border_style),
+            ])
+            .alignment(Alignment::Center),
+        )
+        .title_top(
+            Line::from(vec![
                 Span::styled("┐", overview_border_style),
                 Span::styled(rate_display, Style::default().add_modifier(Modifier::DIM)),
                 Span::styled("┌─", overview_border_style),
@@ -194,7 +215,7 @@ fn draw_targets(f: &mut Frame, area: Rect, app: &mut App, border_style: Style) {
             .collect();
 
         let table = Table::new(target_rows, [Constraint::Min(0), Constraint::Length(12)])
-            .highlight_style(if app.focused_panel == PanelFocus::Targets {
+            .row_highlight_style(if app.focused_panel == PanelFocus::Targets {
                 highlight_style
             } else {
                 Style::default()
