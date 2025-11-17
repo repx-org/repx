@@ -26,8 +26,12 @@ impl TestHarness {
 submission_target = "local"
 [targets.local]
 base_path = "{}"
-scheduler = "local"
-execution_type = "native"
+default_scheduler = "local"
+default_execution_type = "native"
+
+[targets.local.local]
+execution_types = ["native"]
+local_concurrency = 2
 "#,
             cache_dir.path().display()
         );
