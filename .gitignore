@@ -1,0 +1,12 @@
+**/target
+*.o
+*.bin
+*.wav
+*.json
+**/__pycache__
+**/venv_*
+**/venv
+**/.direnv
+**/.debug-cache
+**/result
+*fuse_hidden*
