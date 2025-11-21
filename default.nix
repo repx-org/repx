@@ -1,5 +1,6 @@
 {
   pkgs,
+  reference-lab ? null,
 }:
 
 pkgs.python3Packages.buildPythonPackage {
@@ -14,9 +15,30 @@ pkgs.python3Packages.buildPythonPackage {
     pkgs.python3Packages.setuptools
   ];
 
-  dependencies = [
-    pkgs.python3Packages.pandas
+  nativeBuildInputs = [
+    pkgs.makeWrapper
   ];
+
+  propagatedBuildInputs = with pkgs.python3Packages; [
+    matplotlib
+    rarfile
+    reportlab
+    pandas
+  ];
+
+  nativeCheckInputs = [
+    pkgs.python3Packages.pytest
+  ];
+
+  doCheck = reference-lab != null;
+
+  checkPhase = ''
+    export REFERENCE_LAB_PATH=${if reference-lab != null then reference-lab else ""}
+
+    export PYTHONPATH=$PWD:$PYTHONPATH
+
+    pytest tests
+  '';
 
   pythonImportsCheck = [
     "repx_py.models"

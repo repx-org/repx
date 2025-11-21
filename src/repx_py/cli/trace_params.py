@@ -1,9 +1,13 @@
 import argparse
 import json
+import logging
 import sys
 from pathlib import Path
 
 from repx_py.models import Experiment
+
+logging.basicConfig(level=logging.INFO, format="%(message)s", stream=sys.stderr)
+logger = logging.getLogger("trace-params")
 
 
 def main():
@@ -26,26 +30,22 @@ def main():
     args = parser.parse_args()
 
     try:
-        print(f"Loading experiment from: {args.lab_directory}", file=sys.stderr)
+        logger.info(f"Loading experiment from: {args.lab_directory}")
         exp = Experiment(args.lab_directory)
 
-        print("Calculating effective parameters for all jobs...", file=sys.stderr)
+        logger.info("Calculating effective parameters for all jobs...")
         all_params = exp.effective_params
-        print("Calculation complete.", file=sys.stderr)
+        logger.info("Calculation complete.")
 
     except (FileNotFoundError, KeyError, RecursionError) as e:
-        print(f"\nError: {e}", file=sys.stderr)
+        logger.error(f"\nError: {e}")
         sys.exit(1)
 
     if args.output:
         with open(args.output, "w") as f:
             json.dump(all_params, f, indent=2)
-        print(
-            f"\nSuccessfully wrote effective parameters to '{args.output}'",
-            file=sys.stderr,
-        )
+        logger.info(f"\nSuccessfully wrote effective parameters to '{args.output}'")
     else:
-        # Print to stdout by default
         print(json.dumps(all_params, indent=2))
 
 
