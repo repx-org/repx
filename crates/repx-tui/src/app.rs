@@ -1,8 +1,8 @@
-use crate::model::{
-    StatusCounts, TargetState, TuiDisplayRow, TuiExecutor, TuiJob, TuiRowItem, TuiScheduler,
-    TuiTarget,
-};
-use ratatui::widgets::TableState;
+pub mod jobs;
+pub mod targets;
+
+use crate::app::{jobs::JobsState, targets::TargetsState};
+use crate::model::{StatusCounts, TuiExecutor, TuiRowItem, TuiScheduler, TuiTarget};
 use repx_client::{error::ClientError, Client, SubmitOptions};
 use repx_core::{
     config::Resources,
@@ -88,35 +88,22 @@ pub struct App {
     pub client: Arc<Client>,
     pub theme: Theme,
     pub lab: Lab,
-    pub table_state: TableState,
-    pub targets_table_state: TableState,
-    jobs: Vec<TuiJob>,
-    pub display_rows: Vec<TuiDisplayRow>,
-    pub targets: Vec<TuiTarget>,
+    pub jobs_state: JobsState,
+    pub targets_state: TargetsState,
     pub status_history: VecDeque<StatusCounts>,
     pub completion_rate_history: VecDeque<f64>,
     last_completed_count: usize,
     pub tick_rate: Duration,
     pub should_quit: bool,
     pub input_mode: InputMode,
-    pub filter_text: String,
-    pub status_filter: StatusFilter,
-    pub selected_jobs: HashSet<String>,
-    pub collapsed_nodes: HashSet<String>,
-    pub is_reversed: bool,
     status_rx: Receiver<TargetPollUpdate>,
     log_cmd_tx: Sender<LogPollerCommand>,
     log_result_rx: Receiver<LogUpdate>,
     submission_tx: Sender<SubmissionResult>,
     submission_rx: Receiver<SubmissionResult>,
     pub is_loading: bool,
-    pub is_tree_view: bool,
     resources: Option<Resources>,
-    pub active_target: Arc<Mutex<String>>,
     pub focused_panel: PanelFocus,
-    pub jobs_list_viewport_height: usize,
-    pub targets_focused_column: usize,
-    pub is_editing_target_cell: bool,
 }
 
 impl App {
@@ -131,7 +118,7 @@ impl App {
         submission_rx: Receiver<SubmissionResult>,
         resources: Option<Resources>,
         initial_active_target: String,
-        active_target: Arc<Mutex<String>>,
+        active_target_ref: Arc<Mutex<String>>,
     ) -> Result<Self, ClientError> {
         log_info!("Initializing new App instance.");
         let targets = client
@@ -185,9 +172,9 @@ impl App {
                 TuiTarget {
                     name: name.clone(),
                     state: if name == &initial_active_target {
-                        TargetState::Active
+                        crate::model::TargetState::Active
                     } else {
-                        TargetState::Inactive
+                        crate::model::TargetState::Inactive
                     },
                     available_schedulers,
                     available_executors,
@@ -204,47 +191,32 @@ impl App {
             client: Arc::new(client),
             theme,
             lab,
-            table_state: TableState::default(),
-            targets_table_state: TableState::default(),
-            jobs: Vec::new(),
-            display_rows: Vec::new(),
-            targets,
+            jobs_state: JobsState::new(),
+            targets_state: TargetsState::new(targets, active_target_ref),
             status_history: VecDeque::new(),
             completion_rate_history: VecDeque::new(),
             last_completed_count: 0,
             tick_rate,
             should_quit: false,
             input_mode: InputMode::Normal,
-            filter_text: String::new(),
-            status_filter: StatusFilter::All,
-            selected_jobs: HashSet::new(),
-            collapsed_nodes: HashSet::new(),
-            is_reversed: false,
             status_rx,
             log_cmd_tx,
             log_result_rx,
             submission_tx,
             submission_rx,
             is_loading: true,
-            is_tree_view: true,
             resources,
-            active_target,
             focused_panel: PanelFocus::Jobs,
-            jobs_list_viewport_height: 0,
-            targets_focused_column: 1,
-            is_editing_target_cell: false,
         };
 
-        app.build_initial_job_list();
-        app.rebuild_display_list();
+        app.jobs_state.init_from_lab(&app.lab);
+        app.jobs_state.rebuild_display_list(&app.lab);
+
         log_info!("Performing initial data update.");
 
-        if !app.display_rows.is_empty() {
-            app.table_state.select(Some(0));
+        if !app.jobs_state.display_rows.is_empty() {
+            app.jobs_state.table_state.select(Some(0));
             app.on_selection_change();
-        }
-        if !app.targets.is_empty() {
-            app.targets_table_state.select(Some(0));
         }
 
         log_info!("App initialized successfully.");
@@ -262,12 +234,12 @@ impl App {
             match update_result {
                 Ok((_target_name, job_statuses)) => {
                     log_info!("Received status update. Applying new statuses.");
-                    self.apply_statuses(job_statuses);
+                    self.jobs_state.apply_statuses(&self.lab, job_statuses);
                     if was_loading {
                         let (_, current_completed_count) = self.calculate_current_counts();
                         self.last_completed_count = current_completed_count;
                     }
-                    self.rebuild_display_list();
+                    self.jobs_state.rebuild_display_list(&self.lab);
                 }
                 Err(e) => {
                     log_warn!("Background status update failed: {}", e);
@@ -278,7 +250,12 @@ impl App {
 
     pub fn check_for_log_updates(&mut self) {
         if let Ok((job_id, log_result)) = self.log_result_rx.try_recv() {
-            if let Some(job) = self.jobs.iter_mut().find(|j| j.full_id == job_id) {
+            if let Some(job) = self
+                .jobs_state
+                .jobs
+                .iter_mut()
+                .find(|j| j.full_id == job_id)
+            {
                 log_info!("Received log update for job '{}'", job_id);
                 match log_result {
                     Ok(lines) => job.logs = lines,
@@ -296,7 +273,7 @@ impl App {
                         "Received submission success for {} jobs.",
                         submitted_job_ids.len()
                     );
-                    for job in self.jobs.iter_mut() {
+                    for job in self.jobs_state.jobs.iter_mut() {
                         if submitted_job_ids.contains(&job.full_id) && job.status == "Submitting..."
                         {
                             job.status = "Queued".to_string();
@@ -314,7 +291,7 @@ impl App {
                         error,
                         affected_job_ids.len()
                     );
-                    for job in self.jobs.iter_mut() {
+                    for job in self.jobs_state.jobs.iter_mut() {
                         if affected_job_ids.contains(&job.full_id) && job.status == "Submitting..."
                         {
                             job.status = "Submit Failed".to_string();
@@ -322,74 +299,10 @@ impl App {
                     }
                 }
             }
-            self.rebuild_display_list();
+            self.jobs_state.rebuild_display_list(&self.lab);
         }
     }
 
-    fn build_initial_job_list(&mut self) {
-        log_info!("Job list is empty, building initial list from lab definition.");
-        let mut all_jobs = Vec::new();
-        let mut sorted_runs: Vec<_> = self.lab.runs.iter().collect();
-        sorted_runs.sort_by_key(|(k, _)| (*k).clone());
-        for (run_id, run) in sorted_runs {
-            let mut sorted_jobs: Vec<_> = run.jobs.clone();
-            sorted_jobs.sort();
-            for job_id in sorted_jobs {
-                let short_id = job_id.short_id();
-                let (id_part, name_part) = short_id
-                    .split_once('-')
-                    .map_or((short_id.as_str(), ""), |(id, name)| (id, name));
-
-                let tui_job = TuiJob {
-                    full_id: job_id.clone(),
-                    id: id_part.to_string(),
-                    name: name_part.to_string(),
-                    run: run_id.to_string(),
-                    worker: "-".to_string(),
-                    elapsed: "-".to_string(),
-                    status: "Unknown".to_string(),
-                    context_depends_on: "-".to_string(),
-                    context_dependents: "-".to_string(),
-                    logs: vec!["Awaiting update...".to_string()],
-                };
-                all_jobs.push(tui_job);
-            }
-        }
-        self.jobs = all_jobs;
-    }
-
-    fn apply_statuses(
-        &mut self,
-        job_statuses_from_target: std::collections::HashMap<JobId, engine::JobStatus>,
-    ) {
-        let full_job_statuses =
-            repx_core::engine::determine_job_statuses(&self.lab, &job_statuses_from_target);
-
-        for job in self.jobs.iter_mut() {
-            if job.status == "Submitting..." {
-                if let Some(status) = full_job_statuses.get(&job.full_id) {
-                    if matches!(
-                        status,
-                        engine::JobStatus::Pending | engine::JobStatus::Blocked { .. }
-                    ) {
-                        continue;
-                    }
-                }
-            }
-
-            let (status_str, worker) = match full_job_statuses.get(&job.full_id) {
-                Some(engine::JobStatus::Succeeded { location }) => ("Succeeded", location.clone()),
-                Some(engine::JobStatus::Failed { location }) => ("Failed", location.clone()),
-                Some(engine::JobStatus::Pending) => ("Pending", "-".to_string()),
-                Some(engine::JobStatus::Queued) => ("Queued", "-".to_string()),
-                Some(engine::JobStatus::Running) => ("Running", "-".to_string()),
-                Some(engine::JobStatus::Blocked { .. }) => ("Blocked", "-".to_string()),
-                None => ("Unknown", "-".to_string()),
-            };
-            job.status = status_str.to_string();
-            job.worker = worker.split(':').next_back().unwrap_or(&worker).to_string();
-        }
-    }
     pub fn on_tick(&mut self) {
         if !self.is_loading {
             self.update_history_data();
@@ -400,11 +313,11 @@ impl App {
         let mut counts = StatusCounts::default();
         let mut current_completed_count: usize = 0;
 
-        if self.jobs.is_empty() {
+        if self.jobs_state.jobs.is_empty() {
             return (counts, current_completed_count);
         }
 
-        for job in &self.jobs {
+        for job in &self.jobs_state.jobs {
             counts.total += 1;
             match job.status.as_str() {
                 "Succeeded" => {
@@ -442,10 +355,12 @@ impl App {
     }
 
     pub fn on_selection_change(&mut self) {
-        let selected_row_id = self
-            .table_state
-            .selected()
-            .and_then(|i| self.display_rows.get(i).map(|row| row.id.clone()));
+        let selected_row_id = self.jobs_state.table_state.selected().and_then(|i| {
+            self.jobs_state
+                .display_rows
+                .get(i)
+                .map(|row| row.id.clone())
+        });
 
         let mut job_id_to_watch: Option<JobId> = None;
         if let Some(row_id) = selected_row_id {
@@ -453,7 +368,11 @@ impl App {
                 if let Some(job_id_str) = last_segment.strip_prefix("job:") {
                     let job_id = JobId(job_id_str.to_string());
 
-                    let master_index = self.jobs.iter().position(|j| j.full_id == job_id);
+                    let master_index = self
+                        .jobs_state
+                        .jobs
+                        .iter()
+                        .position(|j| j.full_id == job_id);
                     self.update_context_for_job(master_index);
                     job_id_to_watch = Some(job_id);
                 }
@@ -468,185 +387,59 @@ impl App {
     }
 
     pub fn next_job(&mut self) {
-        let max_len = self.display_rows.len();
-        if max_len == 0 {
-            self.table_state.select(None);
-            return;
-        }
-        let i = match self.table_state.selected() {
-            Some(i) => (i + 1).min(max_len - 1),
-            None => 0,
-        };
-        self.table_state.select(Some(i));
+        self.jobs_state.next();
         self.on_selection_change();
     }
 
     pub fn previous_job(&mut self) {
-        let max_len = self.display_rows.len();
-        if max_len == 0 {
-            self.table_state.select(None);
-            return;
-        }
-        let i = match self.table_state.selected() {
-            Some(i) => i.saturating_sub(1),
-            None => 0,
-        };
-        self.table_state.select(Some(i));
+        self.jobs_state.previous();
         self.on_selection_change();
     }
 
     pub fn scroll_down_half_page(&mut self) {
-        if self.jobs_list_viewport_height == 0 {
-            return;
-        }
-        let max_len = self.display_rows.len();
-        if max_len == 0 {
-            self.table_state.select(None);
-            return;
-        }
-        let half_page = self.jobs_list_viewport_height / 2;
-        let i = match self.table_state.selected() {
-            Some(i) => (i + half_page).min(max_len - 1),
-            None => 0,
-        };
-        self.table_state.select(Some(i));
+        self.jobs_state.scroll_down_half();
         self.on_selection_change();
     }
 
     pub fn scroll_up_half_page(&mut self) {
-        if self.jobs_list_viewport_height == 0 {
-            return;
-        }
-        let max_len = self.display_rows.len();
-        if max_len == 0 {
-            self.table_state.select(None);
-            return;
-        }
-        let half_page = self.jobs_list_viewport_height / 2;
-        let i = match self.table_state.selected() {
-            Some(i) => i.saturating_sub(half_page),
-            None => 0,
-        };
-        self.table_state.select(Some(i));
+        self.jobs_state.scroll_up_half();
         self.on_selection_change();
     }
 
     pub fn next_target_cell(&mut self) {
-        self.targets_focused_column = (self.targets_focused_column + 1).min(3);
+        self.targets_state.next_cell();
     }
 
     pub fn previous_target_cell(&mut self) {
-        self.targets_focused_column = self.targets_focused_column.saturating_sub(1).max(1);
+        self.targets_state.previous_cell();
     }
 
     pub fn toggle_target_cell_edit(&mut self) {
-        if self.targets_focused_column == 1 || self.targets_focused_column == 2 {
-            self.is_editing_target_cell = !self.is_editing_target_cell;
-        }
+        self.targets_state.toggle_edit();
     }
 
     pub fn next_target_cell_value(&mut self) {
-        if let Some(selected_idx) = self.targets_table_state.selected() {
-            if let Some(target) = self.targets.get_mut(selected_idx) {
-                match self.targets_focused_column {
-                    1 => {
-                        let scheduler = target.get_selected_scheduler();
-                        if let Some(executors) = target.available_executors.get(&scheduler) {
-                            if !executors.is_empty() {
-                                target.selected_executor_idx =
-                                    (target.selected_executor_idx + 1) % executors.len();
-                            }
-                        }
-                    }
-                    2 => {
-                        if !target.available_schedulers.is_empty() {
-                            target.selected_scheduler_idx = (target.selected_scheduler_idx + 1)
-                                % target.available_schedulers.len();
-                            target.selected_executor_idx = 0;
-                        }
-                    }
-                    _ => {}
-                }
-            }
-        }
+        self.targets_state.cycle_value_next();
     }
 
     pub fn previous_target_cell_value(&mut self) {
-        if let Some(selected_idx) = self.targets_table_state.selected() {
-            if let Some(target) = self.targets.get_mut(selected_idx) {
-                match self.targets_focused_column {
-                    1 => {
-                        let scheduler = target.get_selected_scheduler();
-                        if let Some(executors) = target.available_executors.get(&scheduler) {
-                            if !executors.is_empty() {
-                                target.selected_executor_idx = if target.selected_executor_idx == 0
-                                {
-                                    executors.len() - 1
-                                } else {
-                                    target.selected_executor_idx - 1
-                                };
-                            }
-                        }
-                    }
-                    2 => {
-                        if !target.available_schedulers.is_empty() {
-                            target.selected_scheduler_idx = if target.selected_scheduler_idx == 0 {
-                                target.available_schedulers.len() - 1
-                            } else {
-                                target.selected_scheduler_idx - 1
-                            };
-                            target.selected_executor_idx = 0;
-                        }
-                    }
-                    _ => {}
-                }
-            }
-        }
+        self.targets_state.cycle_value_prev();
     }
 
     pub fn next_target(&mut self) {
-        let max_len = self.targets.len();
-        if max_len == 0 {
-            self.targets_table_state.select(None);
-            return;
-        }
-        let i = match self.targets_table_state.selected() {
-            Some(i) => (i + 1).min(max_len - 1),
-            None => 0,
-        };
-        self.targets_table_state.select(Some(i));
+        self.targets_state.next();
     }
 
     pub fn previous_target(&mut self) {
-        let max_len = self.targets.len();
-        if max_len == 0 {
-            self.targets_table_state.select(None);
-            return;
-        }
-        let i = match self.targets_table_state.selected() {
-            Some(i) => i.saturating_sub(1),
-            None => 0,
-        };
-        self.targets_table_state.select(Some(i));
+        self.targets_state.previous();
     }
 
     pub fn set_active_target(&mut self) {
-        if let Some(selected_idx) = self.targets_table_state.selected() {
-            if let Some(target) = self.targets.get(selected_idx) {
-                let new_active_target = target.name.clone();
-                log_info!("Setting new active target: {}", new_active_target);
-
-                *self.active_target.lock().unwrap() = new_active_target.clone();
-
-                for t in self.targets.iter_mut() {
-                    if t.name == new_active_target {
-                        t.state = TargetState::Active;
-                    } else if t.state == TargetState::Active {
-                        t.state = TargetState::Inactive;
-                    }
-                }
-            }
-        }
+        self.targets_state.set_active();
+        log_info!(
+            "Active target changed to: {}",
+            self.targets_state.get_active_target_name()
+        );
     }
 
     pub fn set_focused_panel(&mut self, panel: PanelFocus) {
@@ -669,68 +462,73 @@ impl App {
     }
 
     pub fn toggle_reverse(&mut self) {
-        self.is_reversed = !self.is_reversed;
-        self.rebuild_display_list();
+        self.jobs_state.is_reversed = !self.jobs_state.is_reversed;
+        self.jobs_state.rebuild_display_list(&self.lab);
     }
 
     pub fn toggle_selection_and_move_down(&mut self) {
-        let current_selection = self.table_state.selected();
+        let current_selection = self.jobs_state.table_state.selected();
 
         if let Some(selected_idx_in_display) = current_selection {
-            if let Some(row) = self.display_rows.get(selected_idx_in_display) {
-                if !self.selected_jobs.remove(&row.id) {
-                    self.selected_jobs.insert(row.id.clone());
+            if let Some(row) = self.jobs_state.display_rows.get(selected_idx_in_display) {
+                if !self.jobs_state.selected_jobs.remove(&row.id) {
+                    self.jobs_state.selected_jobs.insert(row.id.clone());
                 }
             }
             self.next_job();
-        } else if !self.display_rows.is_empty() {
-            self.table_state.select(Some(0));
-            if let Some(row) = self.display_rows.first() {
-                self.selected_jobs.insert(row.id.clone());
+        } else if !self.jobs_state.display_rows.is_empty() {
+            self.jobs_state.table_state.select(Some(0));
+            if let Some(row) = self.jobs_state.display_rows.first() {
+                self.jobs_state.selected_jobs.insert(row.id.clone());
             }
             self.next_job();
         }
     }
 
     pub fn toggle_collapse_selected(&mut self) {
-        if !self.is_tree_view {
+        if !self.jobs_state.is_tree_view {
             return;
         }
-        if let Some(selected_idx) = self.table_state.selected() {
-            if let Some(row) = self.display_rows.get(selected_idx) {
-                if !self.collapsed_nodes.remove(&row.id) {
-                    self.collapsed_nodes.insert(row.id.clone());
+        if let Some(selected_idx) = self.jobs_state.table_state.selected() {
+            if let Some(row) = self.jobs_state.display_rows.get(selected_idx) {
+                if !self.jobs_state.collapsed_nodes.remove(&row.id) {
+                    self.jobs_state.collapsed_nodes.insert(row.id.clone());
                 }
-                self.rebuild_display_list();
+                self.jobs_state.rebuild_display_list(&self.lab);
             }
         }
     }
 
     pub fn clear_selection(&mut self) {
-        self.selected_jobs.clear();
+        self.jobs_state.selected_jobs.clear();
     }
 
     pub fn select_all(&mut self) {
-        self.selected_jobs = self.display_rows.iter().map(|row| row.id.clone()).collect();
+        self.jobs_state.selected_jobs = self
+            .jobs_state
+            .display_rows
+            .iter()
+            .map(|row| row.id.clone())
+            .collect();
     }
     pub fn next_status_filter(&mut self) {
         let current_index = STATUS_FILTERS
             .iter()
-            .position(|&s| s == self.status_filter)
+            .position(|&s| s == self.jobs_state.status_filter)
             .unwrap_or(0);
         let next_index = (current_index + 1) % STATUS_FILTERS.len();
         log_info!(
             "Status filter changed to: {}",
             STATUS_FILTERS[next_index].as_str()
         );
-        self.status_filter = STATUS_FILTERS[next_index];
-        self.rebuild_display_list();
+        self.jobs_state.status_filter = STATUS_FILTERS[next_index];
+        self.jobs_state.rebuild_display_list(&self.lab);
     }
 
     pub fn previous_status_filter(&mut self) {
         let current_index = STATUS_FILTERS
             .iter()
-            .position(|&s| s == self.status_filter)
+            .position(|&s| s == self.jobs_state.status_filter)
             .unwrap_or(0);
         let prev_index = if current_index == 0 {
             STATUS_FILTERS.len() - 1
@@ -741,279 +539,13 @@ impl App {
             "Status filter changed to: {}",
             STATUS_FILTERS[prev_index].as_str()
         );
-        self.status_filter = STATUS_FILTERS[prev_index];
-        self.rebuild_display_list();
+        self.jobs_state.status_filter = STATUS_FILTERS[prev_index];
+        self.jobs_state.rebuild_display_list(&self.lab);
     }
-
     pub fn rebuild_display_list(&mut self) {
-        log_info!(
-            "Applying filter. Text: '{}', Status: '{}', Reversed: {}",
-            self.filter_text,
-            self.status_filter.as_str(),
-            self.is_reversed
-        );
-        let previously_selected_id = self
-            .table_state
-            .selected()
-            .and_then(|i| self.display_rows.get(i))
-            .map(|row| row.id.clone());
-
-        self.display_rows.clear();
-        let filter = self.filter_text.to_lowercase();
-
-        if self.is_tree_view {
-            self.build_tree_view(&filter);
-        } else {
-            let filtered_jobs = self
-                .jobs
-                .iter()
-                .enumerate()
-                .filter(|(_i, job)| {
-                    let status_match = match self.status_filter {
-                        StatusFilter::All => true,
-                        _ => job.status == self.status_filter.as_str(),
-                    };
-
-                    let text_match = job.id.to_lowercase().contains(&filter)
-                        || job.name.to_lowercase().contains(&filter)
-                        || job.run.to_lowercase().contains(&filter);
-
-                    status_match && text_match
-                })
-                .map(|(i, _job)| i)
-                .collect::<Vec<_>>();
-
-            for job_idx in filtered_jobs {
-                let job = &self.jobs[job_idx];
-                self.display_rows.push(TuiDisplayRow {
-                    item: TuiRowItem::Job {
-                        job: Box::new(job.clone()),
-                    },
-                    id: format!("job:{}", job.full_id),
-                    depth: 0,
-                    parent_prefix: "".to_string(),
-                    is_last_child: false,
-                });
-            }
-        }
-
-        if !self.is_tree_view && self.is_reversed {
-            self.display_rows.reverse();
-        }
-
-        let new_len = self.display_rows.len();
-        let new_selected_index = if let Some(id) = previously_selected_id {
-            self.display_rows
-                .iter()
-                .position(|r| r.id == id)
-                .or(Some(0))
-        } else {
-            Some(0)
-        };
-
-        if new_len == 0 || new_selected_index.is_none() {
-            self.table_state.select(None);
-        } else if let Some(idx) = new_selected_index {
-            self.table_state
-                .select(Some(idx.min(new_len.saturating_sub(1))));
-        } else {
-            self.table_state.select(Some(0));
-        }
-
+        self.jobs_state.rebuild_display_list(&self.lab);
         self.on_selection_change();
     }
-    fn build_tree_view(&mut self, filter: &str) {
-        let mut new_display_rows = Vec::new();
-
-        let visible_job_ids: HashSet<JobId> =
-            if filter.is_empty() && self.status_filter == StatusFilter::All {
-                self.lab.jobs.keys().cloned().collect()
-            } else {
-                let directly_matching_job_ids: HashSet<JobId> = self
-                    .jobs
-                    .iter()
-                    .filter(|job| {
-                        let status_match = match self.status_filter {
-                            StatusFilter::All => true,
-                            _ => job.status == self.status_filter.as_str(),
-                        };
-                        let text_match = filter.is_empty()
-                            || job.id.to_lowercase().contains(filter)
-                            || job.name.to_lowercase().contains(filter);
-                        status_match && text_match
-                    })
-                    .map(|job| job.full_id.clone())
-                    .collect();
-
-                let mut dependents_map: std::collections::HashMap<JobId, Vec<JobId>> =
-                    std::collections::HashMap::new();
-                for (job_id, job) in &self.lab.jobs {
-                    for dep_id in job
-                        .executables
-                        .values()
-                        .flat_map(|exe| exe.inputs.iter())
-                        .filter_map(|mapping| mapping.job_id.as_ref())
-                    {
-                        dependents_map
-                            .entry(dep_id.clone())
-                            .or_default()
-                            .push(job_id.clone());
-                    }
-                }
-                let mut calculated_visible_ids = directly_matching_job_ids.clone();
-                let mut queue: std::collections::VecDeque<_> =
-                    directly_matching_job_ids.iter().cloned().collect();
-                while let Some(job_id) = queue.pop_front() {
-                    if let Some(dependents) = dependents_map.get(&job_id) {
-                        for dependent_id in dependents {
-                            if calculated_visible_ids.insert(dependent_id.clone()) {
-                                queue.push_back(dependent_id.clone());
-                            }
-                        }
-                    }
-                }
-                calculated_visible_ids
-            };
-
-        let mut run_ids: Vec<_> = self.lab.runs.keys().cloned().collect();
-        run_ids.sort();
-        let visible_runs: Vec<_> = run_ids
-            .iter()
-            .filter(|run_id| {
-                let run = self.lab.runs.get(run_id).unwrap();
-                let run_name_matches =
-                    !filter.is_empty() && run_id.0.to_lowercase().contains(filter);
-                let has_visible_jobs = run
-                    .jobs
-                    .iter()
-                    .any(|job_id| visible_job_ids.contains(job_id));
-                run_name_matches || has_visible_jobs
-            })
-            .cloned()
-            .collect();
-        let num_runs = visible_runs.len();
-        for (i, run_id) in visible_runs.iter().enumerate() {
-            let run = self.lab.runs.get(run_id).unwrap();
-            let run_unique_id = format!("run:{}", run_id);
-            new_display_rows.push(TuiDisplayRow {
-                item: TuiRowItem::Run { id: run_id.clone() },
-                id: run_unique_id.clone(),
-                depth: 0,
-                is_last_child: i == num_runs - 1,
-                parent_prefix: "".to_string(),
-            });
-            if !self.collapsed_nodes.contains(&run_unique_id) {
-                let run_jobs_set: HashSet<_> = run.jobs.iter().collect();
-                let mut dep_ids_in_run: HashSet<&JobId> = HashSet::new();
-                for job_id in &run.jobs {
-                    if let Some(job_def) = self.lab.jobs.get(job_id) {
-                        for dep_id in job_def
-                            .executables
-                            .values()
-                            .flat_map(|exe| exe.inputs.iter())
-                            .filter_map(|mapping| mapping.job_id.as_ref())
-                        {
-                            if run_jobs_set.contains(dep_id) {
-                                dep_ids_in_run.insert(dep_id);
-                            }
-                        }
-                    }
-                }
-                let mut visible_top_level_jobs: Vec<_> = run_jobs_set
-                    .iter()
-                    .filter(|j| !dep_ids_in_run.contains(*j))
-                    .copied()
-                    .filter(|job_id| visible_job_ids.contains(job_id))
-                    .cloned()
-                    .collect();
-                visible_top_level_jobs.sort();
-                if self.is_reversed {
-                    visible_top_level_jobs.reverse();
-                }
-                let num_top_jobs = visible_top_level_jobs.len();
-                let prefix = if i == num_runs - 1 { "    " } else { "│   " };
-                for (j, job_id) in visible_top_level_jobs.iter().enumerate() {
-                    Self::add_job_and_deps_to_tree_recursive(
-                        &mut new_display_rows,
-                        &self.lab,
-                        &self.jobs,
-                        &self.collapsed_nodes,
-                        job_id,
-                        1,
-                        j == num_top_jobs - 1,
-                        prefix.to_string(),
-                        &visible_job_ids,
-                        &run_unique_id,
-                    );
-                }
-            }
-        }
-        self.display_rows = new_display_rows;
-    }
-    #[allow(clippy::too_many_arguments)]
-    fn add_job_and_deps_to_tree_recursive(
-        display_rows: &mut Vec<TuiDisplayRow>,
-        lab: &Lab,
-        all_tui_jobs: &[TuiJob],
-        collapsed_nodes: &HashSet<String>,
-        job_id: &JobId,
-        depth: usize,
-        is_last: bool,
-        prefix: String,
-        visible_job_ids: &HashSet<JobId>,
-        parent_path: &str,
-    ) {
-        let job_instance_id = format!("{}/job:{}", parent_path, job_id);
-        let tui_job = all_tui_jobs.iter().find(|j| &j.full_id == job_id).unwrap();
-        display_rows.push(TuiDisplayRow {
-            item: TuiRowItem::Job {
-                job: Box::new(tui_job.clone()),
-            },
-            id: job_instance_id.clone(),
-            depth,
-            is_last_child: is_last,
-            parent_prefix: prefix.clone(),
-        });
-
-        if !collapsed_nodes.contains(&job_instance_id) {
-            let sorted_deps = {
-                let lab_job = lab.jobs.get(job_id).unwrap();
-                let mut deps: Vec<_> = lab_job
-                    .executables
-                    .values()
-                    .flat_map(|exe| exe.inputs.iter())
-                    .filter_map(|m| m.job_id.clone())
-                    .collect::<HashSet<_>>()
-                    .into_iter()
-                    .collect();
-                deps.sort();
-                deps
-            };
-
-            let visible_deps: Vec<_> = sorted_deps
-                .into_iter()
-                .filter(|dep_id| visible_job_ids.contains(dep_id))
-                .collect();
-
-            let new_prefix = format!("{}{}", prefix, if is_last { "    " } else { "│   " });
-            let num_deps = visible_deps.len();
-            for (i, dep_id) in visible_deps.iter().enumerate() {
-                Self::add_job_and_deps_to_tree_recursive(
-                    display_rows,
-                    lab,
-                    all_tui_jobs,
-                    collapsed_nodes,
-                    dep_id,
-                    depth + 1,
-                    i == num_deps - 1,
-                    new_prefix.clone(),
-                    visible_job_ids,
-                    &job_instance_id,
-                );
-            }
-        }
-    }
-
     fn get_target_ids_for_action(&self) -> Vec<String> {
         let get_id = |path_id: &str| -> Option<String> {
             path_id
@@ -1022,13 +554,14 @@ impl App {
                 .and_then(|segment| segment.split_once(':'))
                 .map(|(_, id)| id.to_string())
         };
-        if !self.selected_jobs.is_empty() {
-            self.selected_jobs
+        if !self.jobs_state.selected_jobs.is_empty() {
+            self.jobs_state
+                .selected_jobs
                 .iter()
                 .filter_map(|s| get_id(s))
                 .collect()
-        } else if let Some(selected_idx) = self.table_state.selected() {
-            if let Some(row) = self.display_rows.get(selected_idx) {
+        } else if let Some(selected_idx) = self.jobs_state.table_state.selected() {
+            if let Some(row) = self.jobs_state.display_rows.get(selected_idx) {
                 let id_str = match &row.item {
                     TuiRowItem::Run { id } => id.to_string(),
                     TuiRowItem::Job { job } => job.full_id.to_string(),
@@ -1095,7 +628,7 @@ impl App {
         let ids_to_run: Vec<String> = ids_to_potentially_run
             .into_iter()
             .filter(|id_str| {
-                if let Some(job) = self.jobs.iter().find(|j| j.full_id.0 == *id_str) {
+                if let Some(job) = self.jobs_state.jobs.iter().find(|j| j.full_id.0 == *id_str) {
                     let is_submittable = !matches!(
                         job.status.as_str(),
                         "Succeeded" | "Running" | "Queued" | "Submitting..."
@@ -1134,15 +667,20 @@ impl App {
             all_jobs_to_submit.len(),
             ids_to_run.len()
         );
-        for job in self.jobs.iter_mut() {
+        for job in self.jobs_state.jobs.iter_mut() {
             if all_jobs_to_submit.contains(&job.full_id)
                 && !matches!(job.status.as_str(), "Succeeded" | "Running" | "Queued")
             {
                 job.status = "Submitting...".to_string();
             }
         }
-        let target_name = self.active_target.lock().unwrap().clone();
-        let active_tui_target = self.targets.iter().find(|t| t.name == target_name).unwrap();
+        let target_name = self.targets_state.get_active_target_name();
+        let active_tui_target = self
+            .targets_state
+            .items
+            .iter()
+            .find(|t| t.name == target_name)
+            .unwrap();
         let scheduler = active_tui_target
             .get_selected_scheduler()
             .as_str()
@@ -1212,8 +750,8 @@ impl App {
     }
 
     pub fn toggle_tree_view(&mut self) {
-        self.is_tree_view = !self.is_tree_view;
-        self.rebuild_display_list();
+        self.jobs_state.is_tree_view = !self.jobs_state.is_tree_view;
+        self.jobs_state.rebuild_display_list(&self.lab);
     }
 
     pub fn cancel_selected(&mut self) {
@@ -1236,7 +774,7 @@ impl App {
 
     fn update_context_for_job(&mut self, master_index: Option<usize>) {
         if let Some(master_index) = master_index {
-            if let Some(job) = self.jobs.get_mut(master_index) {
+            if let Some(job) = self.jobs_state.jobs.get_mut(master_index) {
                 if let Some(lab_job) = self.lab.jobs.get(&job.full_id) {
                     let dependencies: HashSet<_> = lab_job
                         .executables
@@ -1268,16 +806,16 @@ impl App {
     }
 
     pub fn go_to_top(&mut self) {
-        if !self.display_rows.is_empty() {
-            self.table_state.select(Some(0));
+        if !self.jobs_state.display_rows.is_empty() {
+            self.jobs_state.table_state.select(Some(0));
             self.on_selection_change();
         }
     }
 
     pub fn go_to_end(&mut self) {
-        if !self.display_rows.is_empty() {
-            let last_index = self.display_rows.len() - 1;
-            self.table_state.select(Some(last_index));
+        if !self.jobs_state.display_rows.is_empty() {
+            let last_index = self.jobs_state.display_rows.len() - 1;
+            self.jobs_state.table_state.select(Some(last_index));
             self.on_selection_change();
         }
     }

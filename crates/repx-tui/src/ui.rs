@@ -67,16 +67,15 @@ fn draw_overview_panel(f: &mut Frame, area: Rect, app: &mut App) {
     let targets_border_style = get_style(app, &app.theme.elements.panels.targets);
     let loading_indicator = if app.is_loading { " [Updating...]" } else { "" };
     let store_path_str = {
-        let active_target_name = app.active_target.lock().unwrap();
+        let active_target_name = app.targets_state.get_active_target_name();
         app.client
             .config()
             .targets
-            .get(&*active_target_name)
+            .get(&active_target_name)
             .map(|t| t.base_path.display().to_string())
             .unwrap_or_else(|| "[unknown]".to_string())
     };
     let githash_short = app.lab.git_hash.chars().take(7).collect::<String>();
-
     let rate_text = format!("{}ms", app.tick_rate.as_millis());
     let current_time = Local::now().format("%H:%M:%S").to_string();
     let overview_block = Block::default()
@@ -226,7 +225,6 @@ fn draw_graphs(f: &mut Frame, area: Rect, app: &App) {
         rate_chunks[1],
     );
 }
-
 fn draw_targets(f: &mut Frame, area: Rect, app: &mut App, border_style: Style) {
     let targets_block = Block::default()
         .borders(Borders::ALL)
@@ -249,8 +247,8 @@ fn draw_targets(f: &mut Frame, area: Rect, app: &mut App, border_style: Style) {
     let targets_inner_area = targets_block.inner(area);
     f.render_widget(targets_block, area);
 
-    if !app.targets.is_empty() {
-        let selected_row_idx = app.targets_table_state.selected();
+    if !app.targets_state.items.is_empty() {
+        let selected_row_idx = app.targets_state.table_state.selected();
 
         let row_highlight_style = if app.focused_panel == PanelFocus::Targets {
             get_style(app, &app.theme.elements.tables.row_highlight_fg).bg(get_color(
@@ -271,7 +269,8 @@ fn draw_targets(f: &mut Frame, area: Rect, app: &mut App, border_style: Style) {
         };
 
         let target_rows: Vec<Row> = app
-            .targets
+            .targets_state
+            .items
             .iter()
             .enumerate()
             .map(|(i, target)| {
@@ -289,13 +288,17 @@ fn draw_targets(f: &mut Frame, area: Rect, app: &mut App, border_style: Style) {
                     TargetState::Down => ("[DOWN]", Style::default().add_modifier(Modifier::DIM)),
                 };
                 let mut executor_text = target.get_selected_executor().as_str().to_string();
-                if is_selected_row && app.targets_focused_column == 1 && app.is_editing_target_cell
+                if is_selected_row
+                    && app.targets_state.focused_column == 1
+                    && app.targets_state.is_editing_cell
                 {
                     executor_text = format!("← {} →", executor_text);
                 }
 
                 let mut scheduler_text = target.get_selected_scheduler().as_str().to_string();
-                if is_selected_row && app.targets_focused_column == 2 && app.is_editing_target_cell
+                if is_selected_row
+                    && app.targets_state.focused_column == 2
+                    && app.targets_state.is_editing_cell
                 {
                     scheduler_text = format!("← {} →", scheduler_text);
                 }
@@ -308,7 +311,7 @@ fn draw_targets(f: &mut Frame, area: Rect, app: &mut App, border_style: Style) {
 
                 if is_selected_row {
                     for (col_idx, cell) in cells.iter_mut().enumerate() {
-                        let style = if col_idx == app.targets_focused_column {
+                        let style = if col_idx == app.targets_state.focused_column {
                             cell_highlight_style
                         } else {
                             row_highlight_style
@@ -336,10 +339,13 @@ fn draw_targets(f: &mut Frame, area: Rect, app: &mut App, border_style: Style) {
         .header(header)
         .highlight_symbol("");
 
-        f.render_stateful_widget(table, targets_inner_area, &mut app.targets_table_state);
+        f.render_stateful_widget(
+            table,
+            targets_inner_area,
+            &mut app.targets_state.table_state,
+        );
     }
 }
-
 fn draw_left_column(f: &mut Frame, area: Rect, app: &App) {
     let left_chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -349,13 +355,13 @@ fn draw_left_column(f: &mut Frame, area: Rect, app: &App) {
     draw_context_panel(f, left_chunks[0], app);
     draw_logs_panel(f, left_chunks[1], app);
 }
-
 fn draw_context_panel(f: &mut Frame, area: Rect, app: &App) {
     let context_border_style = get_style(app, &app.theme.elements.panels.context);
     let selected_job = app
+        .jobs_state
         .table_state
         .selected()
-        .and_then(|i| app.display_rows.get(i))
+        .and_then(|i| app.jobs_state.display_rows.get(i))
         .and_then(|row| {
             if let TuiRowItem::Job { job } = &row.item {
                 Some(job)
@@ -424,13 +430,13 @@ fn draw_context_panel(f: &mut Frame, area: Rect, app: &App) {
     };
     f.render_widget(content, inner_area);
 }
-
 fn draw_logs_panel(f: &mut Frame, area: Rect, app: &App) {
     let logs_border_style = get_style(app, &app.theme.elements.panels.logs);
     let selected_job = app
+        .jobs_state
         .table_state
         .selected()
-        .and_then(|i| app.display_rows.get(i))
+        .and_then(|i| app.jobs_state.display_rows.get(i))
         .and_then(|row| {
             if let TuiRowItem::Job { job } = &row.item {
                 Some(job)
@@ -468,17 +474,16 @@ fn draw_logs_panel(f: &mut Frame, area: Rect, app: &App) {
     };
     f.render_widget(content, inner_area);
 }
-
 fn draw_right_column(f: &mut Frame, area: Rect, app: &mut App) {
     let runs_jobs_border_style = get_style(app, &app.theme.elements.panels.runs_jobs);
-    let filtered_count = app.display_rows.len();
+    let filtered_count = app.jobs_state.display_rows.len();
     let counter_text = if filtered_count > 0 {
-        let selected_index = app.table_state.selected().unwrap_or(0);
+        let selected_index = app.jobs_state.table_state.selected().unwrap_or(0);
         format!("{}/{}", selected_index + 1, filtered_count)
     } else {
         "0/0".to_string()
     };
-    let status_filter_text = app.status_filter.as_str();
+    let status_filter_text = app.jobs_state.status_filter.as_str();
     let right_title_content = format!("┐reverse┌┐tree┌┐{}┌─", status_filter_text);
     let right_title_width = right_title_content.chars().count() as u16 + 1;
     let left_title_prefix = "─┐";
@@ -508,10 +513,9 @@ fn draw_right_column(f: &mut Frame, area: Rect, app: &mut App) {
         ),
         Span::styled(left_title_border2, runs_jobs_border_style),
     ];
-
     match app.input_mode {
         InputMode::Editing => {
-            let mut text_to_truncate = format!("{}_", app.filter_text);
+            let mut text_to_truncate = format!("{}_", app.jobs_state.filter_text);
             if text_to_truncate.len() < "filter".len() {
                 text_to_truncate = format!("{:<width$}", text_to_truncate, width = "filter".len());
             }
@@ -525,8 +529,8 @@ fn draw_right_column(f: &mut Frame, area: Rect, app: &mut App) {
             left_title_spans.push(Span::styled(truncated_filter_text, Style::default()));
         }
         InputMode::Normal | InputMode::SpaceMenu | InputMode::GMenu => {
-            if !app.filter_text.is_empty() {
-                let text_to_truncate = &app.filter_text;
+            if !app.jobs_state.filter_text.is_empty() {
+                let text_to_truncate = &app.jobs_state.filter_text;
                 let truncated_filter_text = if text_to_truncate.len() > max_filter_width as usize {
                     let start_index = text_to_truncate.len() - max_filter_width as usize;
                     &text_to_truncate[start_index..]
@@ -649,8 +653,7 @@ fn draw_right_column(f: &mut Frame, area: Rect, app: &mut App) {
         .split(inner_area);
     let table_area = right_chunks[0];
     let scrollbar_area = right_chunks[1];
-
-    let jobs_table = if app.is_tree_view {
+    let jobs_table = if app.jobs_state.is_tree_view {
         let header = Row::new(vec![
             "", "jobid:", "Item:", "Worker:", "Elapsed:", "Status:",
         ])
@@ -665,9 +668,9 @@ fn draw_right_column(f: &mut Frame, area: Rect, app: &mut App) {
         ];
         let rows = build_tree_rows(
             app,
-            &app.display_rows,
-            &app.selected_jobs,
-            &app.collapsed_nodes,
+            &app.jobs_state.display_rows,
+            &app.jobs_state.selected_jobs,
+            &app.jobs_state.collapsed_nodes,
             app.lab(),
         );
         Table::new(rows, constraints)
@@ -695,7 +698,11 @@ fn draw_right_column(f: &mut Frame, area: Rect, app: &mut App) {
             Constraint::Length(10),
             Constraint::Length(10),
         ];
-        let rows = build_flat_rows(app, &app.display_rows, &app.selected_jobs);
+        let rows = build_flat_rows(
+            app,
+            &app.jobs_state.display_rows,
+            &app.jobs_state.selected_jobs,
+        );
         Table::new(rows, constraints)
             .header(header.height(1))
             .row_highlight_style(if app.focused_panel == PanelFocus::Jobs {
@@ -709,16 +716,15 @@ fn draw_right_column(f: &mut Frame, area: Rect, app: &mut App) {
             .highlight_symbol("")
     };
 
-    f.render_stateful_widget(jobs_table, table_area, &mut app.table_state);
+    f.render_stateful_widget(jobs_table, table_area, &mut app.jobs_state.table_state);
 
     let viewport_height = table_area.height.saturating_sub(1) as usize;
-    app.jobs_list_viewport_height = viewport_height;
+    app.jobs_state.viewport_height = viewport_height;
 
     let mut scrollbar_state = ScrollbarState::default()
         .content_length(filtered_count)
-        .position(app.table_state.selected().unwrap_or(0))
+        .position(app.jobs_state.table_state.selected().unwrap_or(0))
         .viewport_content_length(viewport_height);
-
     f.render_stateful_widget(
         Scrollbar::default()
             .orientation(ScrollbarOrientation::VerticalRight)

@@ -6,9 +6,38 @@ use std::{
     sync::mpsc::Sender,
 };
 use whoami;
-
 pub mod local;
 pub mod ssh;
+
+pub(crate) fn find_local_runner_binary() -> Result<PathBuf> {
+    use repx_core::error::AppError;
+    let current_exe = std::env::current_exe().map_err(AppError::from)?;
+    let mut exe_dir = current_exe.parent().ok_or_else(|| {
+        AppError::Io(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            "Could not find parent directory of the current executable",
+        ))
+    })?;
+
+    if exe_dir.file_name().and_then(|s| s.to_str()) == Some("deps") {
+        if let Some(parent) = exe_dir.parent() {
+            exe_dir = parent;
+        }
+    }
+
+    let runner_exe_path = exe_dir.join("repx-runner");
+
+    if !runner_exe_path.exists() {
+        return Err(crate::error::ClientError::Core(AppError::Io(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            format!(
+                "repx-runner executable not found at expected path: {}. Please ensure it is built and in the same directory as the TUI.",
+                runner_exe_path.display()
+            ),
+        ))));
+    }
+    Ok(runner_exe_path)
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SlurmState {

@@ -17,13 +17,7 @@ use crossterm::{
 };
 use ratatui::{backend::CrosstermBackend, Terminal};
 use repx_client::Client;
-use repx_core::{
-    config::{self, Resources},
-    error::AppError,
-    log_debug,
-    model::JobId,
-    theme,
-};
+use repx_core::{config, error::AppError, model::JobId, theme};
 use std::{
     fs,
     io::{self, Stdout},
@@ -35,51 +29,11 @@ use std::{
     thread,
     time::{Duration, Instant},
 };
-use toml::Value;
 
 #[derive(Parser)]
 struct TuiArgs {
     #[arg(short, long, global = true, default_value = "./result")]
     pub lab: PathBuf,
-}
-
-fn merge_toml_values(a: &mut Value, b: &Value) {
-    match (a, b) {
-        (Value::Table(a), Value::Table(b)) => {
-            for (k, v) in b {
-                merge_toml_values(a.entry(k.clone()).or_insert(v.clone()), v);
-            }
-        }
-        (a, b) => {
-            *a = b.clone();
-        }
-    }
-}
-
-fn load_resources_config() -> Result<Option<Resources>, AppError> {
-    let mut merged_value = Value::Table(toml::map::Map::new());
-
-    let xdg_dirs = xdg::BaseDirectories::with_prefix("repx");
-    if let Some(global_path) = xdg_dirs.find_config_file("resources.toml") {
-        log_debug!("Loading global resources from: {}", global_path.display());
-        let content = fs::read_to_string(global_path)?;
-        let global_value: Value = toml::from_str(&content).map_err(AppError::Toml)?;
-        merge_toml_values(&mut merged_value, &global_value);
-    }
-
-    let cwd_path = std::env::current_dir()?.join("resources.toml");
-    if cwd_path.exists() {
-        log_debug!("Loading local resources from: {}", cwd_path.display());
-        let content = fs::read_to_string(cwd_path)?;
-        let local_value: Value = toml::from_str(&content).map_err(AppError::Toml)?;
-        merge_toml_values(&mut merged_value, &local_value);
-    }
-    if merged_value.as_table().is_none_or(|t| t.is_empty()) {
-        Ok(None)
-    } else {
-        let final_resources: Resources = merged_value.try_into().map_err(AppError::Toml)?;
-        Ok(Some(final_resources))
-    }
 }
 
 fn main() -> Result<(), AppError> {
@@ -97,7 +51,7 @@ fn main() -> Result<(), AppError> {
     })?;
     let config = config::load_config()?;
     let theme = theme::load_theme(&config)?;
-    let resources = load_resources_config()?;
+    let resources = config::load_resources(None)?;
     let client = Client::new(config.clone(), lab_path).map_err(|e| AppError::ExecutionFailed {
         message: "TUI failed to initialize client".to_string(),
         log_path: None,

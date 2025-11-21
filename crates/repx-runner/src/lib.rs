@@ -3,71 +3,14 @@ use crate::commands::AppContext;
 use clap::Parser;
 use repx_client::Client;
 use repx_core::{
-    config::{self, Resources},
+    config,
     error::AppError,
-    log_debug, log_trace,
+    log_trace,
     logging::{self, LogLevel},
 };
-use std::fs;
-use std::path::{Path, PathBuf};
-use toml::Value;
-use xdg::BaseDirectories;
 
 pub mod cli;
 pub mod commands;
-
-fn merge_toml_values(a: &mut Value, b: &Value) {
-    match (a, b) {
-        (Value::Table(a), Value::Table(b)) => {
-            for (k, v) in b {
-                merge_toml_values(a.entry(k.clone()).or_insert(v.clone()), v);
-            }
-        }
-        (a, b) => {
-            *a = b.clone();
-        }
-    }
-}
-
-fn load_resources_config(cli_path: Option<&PathBuf>) -> Result<Option<Resources>, AppError> {
-    let mut merged_value = Value::Table(toml::map::Map::new());
-
-    let xdg_dirs = BaseDirectories::with_prefix("repx");
-    if let Some(global_path) = xdg_dirs.find_config_file("resources.toml") {
-        log_debug!("Loading global resources from: {}", global_path.display());
-        let content = fs::read_to_string(global_path)?;
-        let global_value: Value = toml::from_str(&content).map_err(AppError::Toml)?;
-        merge_toml_values(&mut merged_value, &global_value);
-    }
-
-    let cwd_path = Path::new("./resources.toml");
-    if cwd_path.exists() {
-        log_debug!("Loading local resources from: {}", cwd_path.display());
-        let content = fs::read_to_string(cwd_path)?;
-        let local_value: Value = toml::from_str(&content).map_err(AppError::Toml)?;
-        merge_toml_values(&mut merged_value, &local_value);
-    }
-
-    if let Some(path) = cli_path {
-        if path.exists() {
-            log_debug!("Loading specified resources from: {}", path.display());
-            let content = fs::read_to_string(path)?;
-            let cli_value: Value = toml::from_str(&content).map_err(AppError::Toml)?;
-            merge_toml_values(&mut merged_value, &cli_value);
-        } else {
-            return Err(AppError::PathIo {
-                path: path.clone(),
-                source: std::io::Error::new(std::io::ErrorKind::NotFound, "File not found"),
-            });
-        }
-    }
-    if merged_value.as_table().is_none_or(|t| t.is_empty()) {
-        Ok(None)
-    } else {
-        let final_resources: Resources = merged_value.try_into().map_err(AppError::Toml)?;
-        Ok(Some(final_resources))
-    }
-}
 
 pub fn run() -> Result<(), AppError> {
     let cli = Cli::parse();
@@ -89,7 +32,7 @@ pub fn run() -> Result<(), AppError> {
         }
         Commands::Run(args) => {
             let config = config::load_config()?;
-            let resources = load_resources_config(cli.resources.as_ref())?;
+            let resources = config::load_resources(cli.resources.as_ref())?;
 
             let client = Client::new(config.clone(), cli.lab.clone()).map_err(|e| {
                 AppError::ExecutionFailed {

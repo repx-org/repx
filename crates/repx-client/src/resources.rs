@@ -32,8 +32,25 @@ impl SbatchDirectives {
         opts.extend(self.sbatch_opts.clone());
         opts.join(" ")
     }
-}
 
+    pub fn to_args(&self) -> Vec<String> {
+        let mut opts = Vec::new();
+        if let Some(p) = &self.partition {
+            opts.push(format!("--partition={}", p));
+        }
+        if let Some(c) = self.cpus_per_task {
+            opts.push(format!("--cpus-per-task={}", c));
+        }
+        if let Some(m) = &self.mem {
+            opts.push(format!("--mem={}", m));
+        }
+        if let Some(t) = &self.time {
+            opts.push(format!("--time={}", t));
+        }
+        opts.extend(self.sbatch_opts.clone());
+        opts
+    }
+}
 pub fn resolve_for_job(
     job_id: &JobId,
     target_name: &str,

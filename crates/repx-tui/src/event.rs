@@ -90,9 +90,8 @@ fn handle_jobs_panel_key_event(key: KeyEvent, app: &mut App) {
         _ => {}
     }
 }
-
 fn handle_targets_panel_key_event(key: KeyEvent, app: &mut App) {
-    if app.is_editing_target_cell {
+    if app.targets_state.is_editing_cell {
         match key.code {
             KeyCode::Right | KeyCode::Char('l') => app.next_target_cell_value(),
             KeyCode::Left | KeyCode::Char('h') => app.previous_target_cell_value(),
@@ -101,13 +100,12 @@ fn handle_targets_panel_key_event(key: KeyEvent, app: &mut App) {
         }
         return;
     }
-
     match key.code {
         KeyCode::Down | KeyCode::Char('j') => app.next_target(),
         KeyCode::Up | KeyCode::Char('k') => app.previous_target(),
         KeyCode::Right | KeyCode::Char('l') => app.next_target_cell(),
         KeyCode::Left | KeyCode::Char('h') => app.previous_target_cell(),
-        KeyCode::Enter => match app.targets_focused_column {
+        KeyCode::Enter => match app.targets_state.focused_column {
             1 | 2 => app.toggle_target_cell_edit(),
             3 => app.set_active_target(),
             _ => {}
@@ -115,7 +113,6 @@ fn handle_targets_panel_key_event(key: KeyEvent, app: &mut App) {
         _ => {}
     }
 }
-
 fn handle_space_menu_key_event(key: KeyEvent, app: &mut App) {
     match key.code {
         KeyCode::Char('r') => {
@@ -161,15 +158,14 @@ fn handle_g_menu_key_event(key: KeyEvent, app: &mut App) {
         _ => {}
     }
 }
-
 fn handle_editing_mode_key_event(key: KeyEvent, app: &mut App) {
     match key.code {
         KeyCode::Char(c) => {
-            app.filter_text.push(c);
+            app.jobs_state.filter_text.push(c);
             app.rebuild_display_list();
         }
         KeyCode::Backspace => {
-            app.filter_text.pop();
+            app.jobs_state.filter_text.pop();
             app.rebuild_display_list();
         }
         KeyCode::Enter | KeyCode::Esc => {
@@ -178,7 +174,6 @@ fn handle_editing_mode_key_event(key: KeyEvent, app: &mut App) {
         _ => {}
     }
 }
-
 pub fn poll_event(timeout: Duration) -> io::Result<Option<CrosstermEvent>> {
     if event::poll(timeout)? {
         Ok(Some(crossterm::event::read()?))

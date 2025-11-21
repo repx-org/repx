@@ -192,6 +192,61 @@ fn create_default_resources_if_missing(xdg_dirs: &BaseDirectories) -> Result<(),
     }
     Ok(())
 }
+pub fn merge_toml_values(a: &mut toml::Value, b: &toml::Value) {
+    match (a, b) {
+        (toml::Value::Table(a), toml::Value::Table(b)) => {
+            for (k, v) in b {
+                merge_toml_values(a.entry(k.clone()).or_insert(v.clone()), v);
+            }
+        }
+        (a, b) => {
+            *a = b.clone();
+        }
+    }
+}
+
+pub fn load_resources(
+    extra_path: Option<&std::path::PathBuf>,
+) -> Result<Option<Resources>, AppError> {
+    let mut merged_value = toml::Value::Table(toml::map::Map::new());
+
+    let xdg_dirs = BaseDirectories::with_prefix("repx");
+    if let Some(global_path) = xdg_dirs.find_config_file(RESOURCES_FILE_NAME) {
+        crate::log_debug!("Loading global resources from: {}", global_path.display());
+        let content = fs::read_to_string(global_path)?;
+        let global_value: toml::Value = toml::from_str(&content).map_err(AppError::Toml)?;
+        merge_toml_values(&mut merged_value, &global_value);
+    }
+
+    let cwd_path = std::env::current_dir()?.join(RESOURCES_FILE_NAME);
+    if cwd_path.exists() {
+        crate::log_debug!("Loading local resources from: {}", cwd_path.display());
+        let content = fs::read_to_string(cwd_path)?;
+        let local_value: toml::Value = toml::from_str(&content).map_err(AppError::Toml)?;
+        merge_toml_values(&mut merged_value, &local_value);
+    }
+
+    if let Some(path) = extra_path {
+        if path.exists() {
+            crate::log_debug!("Loading specified resources from: {}", path.display());
+            let content = fs::read_to_string(path)?;
+            let cli_value: toml::Value = toml::from_str(&content).map_err(AppError::Toml)?;
+            merge_toml_values(&mut merged_value, &cli_value);
+        } else {
+            return Err(AppError::PathIo {
+                path: path.clone(),
+                source: std::io::Error::new(std::io::ErrorKind::NotFound, "File not found"),
+            });
+        }
+    }
+
+    if merged_value.as_table().is_none_or(|t| t.is_empty()) {
+        Ok(None)
+    } else {
+        let final_resources: Resources = merged_value.try_into().map_err(AppError::Toml)?;
+        Ok(Some(final_resources))
+    }
+}
 
 pub fn load_config() -> Result<Config, AppError> {
     let xdg_dirs = BaseDirectories::with_prefix("repx");
