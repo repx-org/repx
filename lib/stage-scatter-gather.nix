@@ -89,7 +89,7 @@ else
     let
       mkSubStage =
         subStageDef: subStageArgs:
-        (import ./stage-helper.nix) { inherit pkgs; } (
+        (import ./stage-simple.nix) { inherit pkgs; } (
           subStageDef // subStageArgs // { inherit paramInputs; }
         );
 
@@ -179,10 +179,9 @@ else
           outputs = gatherDef.outputs or { };
         };
       };
-
       dependencyDerivations = stageDef.dependencyDerivations or [ ];
       depders = pkgs.lib.filter pkgs.lib.isDerivation dependencyDerivations;
-      dependencyManifestJson = builtins.toJSON (map (drv: toString drv) depders);
+      dependencyManifestJson = builtins.toJSON (map toString depders);
 
     in
     pkgs.stdenv.mkDerivation rec {

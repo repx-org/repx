@@ -3,78 +3,92 @@
   gitHash,
   includeImages ? true,
 }:
-runDefinitions: runsAttrSet: jobs:
 let
-  jobsAttrSet = pkgs.lib.listToAttrs (
-    map (
-      jobDrv:
-      let
-        jobNameWithHash = builtins.baseNameOf (builtins.unsafeDiscardStringContext (toString jobDrv));
-        pname = jobDrv.pname;
-        stageType = jobDrv.passthru.repxStageType or "simple";
-
-        addPathToExecutables = pkgs.lib.mapAttrs (
-          exeName: exeDef:
-          exeDef
-          // {
-            path =
-              if stageType == "scatter-gather" then
-                "jobs/${jobNameWithHash}/bin/${pname}-${exeName}"
-              else
-                "jobs/${jobNameWithHash}/bin/${pname}";
-          }
-        );
-
-      in
-      {
-        name = jobNameWithHash;
-        value = {
-          params = jobDrv.passthru.paramInputs or { };
-          name = jobDrv.name or null;
-          stage_type = stageType;
-
-          executables = addPathToExecutables (jobDrv.passthru.executables or { });
-        };
-      }
-    ) jobs
-  );
-
-  runsAttrSetForJson =
+  mkJobMetadata =
+    jobDrv: stageType: pname: jobNameWithHash:
     let
-      findRunDef = runName: pkgs.lib.findFirst (rd: rd.name == runName) null runDefinitions;
+      addPathToExecutables = pkgs.lib.mapAttrs (
+        exeName: exeDef:
+        exeDef
+        // {
+          path =
+            if stageType == "scatter-gather" then
+              "jobs/${jobNameWithHash}/bin/${pname}-${exeName}"
+            else
+              "jobs/${jobNameWithHash}/bin/${pname}";
+        }
+      );
     in
-    pkgs.lib.mapAttrs (
-      runName: jobDerivationsListForRun:
-      let
-        runDef = findRunDef runName;
-        imageDrv = if runDef != null then runDef.image else null;
+    {
+      name = jobNameWithHash;
+      value = {
+        params = jobDrv.passthru.paramInputs or { };
+        name = jobDrv.name or null;
+        stage_type = stageType;
+        executables = addPathToExecutables (jobDrv.passthru.executables or { });
+      };
+    };
 
-        imagePath =
-          if includeImages && imageDrv != null then
-            "image/" + (builtins.baseNameOf (toString imageDrv))
-          else
-            null;
+  mkRunMetadata =
+    {
+      runDef,
+      jobs,
+      resolvedDependencies,
+    }:
+    let
+      runName = runDef.name;
 
-        jobIds = map (drv: builtins.baseNameOf (toString drv)) (
-          pkgs.lib.filter pkgs.lib.isDerivation jobDerivationsListForRun
-        );
-      in
-      {
+      imageDrv = runDef.image;
+      imagePath =
+        if includeImages && imageDrv != null then
+          "image/" + (builtins.baseNameOf (toString imageDrv))
+        else
+          null;
+
+      jobsAttrSet = pkgs.lib.listToAttrs (
+        map (
+          jobDrv:
+          let
+            jobNameWithHash = builtins.baseNameOf (builtins.unsafeDiscardStringContext (toString jobDrv));
+            inherit (jobDrv) pname;
+            stageType = jobDrv.passthru.repxStageType or "simple";
+          in
+          mkJobMetadata jobDrv stageType pname jobNameWithHash
+        ) jobs
+      );
+
+      metadata = {
+        schema_version = "1.0";
+        type = "run";
+        name = runName;
+        inherit gitHash;
+        dependencies = resolvedDependencies;
         image = imagePath;
-        jobs = jobIds;
-      }
-    ) runsAttrSet;
+        jobs = jobsAttrSet;
+      };
+    in
+    pkgs.writeTextFile {
+      name = "metadata-${runName}.json";
+      text = builtins.toJSON metadata;
+    };
 
-  finalMetadata = {
-    schema_version = "1.0";
-    inherit gitHash;
-    runs = runsAttrSetForJson;
-    jobs = jobsAttrSet;
-  };
-
+  mkRootMetadata =
+    {
+      runMetadataPaths,
+    }:
+    let
+      metadata = {
+        schema_version = "1.0";
+        type = "root";
+        inherit gitHash;
+        runs = runMetadataPaths;
+      };
+    in
+    pkgs.writeTextFile {
+      name = "metadata-top.json";
+      text = builtins.toJSON metadata;
+    };
 in
-pkgs.writeTextFile {
-  name = "experiment-metadata-json";
-  destination = "/metadata.json";
-  text = builtins.toJSON finalMetadata;
+{
+  inherit mkRunMetadata mkRootMetadata;
 }

@@ -1,7 +1,7 @@
 { pkgs }:
 stageDef:
 let
-  pname = stageDef.pname;
+  inherit (stageDef) pname;
   version = stageDef.version or "1.1";
   inputsDef = stageDef.inputs or { };
   outputsDef = stageDef.outputs or { };
@@ -11,8 +11,7 @@ let
 
   bashInputs = pkgs.lib.mapAttrs (name: _: "\${inputs[\"${name}\"]}") inputsDef;
   bashOutputs = outputsDef;
-  bashParams = pkgs.lib.mapAttrs (name: value: pkgs.lib.escapeShellArg value) paramsDef;
-
+  bashParams = pkgs.lib.mapAttrs (_: value: pkgs.lib.escapeShellArg value) paramsDef;
   userScript = stageDef.run {
     inputs = bashInputs;
     outputs = bashOutputs;
@@ -37,12 +36,6 @@ let
         done < <(echo "$json_content" | ${pkgs.jq}/bin/jq -r 'to_entries[] | .key + " " + .value')
     fi
 
-    # Dynamically declare bash variables from the inputs JSON
-    ${pkgs.lib.concatMapStringsSep "\n" (name: ''
-      ${name}="''${inputs["${name}"]:-}"
-    '') (pkgs.lib.attrNames inputsDef)}
-
-    # We check json_content first to avoid issues with `set -u` and empty associative arrays.
     if [[ -n "$json_content" ]] && [[ "$json_content" != "{}" ]]; then
       echo "Verifying all stage inputs are ready..." >&2
       TIMEOUT_SECONDS=30
@@ -82,9 +75,8 @@ let
     ${header}
     ${userScript}
   '';
-
   depders = pkgs.lib.filter pkgs.lib.isDerivation dependencyDerivations;
-  dependencyManifestJson = builtins.toJSON (map (drv: toString drv) depders);
+  dependencyManifestJson = builtins.toJSON (map toString depders);
 in
 pkgs.stdenv.mkDerivation rec {
   inherit pname version;
