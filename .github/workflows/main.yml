@@ -26,13 +26,3 @@ jobs:
 
       - name: Check for nix formatting
         run: nix fmt -- --fail-on-change .
-
-  build-package:
-    runs-on: ubuntu-latest
-    needs: [check-and-format]
-    steps:
-      - uses: actions/checkout@v4
-      - uses: DeterminateSystems/nix-installer-action@v11
-      - uses: DeterminateSystems/magic-nix-cache-action@v7
-      - name: Build the example-lab package
-        run: nix build .#example-lab

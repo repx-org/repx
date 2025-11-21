@@ -33,7 +33,8 @@ let
                 dependencyDerivations = [ item ];
                 finalFlatInputs = newInputs;
                 inputMappings = newMappings;
-              }            else if pkgs.lib.isList item then
+              }
+            else if pkgs.lib.isList item then
               let
                 dep = pkgs.lib.head item;
                 strings = pkgs.lib.tail item;
@@ -74,7 +75,7 @@ let
               else
                 {
                   dependencyDerivations = [ dep ];
-finalFlatInputs = {
+                  finalFlatInputs = {
                     ${targetName} = "\${inputs[\"${targetName}\"]}";
                   };
                   inputMappings = [
