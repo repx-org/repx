@@ -78,9 +78,16 @@ impl FromStr for RunId {
 pub struct InputMapping {
     pub job_id: Option<JobId>,
     pub source_output: Option<String>,
+    pub target_input: String,
+
     pub source: Option<String>,
     pub source_key: Option<String>,
-    pub target_input: String,
+
+    #[serde(rename = "type")]
+    pub mapping_type: Option<String>,
+    pub dependency_type: Option<String>,
+    pub source_run: Option<RunId>,
+    pub source_stage_filter: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -100,7 +107,7 @@ fn default_stage_type() -> String {
 pub struct Job {
     pub name: Option<String>,
     pub params: serde_json::Value,
-    #[serde(rename = "path_in_lab", skip)]
+    #[serde(skip)]
     pub path_in_lab: PathBuf,
     #[serde(rename = "stage_type", default = "default_stage_type")]
     pub stage_type: String,
@@ -112,6 +119,8 @@ pub struct Job {
 pub struct Run {
     pub image: Option<PathBuf>,
     pub jobs: Vec<JobId>,
+    #[serde(default)]
+    pub dependencies: HashMap<RunId, String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -129,6 +138,30 @@ impl Lab {
     pub fn is_native(&self) -> bool {
         self.runs.values().all(|run| run.image.is_none())
     }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub(crate) struct RootMetadata {
+    pub runs: Vec<String>,
+    #[serde(rename = "gitHash")]
+    pub git_hash: String,
+    pub schema_version: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub(crate) struct RunMetadataForLoading {
+    pub name: RunId,
+    pub image: Option<PathBuf>,
+    #[serde(default)]
+    pub dependencies: HashMap<RunId, String>,
+    pub jobs: HashMap<JobId, Job>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub(crate) struct LabManifest {
+    #[serde(rename = "labId")]
+    pub lab_id: String,
+    pub metadata: String,
 }
 
 #[cfg(test)]

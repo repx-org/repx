@@ -1,7 +1,7 @@
 use crate::{cli::RunArgs, commands::AppContext};
 use colored::Colorize;
 use indicatif::{ProgressBar, ProgressStyle};
-use repx_client::ClientEvent;
+use repx_client::{ClientEvent, SubmitOptions};
 use repx_core::{
     config::{Config, Resources},
     error::AppError,
@@ -36,19 +36,15 @@ pub fn handle_run(
 
     let target_name_clone = target_name.to_string();
     let scheduler_clone = scheduler.to_string();
-
     let submission_thread = thread::spawn(move || {
-        client.submit_batch_run(
-            run_specs,
-            &target_name_clone,
-            &scheduler_clone,
-            None,
+        let options = SubmitOptions {
+            execution_type: None,
             resources,
             num_jobs,
-            Some(tx),
-        )
+            event_sender: Some(tx),
+        };
+        client.submit_batch_run(run_specs, &target_name_clone, &scheduler_clone, options)
     });
-
     let mut pb: Option<ProgressBar> = None;
 
     for event in rx {

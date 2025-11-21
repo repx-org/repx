@@ -14,7 +14,7 @@ pub enum AppError {
         source: std::io::Error,
     },
 
-    #[error("Failed to parse metadata.json: {0}")]
+    #[error("Failed to parse metadata file: {0}")]
     Json(#[from] serde_json::Error),
 
     #[error("Failed to parse TOML configuration: {0}")]
@@ -83,7 +83,7 @@ pub enum AppError {
     #[error("Lab not found at path '{0}'.\nPlease specify a valid lab directory with --lab, or run this command in a directory containing the default lab path ('./result').")]
     LabNotFound(PathBuf),
 
-    #[error("Could not find 'metadata.json' in '{0}' or its 'revision' subdirectory. Is this a valid lab directory?")]
+    #[error("Could not find required lab metadata file(s) in '{0}'. Expected 'lab_manifest.json' and 'revision/metadata.json'. Is this a valid lab directory?")]
     MetadataNotFound(PathBuf),
 
     #[error("Container runtime not found. Please install 'docker' or 'podman' and ensure it's in your PATH, or specify a runtime in your config file.")]

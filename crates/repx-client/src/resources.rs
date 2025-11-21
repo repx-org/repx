@@ -53,12 +53,11 @@ pub fn resolve_for_job(
     };
 
     for rule in &resources.rules {
-        let target_matches = rule.target.as_deref().map_or(true, |t| t == target_name);
+        let target_matches = rule.target.as_deref().is_none_or(|t| t == target_name);
         let glob_matches = rule
             .job_id_glob
             .as_ref()
-            .map_or(true, |glob| WildMatch::new(glob).matches(&job_id.0));
-
+            .is_none_or(|glob| WildMatch::new(glob).matches(&job_id.0));
         if target_matches && glob_matches {
             merge_rule(&mut current, rule);
         }
@@ -84,15 +83,14 @@ pub fn resolve_worker_resources(
         Some(r) => r,
         None => return worker_directives,
     };
-
     let final_rule = resources.rules.iter().rev().find(|rule| {
-        let target_matches = rule.target.as_deref().map_or(true, |t| t == target_name);
-        let glob_matches = rule.job_id_glob.as_ref().map_or(true, |glob| {
-            WildMatch::new(glob).matches(&orchestrator_job_id.0)
-        });
+        let target_matches = rule.target.as_deref().is_none_or(|t| t == target_name);
+        let glob_matches = rule
+            .job_id_glob
+            .as_ref()
+            .is_none_or(|glob| WildMatch::new(glob).matches(&orchestrator_job_id.0));
         target_matches && glob_matches
     });
-
     if let Some(rule) = final_rule {
         if let Some(worker_rule) = &rule.worker_resources {
             log_debug!(

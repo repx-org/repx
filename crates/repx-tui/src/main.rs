@@ -16,7 +16,7 @@ use crossterm::{
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
 use ratatui::{backend::CrosstermBackend, Terminal};
-use repx_client::{error::ClientError, Client};
+use repx_client::Client;
 use repx_core::{
     config::{self, Resources},
     error::AppError,
@@ -74,8 +74,7 @@ fn load_resources_config() -> Result<Option<Resources>, AppError> {
         let local_value: Value = toml::from_str(&content).map_err(AppError::Toml)?;
         merge_toml_values(&mut merged_value, &local_value);
     }
-
-    if merged_value.as_table().map_or(true, |t| t.is_empty()) {
+    if merged_value.as_table().is_none_or(|t| t.is_empty()) {
         Ok(None)
     } else {
         let final_resources: Resources = merged_value.try_into().map_err(AppError::Toml)?;
@@ -128,11 +127,9 @@ fn main() -> Result<(), AppError> {
         let statuses = status_client_clone
             .get_statuses_for_active_target(&target_name)
             .map(|job_statuses| (target_name, job_statuses));
-
-        if status_tx.send(statuses.map_err(ClientError::from)).is_err() {
+        if status_tx.send(statuses).is_err() {
             break;
         }
-
         thread::sleep(Duration::from_secs(5));
     });
 

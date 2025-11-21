@@ -1,21 +1,16 @@
 {
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.05";
-    rust-overlay = {
-      url = "github:oxalica/rust-overlay";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
     flake-utils.url = "github:numtide/flake-utils";
-    repx-nix.url = "github:repx-org/repx-nix";
+    repx-reference.url = "github:repx-org/repx?dir=examples/reference";
   };
 
   outputs =
     {
       self,
       nixpkgs,
-      rust-overlay,
       flake-utils,
-      repx-nix,
+      repx-reference,
       ...
     }:
     {
@@ -27,7 +22,6 @@
       system:
       let
         overlays = [
-          (import rust-overlay)
           self.overlays.default
         ];
         pkgs = import nixpkgs { inherit system overlays; };
@@ -40,12 +34,13 @@
         packages.default = repx-runner;
 
         devShells.default = pkgs.mkShell {
-          EXAMPLE_REPX_LAB = repx-nix.packages.${system}.example-lab;
+          EXAMPLE_REPX_LAB = repx-reference.packages.${system}.lab;
           buildInputs = with pkgs; [
             openssl
             pkg-config
             rustc
             cargo
+            clippy
           ];
         };
       }

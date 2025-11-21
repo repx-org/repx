@@ -129,9 +129,8 @@ impl Target for LocalTarget {
         fs_err::write(path, content).map_err(AppError::from)?;
         Ok(())
     }
-
     fn sync_directory(&self, local_path: &Path, remote_path: &Path) -> Result<()> {
-        fs_err::create_dir_all(&remote_path).map_err(AppError::from)?;
+        fs_err::create_dir_all(remote_path).map_err(AppError::from)?;
 
         let mut rsync_cmd = Command::new("rsync");
         rsync_cmd
@@ -215,15 +214,21 @@ impl Target for LocalTarget {
         }
         Ok(())
     }
-
     fn deploy_repx_binary(&self) -> Result<PathBuf> {
         let current_exe = std::env::current_exe().map_err(AppError::from)?;
-        let exe_dir = current_exe.parent().ok_or_else(|| {
+        let mut exe_dir = current_exe.parent().ok_or_else(|| {
             AppError::Io(std::io::Error::new(
                 std::io::ErrorKind::NotFound,
                 "Could not find parent directory of the current executable",
             ))
         })?;
+
+        if exe_dir.file_name().and_then(|s| s.to_str()) == Some("deps") {
+            if let Some(parent) = exe_dir.parent() {
+                exe_dir = parent;
+            }
+        }
+
         let runner_exe_path = exe_dir.join("repx-runner");
 
         if !runner_exe_path.exists() {
@@ -235,7 +240,6 @@ impl Target for LocalTarget {
                 ),
             ))));
         }
-
         let bin_dir = self.base_path().join("bin");
         fs_err::create_dir_all(&bin_dir).map_err(AppError::from)?;
 

@@ -9,8 +9,7 @@ pub struct StackedBarChart<'a> {
     pub data: &'a [StatusCounts],
     pub status_colors: &'a BTreeMap<&'static str, Color>,
 }
-
-impl<'a> Widget for StackedBarChart<'a> {
+impl Widget for StackedBarChart<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
         if area.width < 1 || area.height < 1 || self.data.is_empty() {
             return;
@@ -135,10 +134,8 @@ impl<'a> Widget for StackedBarChart<'a> {
                             .set_fg(bottom_color)
                             .set_bg(top_color);
                     }
-                } else {
-                    if bottom_color != Color::Reset {
-                        cell.set_symbol("█").set_fg(bottom_color);
-                    }
+                } else if bottom_color != Color::Reset {
+                    cell.set_symbol("█").set_fg(bottom_color);
                 }
             }
         }

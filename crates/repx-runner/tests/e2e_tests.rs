@@ -50,17 +50,42 @@ fn test_partial_run_by_job_id() {
     let harness = TestHarness::new();
 
     let stage_c_job_id = harness.get_job_id_by_name("stage-C-consumer");
+
+    let c_job_data = &harness.metadata["jobs"][&stage_c_job_id];
+    let inputs = c_job_data["executables"]["main"]["inputs"]
+        .as_array()
+        .expect("Could not find inputs for stage C job");
+
+    let dependency_job_ids: Vec<String> = inputs
+        .iter()
+        .map(|mapping| {
+            mapping["job_id"]
+                .as_str()
+                .expect("job_id not a string")
+                .to_string()
+        })
+        .collect();
+    assert_eq!(
+        dependency_job_ids.len(),
+        2,
+        "Stage C should have exactly 2 dependencies"
+    );
+
     let mut cmd = harness.cmd();
     cmd.arg("run").arg(&stage_c_job_id);
-
     cmd.assert().success();
 
     let outputs_dir = harness.cache_dir.path().join("outputs");
+    let mut jobs_that_should_have_run = dependency_job_ids;
+    jobs_that_should_have_run.push(stage_c_job_id.clone());
 
-    for name in ["stage-A-producer", "stage-B-producer", "stage-C-consumer"] {
-        let job_id = harness.get_job_id_by_name(name);
+    for job_id in &jobs_that_should_have_run {
         let stage_path = outputs_dir.join(job_id);
-        assert!(stage_path.join("repx/SUCCESS").exists());
+        assert!(
+            stage_path.join("repx/SUCCESS").exists(),
+            "Job {} was expected to succeed but did not",
+            stage_path.display()
+        );
     }
 
     let stage_d_job_id = harness.get_job_id_by_name("stage-D-partial-sums");

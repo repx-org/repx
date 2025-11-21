@@ -1,7 +1,6 @@
 use crate::cli::{Cli, Commands};
 use crate::commands::AppContext;
 use clap::Parser;
-use num_cpus;
 use repx_client::Client;
 use repx_core::{
     config::{self, Resources},
@@ -62,8 +61,7 @@ fn load_resources_config(cli_path: Option<&PathBuf>) -> Result<Option<Resources>
             });
         }
     }
-
-    if merged_value.as_table().map_or(true, |t| t.is_empty()) {
+    if merged_value.as_table().is_none_or(|t| t.is_empty()) {
         Ok(None)
     } else {
         let final_resources: Resources = merged_value.try_into().map_err(AppError::Toml)?;

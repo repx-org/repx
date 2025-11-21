@@ -3,7 +3,7 @@ use crate::model::{
     TuiTarget,
 };
 use ratatui::widgets::TableState;
-use repx_client::{error::ClientError, Client};
+use repx_client::{error::ClientError, Client, SubmitOptions};
 use repx_core::{
     config::Resources,
     engine, log_info, log_warn,
@@ -14,7 +14,7 @@ use std::collections::{HashSet, VecDeque};
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 #[derive(Debug, PartialEq, Clone, Copy)]
 pub enum PanelFocus {
@@ -40,7 +40,7 @@ pub enum StatusFilter {
 }
 
 impl StatusFilter {
-    pub fn to_str(&self) -> &'static str {
+    pub fn as_str(&self) -> &'static str {
         match self {
             StatusFilter::All => "all",
             StatusFilter::Failed => "Failed",
@@ -58,15 +58,6 @@ const STATUS_FILTERS: [StatusFilter; 5] = [
     StatusFilter::Pending,
     StatusFilter::Completed,
 ];
-
-type StatusUpdate = Result<
-    (
-        std::collections::BTreeMap<repx_core::model::RunId, repx_core::engine::JobStatus>,
-        std::collections::HashMap<repx_core::model::JobId, repx_core::engine::JobStatus>,
-    ),
-    ClientError,
->;
-
 type TargetPollUpdate = Result<
     (
         String,
@@ -129,6 +120,7 @@ pub struct App {
 }
 
 impl App {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         client: Client,
         theme: Theme,
@@ -190,7 +182,6 @@ impl App {
                     .get(&default_scheduler)
                     .and_then(|execs| execs.iter().position(|&e| e == default_executor))
                     .unwrap_or(0);
-
                 TuiTarget {
                     name: name.clone(),
                     state: if name == &initial_active_target {
@@ -198,7 +189,6 @@ impl App {
                     } else {
                         TargetState::Inactive
                     },
-                    activity: vec![0.0; 100],
                     available_schedulers,
                     available_executors,
                     selected_scheduler_idx,
@@ -397,10 +387,9 @@ impl App {
                 None => ("Unknown", "-".to_string()),
             };
             job.status = status_str.to_string();
-            job.worker = worker.split(':').last().unwrap_or(&worker).to_string();
+            job.worker = worker.split(':').next_back().unwrap_or(&worker).to_string();
         }
     }
-
     pub fn on_tick(&mut self) {
         if !self.is_loading {
             self.update_history_data();
@@ -459,9 +448,8 @@ impl App {
             .and_then(|i| self.display_rows.get(i).map(|row| row.id.clone()));
 
         let mut job_id_to_watch: Option<JobId> = None;
-
         if let Some(row_id) = selected_row_id {
-            if let Some(last_segment) = row_id.split('/').last() {
+            if let Some(last_segment) = row_id.split('/').next_back() {
                 if let Some(job_id_str) = last_segment.strip_prefix("job:") {
                     let job_id = JobId(job_id_str.to_string());
 
@@ -697,7 +685,7 @@ impl App {
             self.next_job();
         } else if !self.display_rows.is_empty() {
             self.table_state.select(Some(0));
-            if let Some(row) = self.display_rows.get(0) {
+            if let Some(row) = self.display_rows.first() {
                 self.selected_jobs.insert(row.id.clone());
             }
             self.next_job();
@@ -725,7 +713,6 @@ impl App {
     pub fn select_all(&mut self) {
         self.selected_jobs = self.display_rows.iter().map(|row| row.id.clone()).collect();
     }
-
     pub fn next_status_filter(&mut self) {
         let current_index = STATUS_FILTERS
             .iter()
@@ -734,7 +721,7 @@ impl App {
         let next_index = (current_index + 1) % STATUS_FILTERS.len();
         log_info!(
             "Status filter changed to: {}",
-            STATUS_FILTERS[next_index].to_str()
+            STATUS_FILTERS[next_index].as_str()
         );
         self.status_filter = STATUS_FILTERS[next_index];
         self.rebuild_display_list();
@@ -752,7 +739,7 @@ impl App {
         };
         log_info!(
             "Status filter changed to: {}",
-            STATUS_FILTERS[prev_index].to_str()
+            STATUS_FILTERS[prev_index].as_str()
         );
         self.status_filter = STATUS_FILTERS[prev_index];
         self.rebuild_display_list();
@@ -762,7 +749,7 @@ impl App {
         log_info!(
             "Applying filter. Text: '{}', Status: '{}', Reversed: {}",
             self.filter_text,
-            self.status_filter.to_str(),
+            self.status_filter.as_str(),
             self.is_reversed
         );
         let previously_selected_id = self
@@ -784,7 +771,7 @@ impl App {
                 .filter(|(_i, job)| {
                     let status_match = match self.status_filter {
                         StatusFilter::All => true,
-                        _ => job.status == self.status_filter.to_str(),
+                        _ => job.status == self.status_filter.as_str(),
                     };
 
                     let text_match = job.id.to_lowercase().contains(&filter)
@@ -799,7 +786,9 @@ impl App {
             for job_idx in filtered_jobs {
                 let job = &self.jobs[job_idx];
                 self.display_rows.push(TuiDisplayRow {
-                    item: TuiRowItem::Job { job: job.clone() },
+                    item: TuiRowItem::Job {
+                        job: Box::new(job.clone()),
+                    },
                     id: format!("job:{}", job.full_id),
                     depth: 0,
                     parent_prefix: "".to_string(),
@@ -833,59 +822,58 @@ impl App {
 
         self.on_selection_change();
     }
-
     fn build_tree_view(&mut self, filter: &str) {
         let mut new_display_rows = Vec::new();
 
-        let visible_job_ids: HashSet<JobId>;
-        if filter.is_empty() && self.status_filter == StatusFilter::All {
-            visible_job_ids = self.lab.jobs.keys().cloned().collect();
-        } else {
-            let directly_matching_job_ids: HashSet<JobId> = self
-                .jobs
-                .iter()
-                .filter(|job| {
-                    let status_match = match self.status_filter {
-                        StatusFilter::All => true,
-                        _ => job.status == self.status_filter.to_str(),
-                    };
-                    let text_match = filter.is_empty()
-                        || job.id.to_lowercase().contains(filter)
-                        || job.name.to_lowercase().contains(filter);
-                    status_match && text_match
-                })
-                .map(|job| job.full_id.clone())
-                .collect();
+        let visible_job_ids: HashSet<JobId> =
+            if filter.is_empty() && self.status_filter == StatusFilter::All {
+                self.lab.jobs.keys().cloned().collect()
+            } else {
+                let directly_matching_job_ids: HashSet<JobId> = self
+                    .jobs
+                    .iter()
+                    .filter(|job| {
+                        let status_match = match self.status_filter {
+                            StatusFilter::All => true,
+                            _ => job.status == self.status_filter.as_str(),
+                        };
+                        let text_match = filter.is_empty()
+                            || job.id.to_lowercase().contains(filter)
+                            || job.name.to_lowercase().contains(filter);
+                        status_match && text_match
+                    })
+                    .map(|job| job.full_id.clone())
+                    .collect();
 
-            let mut dependents_map: std::collections::HashMap<JobId, Vec<JobId>> =
-                std::collections::HashMap::new();
-            for (job_id, job) in &self.lab.jobs {
-                for dep_id in job
-                    .executables
-                    .values()
-                    .flat_map(|exe| exe.inputs.iter())
-                    .filter_map(|mapping| mapping.job_id.as_ref())
-                {
-                    dependents_map
-                        .entry(dep_id.clone())
-                        .or_default()
-                        .push(job_id.clone());
+                let mut dependents_map: std::collections::HashMap<JobId, Vec<JobId>> =
+                    std::collections::HashMap::new();
+                for (job_id, job) in &self.lab.jobs {
+                    for dep_id in job
+                        .executables
+                        .values()
+                        .flat_map(|exe| exe.inputs.iter())
+                        .filter_map(|mapping| mapping.job_id.as_ref())
+                    {
+                        dependents_map
+                            .entry(dep_id.clone())
+                            .or_default()
+                            .push(job_id.clone());
+                    }
                 }
-            }
-            let mut calculated_visible_ids = directly_matching_job_ids.clone();
-            let mut queue: std::collections::VecDeque<_> =
-                directly_matching_job_ids.iter().cloned().collect();
-            while let Some(job_id) = queue.pop_front() {
-                if let Some(dependents) = dependents_map.get(&job_id) {
-                    for dependent_id in dependents {
-                        if calculated_visible_ids.insert(dependent_id.clone()) {
-                            queue.push_back(dependent_id.clone());
+                let mut calculated_visible_ids = directly_matching_job_ids.clone();
+                let mut queue: std::collections::VecDeque<_> =
+                    directly_matching_job_ids.iter().cloned().collect();
+                while let Some(job_id) = queue.pop_front() {
+                    if let Some(dependents) = dependents_map.get(&job_id) {
+                        for dependent_id in dependents {
+                            if calculated_visible_ids.insert(dependent_id.clone()) {
+                                queue.push_back(dependent_id.clone());
+                            }
                         }
                     }
                 }
-            }
-            visible_job_ids = calculated_visible_ids;
-        }
+                calculated_visible_ids
+            };
 
         let mut run_ids: Vec<_> = self.lab.runs.keys().cloned().collect();
         run_ids.sort();
@@ -903,10 +891,9 @@ impl App {
             })
             .cloned()
             .collect();
-
         let num_runs = visible_runs.len();
         for (i, run_id) in visible_runs.iter().enumerate() {
-            let run = self.lab.runs.get(&run_id).unwrap();
+            let run = self.lab.runs.get(run_id).unwrap();
             let run_unique_id = format!("run:{}", run_id);
             new_display_rows.push(TuiDisplayRow {
                 item: TuiRowItem::Run { id: run_id.clone() },
@@ -932,11 +919,10 @@ impl App {
                         }
                     }
                 }
-
                 let mut visible_top_level_jobs: Vec<_> = run_jobs_set
                     .iter()
                     .filter(|j| !dep_ids_in_run.contains(*j))
-                    .map(|j| *j)
+                    .copied()
                     .filter(|job_id| visible_job_ids.contains(job_id))
                     .cloned()
                     .collect();
@@ -964,7 +950,7 @@ impl App {
         }
         self.display_rows = new_display_rows;
     }
-
+    #[allow(clippy::too_many_arguments)]
     fn add_job_and_deps_to_tree_recursive(
         display_rows: &mut Vec<TuiDisplayRow>,
         lab: &Lab,
@@ -979,10 +965,9 @@ impl App {
     ) {
         let job_instance_id = format!("{}/job:{}", parent_path, job_id);
         let tui_job = all_tui_jobs.iter().find(|j| &j.full_id == job_id).unwrap();
-
         display_rows.push(TuiDisplayRow {
             item: TuiRowItem::Job {
-                job: tui_job.clone(),
+                job: Box::new(tui_job.clone()),
             },
             id: job_instance_id.clone(),
             depth,
@@ -1033,7 +1018,7 @@ impl App {
         let get_id = |path_id: &str| -> Option<String> {
             path_id
                 .split('/')
-                .last()
+                .next_back()
                 .and_then(|segment| segment.split_once(':'))
                 .map(|(_, id)| id.to_string())
         };
@@ -1069,14 +1054,12 @@ impl App {
             let run_id = repx_core::model::RunId(id_str.to_string());
             if let Some(run) = self.lab.runs.get(&run_id) {
                 selected_jobs_set.extend(run.jobs.iter().cloned());
-            } else {
-                if let Ok(resolved_ids) =
-                    repx_core::resolver::resolve_all_final_job_ids(&self.lab, &run_id)
-                {
-                    for job_id in resolved_ids {
-                        let dep_graph = engine::build_dependency_graph(&self.lab, job_id);
-                        selected_jobs_set.extend(dep_graph);
-                    }
+            } else if let Ok(resolved_ids) =
+                repx_core::resolver::resolve_all_final_job_ids(&self.lab, &run_id)
+            {
+                for job_id in resolved_ids {
+                    let dep_graph = engine::build_dependency_graph(&self.lab, job_id);
+                    selected_jobs_set.extend(dep_graph);
                 }
             }
         }
@@ -1090,15 +1073,12 @@ impl App {
         let all_dependencies_in_selection: HashSet<JobId> = selected_jobs_set
             .iter()
             .flat_map(|job_id| {
-                self.lab.jobs.get(job_id).map_or_else(
-                    || Vec::new(),
-                    |j| {
-                        j.executables
-                            .values()
-                            .flat_map(|e| e.inputs.clone())
-                            .collect()
-                    },
-                )
+                self.lab.jobs.get(job_id).map_or_else(Vec::new, |j| {
+                    j.executables
+                        .values()
+                        .flat_map(|e| e.inputs.clone())
+                        .collect()
+                })
             })
             .filter_map(|mapping| mapping.job_id)
             .collect();
@@ -1154,24 +1134,22 @@ impl App {
             all_jobs_to_submit.len(),
             ids_to_run.len()
         );
-
         for job in self.jobs.iter_mut() {
-            if all_jobs_to_submit.contains(&job.full_id) {
-                if !matches!(job.status.as_str(), "Succeeded" | "Running" | "Queued") {
-                    job.status = "Submitting...".to_string();
-                }
+            if all_jobs_to_submit.contains(&job.full_id)
+                && !matches!(job.status.as_str(), "Succeeded" | "Running" | "Queued")
+            {
+                job.status = "Submitting...".to_string();
             }
         }
-
         let target_name = self.active_target.lock().unwrap().clone();
         let active_tui_target = self.targets.iter().find(|t| t.name == target_name).unwrap();
         let scheduler = active_tui_target
             .get_selected_scheduler()
-            .to_str()
+            .as_str()
             .to_string();
         let execution_type = active_tui_target
             .get_selected_executor()
-            .to_str()
+            .as_str()
             .to_string();
 
         let config = self.client.config();
@@ -1191,7 +1169,6 @@ impl App {
         let submission_tx_clone = self.submission_tx.clone();
         let resources_clone = self.resources.clone();
         let run_specs_to_submit = ids_to_run;
-
         thread::spawn(move || {
             log_info!(
                 "Submitting batch run for final jobs {:?} to target '{}'",
@@ -1199,14 +1176,18 @@ impl App {
                 &target_name
             );
 
+            let options = SubmitOptions {
+                execution_type: Some(execution_type),
+                resources: resources_clone,
+                num_jobs,
+                event_sender: None,
+            };
+
             match client_clone.submit_batch_run(
                 run_specs_to_submit.clone(),
                 &target_name,
                 &scheduler,
-                Some(&execution_type),
-                resources_clone,
-                num_jobs,
-                None,
+                options,
             ) {
                 Ok(msg) => {
                     log_info!("Batch submission successful: {}", msg);

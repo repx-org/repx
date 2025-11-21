@@ -20,16 +20,14 @@ pub enum TuiScheduler {
     Local,
     Slurm,
 }
-
 impl TuiScheduler {
-    pub fn to_str(&self) -> &'static str {
+    pub fn as_str(&self) -> &'static str {
         match self {
             TuiScheduler::Local => "local",
             TuiScheduler::Slurm => "slurm",
         }
     }
 }
-
 impl FromStr for TuiScheduler {
     type Err = ();
     fn from_str(s: &str) -> Result<Self, Self::Err> {
@@ -48,9 +46,8 @@ pub enum TuiExecutor {
     Docker,
     Bwrap,
 }
-
 impl TuiExecutor {
-    pub fn to_str(&self) -> &'static str {
+    pub fn as_str(&self) -> &'static str {
         match self {
             TuiExecutor::Native => "native",
             TuiExecutor::Podman => "podman",
@@ -59,7 +56,6 @@ impl TuiExecutor {
         }
     }
 }
-
 impl FromStr for TuiExecutor {
     type Err = ();
     fn from_str(s: &str) -> Result<Self, Self::Err> {
@@ -86,13 +82,11 @@ pub struct TuiJob {
     pub context_dependents: String,
     pub logs: Vec<String>,
 }
-
 #[derive(Clone, Debug)]
 pub enum TuiRowItem {
     Run { id: repx_core::model::RunId },
-    Job { job: TuiJob },
+    Job { job: Box<TuiJob> },
 }
-
 #[derive(Clone, Debug)]
 pub struct TuiDisplayRow {
     pub item: TuiRowItem,
@@ -102,18 +96,17 @@ pub struct TuiDisplayRow {
     pub parent_prefix: String,
     pub is_last_child: bool,
 }
-
 #[derive(Clone, Debug, PartialEq)]
 pub enum TargetState {
     Active,
     Inactive,
+    #[allow(dead_code)]
     Down,
 }
 
 pub struct TuiTarget {
     pub name: String,
     pub state: TargetState,
-    pub activity: Vec<f64>,
     pub available_schedulers: Vec<TuiScheduler>,
     pub available_executors: HashMap<TuiScheduler, Vec<TuiExecutor>>,
     pub selected_scheduler_idx: usize,

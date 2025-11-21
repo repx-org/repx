@@ -90,17 +90,19 @@ local_concurrency = 2
         let jobs = self.metadata["jobs"]
             .as_object()
             .expect("metadata.json has no 'jobs' object");
+
         let (job_id, _) = jobs
             .iter()
-            .find(|(_id, job_data)| {
-                job_data["name"]
-                    .as_str()
-                    .unwrap_or("")
-                    .contains(name_substring)
+            .find(|(id, job_data)| {
+                id.contains(name_substring)
+                    || job_data["name"]
+                        .as_str()
+                        .unwrap_or("")
+                        .contains(name_substring)
             })
             .unwrap_or_else(|| {
                 panic!(
-                    "Could not find job with name containing '{}'",
+                    "Could not find job with name/id containing '{}'",
                     name_substring
                 )
             });
@@ -117,23 +119,64 @@ local_concurrency = 2
     }
 
     fn load_metadata(lab_path: &Path) -> Value {
-        let revision_dir = lab_path.join("revision");
-        let entry = revision_dir
-            .read_dir()
-            .unwrap_or_else(|e| {
-                panic!(
-                    "Could not read revision dir at '{}': {}",
-                    revision_dir.display(),
-                    e
-                )
-            })
-            .next()
-            .expect("Revision dir is empty")
-            .unwrap();
+        let lab_subdir = lab_path.join("lab");
+        let entries = fs::read_dir(&lab_subdir).expect("Could not read lab/ subdirectory");
 
-        let metadata_path = entry.path().join("metadata.json");
-        let content = fs::read_to_string(&metadata_path).expect("Could not read metadata.json");
-        serde_json::from_str(&content).expect("Could not parse metadata.json")
+        let manifest_path = entries
+            .filter_map(|e| e.ok())
+            .find(|e| {
+                e.file_name()
+                    .to_string_lossy()
+                    .ends_with("lab-metadata.json")
+            })
+            .map(|e| e.path())
+            .expect("Could not find *-lab-metadata.json in lab/");
+
+        let manifest_content = fs::read_to_string(&manifest_path).expect("Failed to read manifest");
+        let manifest: Value =
+            serde_json::from_str(&manifest_content).expect("Failed to parse manifest");
+
+        let root_meta_rel_path = manifest["metadata"]
+            .as_str()
+            .expect("Manifest missing metadata path");
+        let root_meta_path = lab_path.join(root_meta_rel_path);
+
+        let root_content = fs::read_to_string(&root_meta_path).unwrap_or_else(|e| {
+            panic!(
+                "Could not read root metadata at '{}': {}",
+                root_meta_path.display(),
+                e
+            )
+        });
+        let root_meta: Value =
+            serde_json::from_str(&root_content).expect("Could not parse root metadata");
+
+        let mut all_jobs = serde_json::Map::new();
+        let mut combined_metadata = root_meta
+            .as_object()
+            .expect("Root metadata is not a JSON object")
+            .clone();
+
+        if let Some(run_paths) = root_meta.get("runs").and_then(|r| r.as_array()) {
+            for run_path_val in run_paths {
+                if let Some(run_rel_path) = run_path_val.as_str() {
+                    let run_meta_path = lab_path.join(run_rel_path);
+                    let run_content =
+                        fs::read_to_string(&run_meta_path).expect("Could not read run metadata");
+                    let run_meta: Value =
+                        serde_json::from_str(&run_content).expect("Could not parse run metadata");
+
+                    if let Some(jobs) = run_meta.get("jobs").and_then(|j| j.as_object()) {
+                        all_jobs.extend(jobs.clone());
+                    }
+                }
+            }
+        }
+
+        combined_metadata.remove("runs");
+        combined_metadata.insert("jobs".to_string(), Value::Object(all_jobs));
+
+        Value::Object(combined_metadata)
     }
 
     pub fn get_staged_executable_path(&self, job_id: &str) -> PathBuf {

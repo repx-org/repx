@@ -26,21 +26,19 @@ fn interpolate_color(c1: Color, c2: Color, t: f64) -> Color {
         let g = ((g1 as f64) * (1.0 - t) + (g2 as f64) * t).round() as u8;
         let b = ((b1 as f64) * (1.0 - t) + (b2 as f64) * t).round() as u8;
         Color::Rgb(r, g, b)
+    } else if t < 0.5 {
+        c1
     } else {
-        if t < 0.5 {
-            c1
-        } else {
-            c2
-        }
+        c2
     }
 }
 
 #[derive(Clone, Copy)]
 pub enum GraphDirection {
     Upwards,
+    #[allow(dead_code)]
     Downwards,
 }
-
 pub struct BrailleGraph<'a> {
     pub data: &'a [f64],
     pub max_value: f64,
@@ -48,8 +46,7 @@ pub struct BrailleGraph<'a> {
     pub high_color: Color,
     pub direction: GraphDirection,
 }
-
-impl<'a> Widget for BrailleGraph<'a> {
+impl Widget for BrailleGraph<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
         if area.width < 1 || area.height == 0 || self.max_value == 0.0 || self.data.is_empty() {
             return;
@@ -82,11 +79,9 @@ impl<'a> Widget for BrailleGraph<'a> {
 
         const DOTS_PER_ROW: usize = 4;
         let total_dots_height = area.height as usize * DOTS_PER_ROW;
-
         for (chunk, column_x) in resampled_data.chunks(2).zip(area.left()..area.right()) {
-            let left_value = chunk.get(0).copied().unwrap_or(0.0);
+            let left_value = chunk.first().copied().unwrap_or(0.0);
             let right_value = chunk.get(1).copied().unwrap_or(0.0);
-
             let left_normalized = (left_value / self.max_value).clamp(0.0, 1.0);
             let right_normalized = (right_value / self.max_value).clamp(0.0, 1.0);
 

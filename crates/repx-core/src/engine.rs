@@ -12,8 +12,7 @@ pub enum JobStatus {
     Running,
     Blocked { missing_deps: HashSet<JobId> },
 }
-
-fn get_all_dependencies<'a>(job: &'a Job) -> impl Iterator<Item = &'a JobId> {
+fn get_all_dependencies(job: &Job) -> impl Iterator<Item = &JobId> {
     job.executables
         .values()
         .flat_map(|exe| exe.inputs.iter())

@@ -101,16 +101,13 @@ pub fn merge_stores(
             processed_entries: i as u64,
             current_path: relative_path.to_path_buf(),
         });
-
         if path.is_dir() {
             fs::create_dir_all(&dest_path)?;
-        } else {
-            if !dest_path.exists() {
-                if let Some(p) = dest_path.parent() {
-                    fs::create_dir_all(p)?;
-                }
-                fs::copy(path, &dest_path)?;
+        } else if !dest_path.exists() {
+            if let Some(p) = dest_path.parent() {
+                fs::create_dir_all(p)?;
             }
+            fs::copy(path, &dest_path)?;
         }
     }
 

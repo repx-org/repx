@@ -167,9 +167,8 @@ impl Executor {
 
         Ok(cmd)
     }
-
     async fn ensure_image_loaded(&self, runtime: &str, image_tag: &str) -> Result<()> {
-        let image_hash = image_tag.split(':').last().unwrap_or(image_tag);
+        let image_hash = image_tag.split(':').next_back().unwrap_or(image_tag);
         let lock_path = std::env::temp_dir().join(format!("repx-load-{}.lock", image_hash));
         let lock_file = std::fs::File::create(&lock_path)?;
         let _lock = Flock::lock(lock_file, FlockArg::LockExclusive).map_err(|(_file, e)| {

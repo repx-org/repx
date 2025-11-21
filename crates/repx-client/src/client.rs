@@ -62,9 +62,15 @@ pub enum ClientEvent {
         num_jobs: usize,
     },
 }
-
 type SlurmIdMap = Arc<Mutex<HashMap<JobId, (String, u32)>>>;
 
+#[derive(Default)]
+pub struct SubmitOptions {
+    pub execution_type: Option<String>,
+    pub resources: Option<Resources>,
+    pub num_jobs: Option<usize>,
+    pub event_sender: Option<Sender<ClientEvent>>,
+}
 #[derive(Clone)]
 pub struct Client {
     config: Arc<Config>,
@@ -73,10 +79,9 @@ pub struct Client {
     targets: Arc<HashMap<String, Arc<dyn Target>>>,
     slurm_map: SlurmIdMap,
 }
-
 fn generate_repx_invoker_script(
     job_id: &JobId,
-    job_root_on_target: &PathBuf,
+    job_root_on_target: &Path,
     directives: &SbatchDirectives,
     repx_command_to_wrap: String,
 ) -> Result<String> {
@@ -290,26 +295,14 @@ impl Client {
 
         Ok(job_statuses)
     }
-
     pub fn submit_run(
         &self,
         run_spec: String,
         target_name: &str,
         scheduler: &str,
-        execution_type: Option<&str>,
-        resources: Option<Resources>,
-        num_jobs: Option<usize>,
-        event_sender: Option<Sender<ClientEvent>>,
+        options: SubmitOptions,
     ) -> Result<String> {
-        self.submit_batch_run(
-            vec![run_spec],
-            target_name,
-            scheduler,
-            execution_type,
-            resources,
-            num_jobs,
-            event_sender,
-        )
+        self.submit_batch_run(vec![run_spec], target_name, scheduler, options)
     }
 
     pub fn submit_batch_run(
@@ -317,17 +310,13 @@ impl Client {
         run_specs: Vec<String>,
         target_name: &str,
         scheduler: &str,
-        execution_type: Option<&str>,
-        resources: Option<Resources>,
-        num_jobs: Option<usize>,
-        event_sender: Option<Sender<ClientEvent>>,
+        options: SubmitOptions,
     ) -> Result<String> {
         let send = |event: ClientEvent| {
-            if let Some(sender) = &event_sender {
+            if let Some(sender) = &options.event_sender {
                 let _ = sender.send(event);
             }
         };
-
         let target = self
             .targets
             .get(target_name)
@@ -401,9 +390,23 @@ impl Client {
 
         for (job_id, job) in &jobs_to_run {
             if job.stage_type == "scatter-gather" {
-                Self::generate_and_write_inputs_json(&self.lab, job, job_id, &target, "scatter")?;
+                Self::generate_and_write_inputs_json(
+                    &self.lab,
+                    &self.lab_path,
+                    job,
+                    job_id,
+                    target.clone(),
+                    "scatter",
+                )?;
             } else {
-                Self::generate_and_write_inputs_json(&self.lab, job, job_id, &target, "main")?;
+                Self::generate_and_write_inputs_json(
+                    &self.lab,
+                    &self.lab_path,
+                    job,
+                    job_id,
+                    target.clone(),
+                    "main",
+                )?;
             }
         }
 
@@ -417,30 +420,23 @@ impl Client {
         send(ClientEvent::SyncingArtifacts { total: 1 });
         target.sync_lab_root(&self.lab_path)?;
         send(ClientEvent::SyncingFinished);
-
         match scheduler {
             "slurm" => self.submit_slurm_batch_run(
                 jobs_to_submit,
                 target.clone(),
                 target_name,
                 &remote_repx_binary_path,
-                execution_type,
-                resources,
+                &options,
                 send,
             ),
-            "local" => {
-                let num_jobs = num_jobs.unwrap_or_else(num_cpus::get);
-                self.submit_local_batch_run(
-                    jobs_to_run,
-                    target.clone(),
-                    target_name,
-                    &remote_repx_binary_path,
-                    execution_type,
-                    resources,
-                    num_jobs,
-                    send,
-                )
-            }
+            "local" => self.submit_local_batch_run(
+                jobs_to_run,
+                target.clone(),
+                target_name,
+                &remote_repx_binary_path,
+                &options,
+                send,
+            ),
             _ => Err(ClientError::Core(AppError::ConfigurationError(format!(
                 "Unsupported scheduler: '{}'. Must be 'slurm' or 'local'.",
                 scheduler
@@ -454,8 +450,7 @@ impl Client {
         target: Arc<dyn Target>,
         target_name: &str,
         remote_repx_binary_path: &Path,
-        execution_type_override: Option<&str>,
-        resources: Option<Resources>,
+        options: &SubmitOptions,
         send: impl Fn(ClientEvent),
     ) -> Result<String> {
         let remote_repx_command = remote_repx_binary_path.to_string_lossy();
@@ -476,8 +471,7 @@ impl Client {
 
         for (job_id, job) in &jobs_to_submit {
             let job_root_on_target = target.base_path().join("outputs").join(&job_id.0);
-
-            let execution_type = execution_type_override.unwrap_or_else(|| {
+            let execution_type = options.execution_type.as_deref().unwrap_or_else(|| {
                 let scheduler_config = target.config().slurm.as_ref().unwrap();
                 target
                     .config()
@@ -540,10 +534,10 @@ impl Client {
                     gather_exe_path.display(),
                     worker_outputs_json
                 );
-
-                let main_directives = resources::resolve_for_job(job_id, target_name, &resources);
+                let main_directives =
+                    resources::resolve_for_job(job_id, target_name, &options.resources);
                 let worker_directives =
-                    resources::resolve_worker_resources(job_id, target_name, &resources);
+                    resources::resolve_worker_resources(job_id, target_name, &options.resources);
                 let worker_opts_str = worker_directives.to_shell_string();
 
                 let command = format!(
@@ -565,7 +559,8 @@ impl Client {
                     repx_args,
                     executable_path_on_target.display()
                 );
-                let directives = resources::resolve_for_job(job_id, target_name, &resources);
+                let directives =
+                    resources::resolve_for_job(job_id, target_name, &options.resources);
                 let command = format!("{} internal-execute {}", remote_repx_command, repx_args);
                 (command, directives)
             };
@@ -648,16 +643,13 @@ impl Client {
             submitted_count
         ))
     }
-
     fn submit_local_batch_run(
         &self,
         jobs_in_batch: HashMap<JobId, &Job>,
         target: Arc<dyn Target>,
         _target_name: &str,
         repx_binary_path: &Path,
-        execution_type_override: Option<&str>,
-        _resources: Option<Resources>,
-        num_jobs: usize,
+        options: &SubmitOptions,
         send: impl Fn(ClientEvent),
     ) -> Result<String> {
         send(ClientEvent::SubmittingJobs {
@@ -723,28 +715,29 @@ impl Client {
             let mut jobs_to_spawn = current_wave.into_iter();
             let mut active_handles: Vec<(JobId, Child)> = vec![];
             let mut finished_jobs_in_wave = 0;
-
+            let concurrency = options.num_jobs.unwrap_or_else(num_cpus::get);
             while finished_jobs_in_wave < wave_job_count {
-                while active_handles.len() < num_jobs {
+                while active_handles.len() < concurrency {
                     if let Some(job_id) = jobs_to_spawn.next() {
                         jobs_left.remove(&job_id);
                         let job = jobs_in_batch.get(&job_id).unwrap();
 
                         let stage_type = &job.stage_type;
-                        let execution_type = execution_type_override.unwrap_or_else(|| {
-                            let scheduler_config = target.config().local.as_ref().unwrap();
-                            target
-                                .config()
-                                .default_execution_type
-                                .as_deref()
-                                .filter(|&et| {
-                                    scheduler_config.execution_types.contains(&et.to_string())
-                                })
-                                .or_else(|| {
-                                    scheduler_config.execution_types.first().map(|s| s.as_str())
-                                })
-                                .unwrap_or("native")
-                        });
+                        let execution_type =
+                            options.execution_type.as_deref().unwrap_or_else(|| {
+                                let scheduler_config = target.config().local.as_ref().unwrap();
+                                target
+                                    .config()
+                                    .default_execution_type
+                                    .as_deref()
+                                    .filter(|&et| {
+                                        scheduler_config.execution_types.contains(&et.to_string())
+                                    })
+                                    .or_else(|| {
+                                        scheduler_config.execution_types.first().map(|s| s.as_str())
+                                    })
+                                    .unwrap_or("native")
+                            });
                         let image_path_opt = self
                             .lab
                             .runs
@@ -863,12 +856,12 @@ impl Client {
             submitted_count
         ))
     }
-
     fn generate_and_write_inputs_json(
         lab: &Lab,
+        local_lab_path: &Path,
         job: &Job,
         job_id: &JobId,
-        target: &Arc<dyn Target>,
+        target: Arc<dyn Target>,
         executable_name: &str,
     ) -> Result<()> {
         let mut inputs_map = serde_json::Map::new();
@@ -930,6 +923,43 @@ impl Client {
                     mapping.target_input.clone(),
                     serde_json::Value::String(final_path),
                 );
+            } else if mapping.mapping_type.as_deref() == Some("global")
+                || mapping.target_input == "store__base"
+            {
+                let store_path = target.base_path().to_string_lossy().to_string();
+                inputs_map.insert(
+                    mapping.target_input.clone(),
+                    serde_json::Value::String(store_path),
+                );
+            } else if let Some(run_id) = &mapping.source_run {
+                let revision_dir = local_lab_path.join("revision");
+                let suffix = format!("metadata-{}.json", run_id.0);
+
+                let mut found_filename = None;
+
+                if let Ok(entries) = fs_err::read_dir(&revision_dir) {
+                    for entry in entries.flatten() {
+                        if let Some(name) = entry.file_name().to_str() {
+                            if name.ends_with(&suffix) {
+                                found_filename = Some(name.to_string());
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                if let Some(filename) = found_filename {
+                    let remote_path = target.artifacts_base_path().join("revision").join(filename);
+                    inputs_map.insert(
+                        mapping.target_input.clone(),
+                        serde_json::Value::String(remote_path.to_string_lossy().to_string()),
+                    );
+                } else {
+                    log_info!(
+                        "Warning: Could not resolve metadata file for run '{}' in revision directory. Input '{}' will be missing.",
+                        run_id, mapping.target_input
+                    );
+                }
             }
         }
 

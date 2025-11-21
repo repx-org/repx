@@ -36,6 +36,22 @@
     },
     "nixpkgs_2": {
       "locked": {
+        "lastModified": 1757545623,
+        "narHash": "sha256-mCxPABZ6jRjUQx3bPP4vjA68ETbPLNz9V2pk9tO7pRQ=",
+        "owner": "NixOS",
+        "repo": "nixpkgs",
+        "rev": "8cd5ce828d5d1d16feff37340171a98fc3bf6526",
+        "type": "github"
+      },
+      "original": {
+        "owner": "NixOS",
+        "ref": "nixos-25.05",
+        "repo": "nixpkgs",
+        "type": "github"
+      }
+    },
+    "nixpkgs_3": {
+      "locked": {
         "lastModified": 1747953325,
         "narHash": "sha256-y2ZtlIlNTuVJUZCqzZAhIw5rrKP4DOSklev6c8PyCkQ=",
         "owner": "NixOS",
@@ -52,19 +68,41 @@
     },
     "repx-nix": {
       "inputs": {
-        "nixpkgs": "nixpkgs_2"
+        "nixpkgs": "nixpkgs_3"
       },
       "locked": {
-        "lastModified": 1763284295,
-        "narHash": "sha256-du5uavs2Q+H5hDHtzO64gaqaPow0dDl/ftCj3GGGOMU=",
+        "lastModified": 1763742583,
+        "narHash": "sha256-kw18dAXyjT2pwEbPzOnhQ1OW1DUcLoer6VUF4c+aKiQ=",
         "owner": "repx-org",
         "repo": "repx-nix",
-        "rev": "70232ee2afbe753dcae9dad445ea8dfe8f75356f",
+        "rev": "4911e5f5511aec30c4444c39c6f7beb581df1eaf",
         "type": "github"
       },
       "original": {
         "owner": "repx-org",
+        "ref": "main",
         "repo": "repx-nix",
+        "type": "github"
+      }
+    },
+    "repx-reference": {
+      "inputs": {
+        "nixpkgs": "nixpkgs_2",
+        "repx-nix": "repx-nix"
+      },
+      "locked": {
+        "dir": "examples/reference",
+        "lastModified": 1763745795,
+        "narHash": "sha256-wBgUxzGD/Vv8Fz7TCjDDm1qvLwwUNkoasK37r6jCHYM=",
+        "owner": "repx-org",
+        "repo": "repx",
+        "rev": "b8293cb8b844919e73b1cf43f91e31aca1f33add",
+        "type": "github"
+      },
+      "original": {
+        "dir": "examples/reference",
+        "owner": "repx-org",
+        "repo": "repx",
         "type": "github"
       }
     },
@@ -72,28 +110,7 @@
       "inputs": {
         "flake-utils": "flake-utils",
         "nixpkgs": "nixpkgs",
-        "repx-nix": "repx-nix",
-        "rust-overlay": "rust-overlay"
-      }
-    },
-    "rust-overlay": {
-      "inputs": {
-        "nixpkgs": [
-          "nixpkgs"
-        ]
-      },
-      "locked": {
-        "lastModified": 1760841560,
-        "narHash": "sha256-NVOl5Lk1QD+i4I4My4f85yjXBinu+OXOUWskPNtzKHs=",
-        "owner": "oxalica",
-        "repo": "rust-overlay",
-        "rev": "a9121dc4ccd63e0309426b91bd7a494189516274",
-        "type": "github"
-      },
-      "original": {
-        "owner": "oxalica",
-        "repo": "rust-overlay",
-        "type": "github"
+        "repx-reference": "repx-reference"
       }
     },
     "systems": {

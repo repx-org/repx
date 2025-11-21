@@ -21,7 +21,7 @@ fn rgb_to_hsl(rgb: Rgb) -> Hsl {
     let min = r.min(g).min(b);
 
     let mut h = 0.0;
-    let mut s;
+    let s;
     let l = (max + min) / 2.0;
 
     if max == min {

@@ -206,7 +206,7 @@ async fn async_handle_scatter_gather(args: InternalScatterGatherArgs) -> Result<
                 worker_out_dir.to_string_lossy().to_string(),
                 worker_inputs_json_path.to_string_lossy().to_string(),
             ];
-            let mut worker_cmd = worker_executor
+            let worker_cmd = worker_executor
                 .build_command_for_script(&worker_exe, &worker_args)
                 .await
                 .map_err(|e| AppError::ExecutionFailed {
@@ -214,7 +214,7 @@ async fn async_handle_scatter_gather(args: InternalScatterGatherArgs) -> Result<
                     log_path: None,
                     log_summary: e.to_string(),
                 })?;
-            let command_string = command_to_shell_string(&mut worker_cmd);
+            let command_string = command_to_shell_string(&worker_cmd);
 
             let mut sbatch_cmd = Command::new("sbatch");
             sbatch_cmd

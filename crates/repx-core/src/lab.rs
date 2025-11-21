@@ -1,31 +1,47 @@
 use crate::log_debug;
-use crate::{error::AppError, model::Lab};
+use crate::{
+    error::AppError,
+    model::{Lab, LabManifest, RootMetadata, Run, RunMetadataForLoading},
+};
+use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-pub fn find_metadata_path(lab_path: &Path) -> Option<PathBuf> {
-    let direct_path = lab_path.join("metadata.json");
-    if direct_path.is_file() {
-        return Some(direct_path);
+fn find_manifest_path(lab_path: &Path) -> Option<PathBuf> {
+    let lab_subdir = lab_path.join("lab");
+    if !lab_subdir.is_dir() {
+        return None;
     }
 
-    let revision_dir = lab_path.join("revision");
-    if revision_dir.is_dir() {
-        if let Some(Ok(entry)) = fs::read_dir(revision_dir).ok()?.next() {
-            let revision_subdir = entry.path();
-            let nested_path = revision_subdir.join("metadata.json");
-            if nested_path.is_file() {
-                return Some(nested_path);
+    let entries = fs::read_dir(lab_subdir).ok()?;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+            if name.ends_with("lab-metadata.json") {
+                return Some(path);
             }
         }
     }
-
     None
 }
 
-pub fn load_from_path(lab_path: &Path) -> Result<Lab, AppError> {
+pub fn load_from_path(initial_path: &Path) -> Result<Lab, AppError> {
     log_debug!(
-        "Loading and validating lab from '{}'...",
+        "Attempting to load lab from initial path: '{}'",
+        initial_path.display()
+    );
+
+    let lab_path = if initial_path.is_dir() {
+        initial_path.to_path_buf()
+    } else {
+        initial_path
+            .parent()
+            .ok_or_else(|| AppError::LabNotFound(initial_path.to_path_buf()))?
+            .to_path_buf()
+    };
+
+    log_debug!(
+        "Loading and validating lab from resolved directory '{}'...",
         lab_path.display()
     );
 
@@ -33,49 +49,84 @@ pub fn load_from_path(lab_path: &Path) -> Result<Lab, AppError> {
         return Err(AppError::LabNotFound(lab_path.to_path_buf()));
     }
 
-    let metadata_path = find_metadata_path(lab_path)
+    let manifest_path = find_manifest_path(&lab_path)
         .ok_or_else(|| AppError::MetadataNotFound(lab_path.to_path_buf()))?;
 
-    log_debug!("Found metadata file at '{}'", metadata_path.display());
+    log_debug!("Found lab manifest at: '{}'", manifest_path.display());
 
-    let file_content = fs::read_to_string(&metadata_path)?;
-    let mut lab: Lab = serde_json::from_str(&file_content)?;
+    let manifest_content = fs::read_to_string(&manifest_path)?;
+    let manifest: LabManifest = serde_json::from_str(&manifest_content)?;
+    let content_hash = manifest.lab_id;
 
-    for (job_id, job) in lab.jobs.iter_mut() {
-        job.path_in_lab = PathBuf::from("jobs").join(&job_id.0);
+    log_debug!("Lab Content Hash (ID): {}", content_hash);
+
+    let root_metadata_path = lab_path.join(&manifest.metadata);
+    if !root_metadata_path.is_file() {
+        return Err(AppError::Io(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            format!(
+                "Root metadata file not found at '{}'",
+                root_metadata_path.display()
+            ),
+        )));
     }
 
-    log_debug!("Successfully parsed metadata.json.");
+    log_debug!(
+        "Loading root metadata from '{}'",
+        root_metadata_path.display()
+    );
+    let root_metadata_content = fs::read_to_string(&root_metadata_path)?;
+    let root_meta: RootMetadata = serde_json::from_str(&root_metadata_content)?;
 
-    let parent_dir = metadata_path.parent().ok_or_else(|| {
-        AppError::ConfigurationError(format!(
-            "Could not get parent directory of metadata.json: {}",
-            metadata_path.display()
-        ))
-    })?;
-    let parent_dir_name = parent_dir
-        .file_name()
-        .and_then(|s| s.to_str())
-        .ok_or_else(|| {
-            AppError::ConfigurationError(format!(
-                "Could not get directory name for: {}",
-                parent_dir.display()
+    let mut lab = Lab {
+        schema_version: root_meta.schema_version,
+        git_hash: root_meta.git_hash,
+        content_hash,
+        runs: HashMap::new(),
+        jobs: HashMap::new(),
+    };
+
+    for run_rel_path in root_meta.runs {
+        let run_metadata_path = lab_path.join(&run_rel_path);
+        log_debug!(
+            "Loading run metadata from '{}'",
+            run_metadata_path.display()
+        );
+
+        let run_meta_content = fs::read_to_string(&run_metadata_path).map_err(|e| {
+            AppError::Io(std::io::Error::new(
+                e.kind(),
+                format!(
+                    "Failed to read run metadata at {:?}: {}",
+                    run_metadata_path, e
+                ),
             ))
         })?;
 
-    const SUFFIX: &str = "-experiment-metadata-json";
-    let hash = parent_dir_name.strip_suffix(SUFFIX).ok_or_else(|| AppError::ConfigurationError(format!(
-        "Cannot determine unique lab hash. The directory containing metadata.json ('{}') does not follow the expected '<hash>{}' format.",
-        parent_dir_name, SUFFIX
-    )))?;
+        let mut run_meta: RunMetadataForLoading = serde_json::from_str(&run_meta_content)?;
+        let run_id = run_meta.name.clone();
 
-    if hash.is_empty() {
-        return Err(AppError::ConfigurationError(format!(
-            "Cannot determine unique lab hash. The directory name '{}' results in an empty hash.",
-            parent_dir_name
-        )));
+        let job_ids_for_run: Vec<_> = run_meta.jobs.keys().cloned().collect();
+
+        let run = Run {
+            image: run_meta.image,
+            jobs: job_ids_for_run,
+            dependencies: run_meta.dependencies,
+        };
+
+        lab.runs.insert(run_id, run);
+
+        for (job_id, mut job) in run_meta.jobs.drain() {
+            job.path_in_lab = PathBuf::from("jobs").join(&job_id.0);
+            lab.jobs.insert(job_id, job);
+        }
     }
-    lab.content_hash = hash.to_string();
+
+    log_debug!(
+        "Successfully parsed all metadata. Total runs: {}, Total jobs: {}",
+        lab.runs.len(),
+        lab.jobs.len()
+    );
 
     let jobs_dir = lab_path.join("jobs");
     if !jobs_dir.is_dir() {
@@ -95,28 +146,27 @@ pub fn load_from_path(lab_path: &Path) -> Result<Lab, AppError> {
                 return Err(AppError::Io(std::io::Error::new(
                     std::io::ErrorKind::NotFound,
                     format!(
-                        "Lab integrity check failed: image file '{}' not found.",
+                        "Lab integrity check failed: image file '{}' not found for run.",
                         image_full_path.display()
                     ),
                 )));
             }
         }
     }
-    log_debug!("All container image files found.");
 
-    for job in lab.jobs.values() {
+    for (job_id, job) in &lab.jobs {
         let job_pkg_path = lab_path.join(&job.path_in_lab);
         if !job_pkg_path.is_dir() {
-            return Err(AppError::Io(std::io::Error::new(
-                std::io::ErrorKind::NotFound,
-                format!(
-                    "Lab integrity check failed: job package directory '{}' not found.",
-                    job_pkg_path.display()
+            return Err(AppError::JobPackageIoError {
+                job_id: job_id.clone(),
+                path: job_pkg_path,
+                source: std::io::Error::new(
+                    std::io::ErrorKind::NotFound,
+                    "Job package directory not found",
                 ),
-            )));
+            });
         }
     }
-    log_debug!("All job package directories found.");
 
     log_debug!("Lab validation successful.");
     Ok(lab)

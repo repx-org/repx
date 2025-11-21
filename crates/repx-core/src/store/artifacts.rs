@@ -25,7 +25,7 @@ pub fn put_artifact(base_path: &Path, hash_path: &str, content: &[u8]) -> Result
     })?;
 
     let relative_path = Path::new(hash_path);
-    if relative_path.parent().map_or(false, |p| p.ends_with("bin")) {
+    if relative_path.parent().is_some_and(|p| p.ends_with("bin")) {
         #[cfg(unix)]
         {
             let mut perms = fs::metadata(&dest_path)

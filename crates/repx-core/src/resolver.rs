@@ -3,8 +3,7 @@ use crate::{
     model::{Job, JobId, Lab, RunId},
 };
 use std::collections::HashSet;
-
-fn get_all_dependencies<'a>(job: &'a Job) -> impl Iterator<Item = &'a JobId> {
+fn get_all_dependencies(job: &Job) -> impl Iterator<Item = &JobId> {
     job.executables
         .values()
         .flat_map(|exe| exe.inputs.iter())
@@ -129,9 +128,13 @@ mod tests {
             .map(|s| InputMapping {
                 job_id: Some(JobId(s.to_string())),
                 source_output: Some("default".to_string()),
+                target_input: "default".to_string(),
                 source: None,
                 source_key: None,
-                target_input: "default".to_string(),
+                mapping_type: None,
+                dependency_type: None,
+                source_run: None,
+                source_stage_filter: None,
             })
             .collect();
 
@@ -161,6 +164,7 @@ mod tests {
                     Run {
                         image: None,
                         jobs: vec![JobId("job-a1".into()), JobId("job-a2".into())],
+                        dependencies: HashMap::new(), // ADDED: Initialize missing field
                     },
                 ),
                 (
@@ -168,6 +172,7 @@ mod tests {
                     Run {
                         image: None,
                         jobs: vec![JobId("job-b1".into()), JobId("job-b2".into())],
+                        dependencies: HashMap::new(), // ADDED: Initialize missing field
                     },
                 ),
             ]),

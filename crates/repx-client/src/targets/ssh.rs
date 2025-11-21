@@ -196,33 +196,28 @@ impl Target for SshTarget {
         }
 
         let mut chmod_cmds = Vec::new();
-
         if local_path.is_dir() {
             chmod_cmds.push(format!(
                 "chmod -R a-w,a+rX {}",
                 shell_quote(&remote_dest.to_string_lossy())
             ));
 
-            for entry_result in walkdir::WalkDir::new(local_path) {
-                if let Ok(entry) = entry_result {
-                    if entry.file_type().is_file() {
-                        if let Ok(metadata) = entry.metadata() {
-                            if (metadata.mode() & 0o111) != 0 {
-                                let rel_path = entry.path().strip_prefix(local_path).unwrap();
-                                let remote_file_path = remote_dest.join(rel_path);
-                                chmod_cmds.push(format!(
-                                    "chmod a+x {}",
-                                    shell_quote(&remote_file_path.to_string_lossy())
-                                ));
-                            }
+            for entry in walkdir::WalkDir::new(local_path).into_iter().flatten() {
+                if entry.file_type().is_file() {
+                    if let Ok(metadata) = entry.metadata() {
+                        if (metadata.mode() & 0o111) != 0 {
+                            let rel_path = entry.path().strip_prefix(local_path).unwrap();
+                            let remote_file_path = remote_dest.join(rel_path);
+                            chmod_cmds.push(format!(
+                                "chmod a+x {}",
+                                shell_quote(&remote_file_path.to_string_lossy())
+                            ));
                         }
                     }
                 }
             }
         } else {
-            let is_executable = local_path
-                .metadata()
-                .map_or(false, |m| (m.mode() & 0o111) != 0);
+            let is_executable = local_path.metadata().is_ok_and(|m| (m.mode() & 0o111) != 0);
             let mode = if is_executable { "555" } else { "444" };
             chmod_cmds.push(format!(
                 "chmod {} {}",
@@ -336,15 +331,21 @@ impl Target for SshTarget {
         let remote_artifacts_base = self.artifacts_base_path();
         self.sync_directory(local_lab_path, &remote_artifacts_base)
     }
-
     fn deploy_repx_binary(&self) -> Result<PathBuf> {
         let current_exe = std::env::current_exe().map_err(AppError::from)?;
-        let exe_dir = current_exe.parent().ok_or_else(|| {
+        let mut exe_dir = current_exe.parent().ok_or_else(|| {
             AppError::Io(std::io::Error::new(
                 std::io::ErrorKind::NotFound,
                 "Could not find parent directory of the current executable",
             ))
         })?;
+
+        if exe_dir.file_name().and_then(|s| s.to_str()) == Some("deps") {
+            if let Some(parent) = exe_dir.parent() {
+                exe_dir = parent;
+            }
+        }
+
         let runner_exe_path = exe_dir.join("repx-runner");
 
         if !runner_exe_path.exists() {
@@ -356,7 +357,6 @@ impl Target for SshTarget {
                 ),
             ))));
         }
-
         let remote_bin_dir = self.base_path().join("bin");
 
         let mkdir_cmd = format!(

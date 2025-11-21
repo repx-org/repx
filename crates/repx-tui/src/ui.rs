@@ -288,19 +288,17 @@ fn draw_targets(f: &mut Frame, area: Rect, app: &mut App, border_style: Style) {
                     ),
                     TargetState::Down => ("[DOWN]", Style::default().add_modifier(Modifier::DIM)),
                 };
-
-                let mut executor_text = target.get_selected_executor().to_str().to_string();
+                let mut executor_text = target.get_selected_executor().as_str().to_string();
                 if is_selected_row && app.targets_focused_column == 1 && app.is_editing_target_cell
                 {
                     executor_text = format!("← {} →", executor_text);
                 }
 
-                let mut scheduler_text = target.get_selected_scheduler().to_str().to_string();
+                let mut scheduler_text = target.get_selected_scheduler().as_str().to_string();
                 if is_selected_row && app.targets_focused_column == 2 && app.is_editing_target_cell
                 {
                     scheduler_text = format!("← {} →", scheduler_text);
                 }
-
                 let mut cells = vec![
                     Cell::from(target.name.clone()),
                     Cell::from(executor_text),
@@ -480,8 +478,7 @@ fn draw_right_column(f: &mut Frame, area: Rect, app: &mut App) {
     } else {
         "0/0".to_string()
     };
-
-    let status_filter_text = app.status_filter.to_str();
+    let status_filter_text = app.status_filter.as_str();
     let right_title_content = format!("┐reverse┌┐tree┌┐{}┌─", status_filter_text);
     let right_title_width = right_title_content.chars().count() as u16 + 1;
     let left_title_prefix = "─┐";
@@ -859,13 +856,11 @@ fn build_tree_rows<'a>(
                         }
                     })
                     .collect();
-
-                let corrected_prefix = if !ancestor_is_last_stack.get(0).cloned().unwrap_or(true) {
+                let corrected_prefix = if !ancestor_is_last_stack.first().cloned().unwrap_or(true) {
                     prefix
                 } else {
                     prefix.get(2..).unwrap_or("").to_string()
                 };
-
                 ancestor_is_last_stack.push(row_data.is_last_child);
 
                 let display_text = job.name.clone();
