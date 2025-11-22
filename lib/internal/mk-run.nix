@@ -85,10 +85,10 @@ else
 
     image =
       if containerized then
-        pkgs.dockerTools.buildLayeredImage {
+        pkgs.dockerTools.buildImage {
           name = name + "-image";
           tag = "latest";
-          contents =
+          copyToRoot =
             (pkgs.lib.flatten (map getDrvsFromPipeline loadedPipelines))
             ++ [
               pkgs.jq
@@ -101,7 +101,7 @@ else
             ]
             ++ paramsDependencies;
           config = {
-            Entrypoint = [ "${pkgs.bash}/bin/bash" ];
+            Cmd = [ "${pkgs.bash}/bin/bash" ];
           };
         }
       else

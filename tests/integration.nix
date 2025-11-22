@@ -60,6 +60,5 @@ let
       run1 = repx-lib.callRun runDefFile [ ];
     };
   };
-
 in
-labResult.labNative
+labResult.lab

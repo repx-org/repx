@@ -177,7 +177,6 @@ let
     {
       inherit labCore labManifest allReadmeParts;
     };
-
   runs2Lab =
     runs:
     let
@@ -190,7 +189,7 @@ let
             ${artifacts.allReadmeParts.readmeContainer}/README_container.md > $out
       '';
     in
-    rec {
+    {
       lab = pkgs.stdenv.mkDerivation {
         name = "hpc-experiment-lab";
         version = "1.0";
@@ -212,70 +211,7 @@ let
         '';
       };
     };
-
-  runs2labUnified =
-    runs:
-    let
-      artifacts = buildLabCoreAndManifest {
-        inherit runs;
-        includeImages = false;
-      };
-      labContents = pkgs.buildEnv {
-        name = "image-contents";
-        paths = with artifacts; [ labCore ];
-        postBuild = ''
-          mkdir -p $out/lab
-          cp -rL ${artifacts.labCore}/* $out/lab/
-          cp ${artifacts.labManifest} $out/lab/lab-metadata.json
-        '';
-      };
-    in
-    {
-      labUnified = pkgs.dockerTools.buildLayeredImage {
-        name = "hpc-experiment-lab-unified";
-        tag = "latest";
-        contents = [ labContents ];
-        config = {
-          Cmd = [ "/bin/bash" ];
-          WorkingDir = "/lab";
-        };
-      };
-    };
-
-  runs2LabNative =
-    runs:
-    let
-      artifacts = buildLabCoreAndManifest {
-        inherit runs;
-        includeImages = false;
-      };
-      readmeSrc = "${artifacts.allReadmeParts.readmeNative}/README.md";
-      readmeHashName = builtins.baseNameOf (toString artifacts.allReadmeParts.readmeNative);
-    in
-    rec {
-      labNative = pkgs.stdenv.mkDerivation {
-        name = "hpc-experiment-lab-native";
-        version = "1.o";
-        nativeBuildInputs = with artifacts; [
-          labCore
-          allReadmeParts.readmeNative
-        ];
-
-        buildCommand = ''
-          mkdir -p $out $out/lab $out/readme
-          cp -rL ${artifacts.labCore}/* $out/
-
-          # Copy manifest to lab/ subdirectory with hash preserved
-          cp ${artifacts.labManifest} $out/lab/$(basename ${artifacts.labManifest})
-
-          # Copy native readme to readme/ subdirectory
-          cp "${readmeSrc}" "$out/readme/${readmeHashName}-README.md"
-
-          echo "Native lab directory created successfully (without container images)."
-        '';
-      };
-    };
 in
 {
-  inherit runs2Lab runs2labUnified runs2LabNative;
+  inherit runs2Lab;
 }

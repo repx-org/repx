@@ -135,5 +135,3 @@ if duplicateNames != [ ] then
   ''
 else
   lab-packagers.runs2Lab finalRunDefinitions
-  // lab-packagers.runs2labUnified finalRunDefinitions
-  // lab-packagers.runs2LabNative finalRunDefinitions
