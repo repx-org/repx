@@ -23,6 +23,8 @@ fn test_internal_execute_simple_job_ok() {
         .arg(harness.get_staged_executable_path(&job_id))
         .arg("--base-path")
         .arg(harness.cache_dir.path())
+        .arg("--host-tools-dir")
+        .arg(harness.get_host_tools_dir_name())
         .arg("--runtime")
         .arg("native");
 
@@ -68,6 +70,8 @@ fn test_internal_execute_with_inputs_ok() {
         .arg(harness.get_staged_executable_path(&job_c_id))
         .arg("--base-path")
         .arg(harness.cache_dir.path())
+        .arg("--host-tools-dir")
+        .arg(harness.get_host_tools_dir_name())
         .arg("--runtime")
         .arg("native");
 
@@ -86,7 +90,6 @@ fn test_internal_execute_fails_if_lab_not_staged() {
     harness.stage_job_dirs(&job_id);
     let job_output_path = harness.get_job_output_path(&job_id);
     fs::write(job_output_path.join("repx/inputs.json"), "{}").unwrap();
-
     let mut cmd = harness.cmd();
     cmd.arg("internal-execute")
         .arg("--job-id")
@@ -95,9 +98,10 @@ fn test_internal_execute_fails_if_lab_not_staged() {
         .arg(harness.get_staged_executable_path(&job_id))
         .arg("--base-path")
         .arg(harness.cache_dir.path())
+        .arg("--host-tools-dir")
+        .arg(harness.get_host_tools_dir_name())
         .arg("--runtime")
         .arg("native");
-
     cmd.assert()
         .failure()
         .stderr(predicates::str::contains("Execution failed for job"))

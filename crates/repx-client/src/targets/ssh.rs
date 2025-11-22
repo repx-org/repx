@@ -18,6 +18,34 @@ pub struct SshTarget {
     pub(crate) name: String,
     pub(crate) address: String,
     pub(crate) config: repx_core::config::Target,
+    pub(crate) local_tools_path: PathBuf,
+    pub(crate) host_tools_dir_name: String,
+}
+
+impl SshTarget {
+    fn local_tool(&self, name: &str) -> PathBuf {
+        let tool_path = self.local_tools_path.join(name);
+        if tool_path.exists() {
+            tool_path
+        } else {
+            PathBuf::from(name)
+        }
+    }
+
+    fn remote_tool(&self, name: &str) -> String {
+        if ["sbatch", "scancel", "squeue", "sacct", "sh"].contains(&name) {
+            return name.to_string();
+        }
+
+        let remote_bin = self
+            .artifacts_base_path()
+            .join("host-tools")
+            .join(&self.host_tools_dir_name)
+            .join("bin");
+
+        let tool_path = remote_bin.join(name);
+        tool_path.to_string_lossy().to_string()
+    }
 }
 
 impl Target for SshTarget {
@@ -43,15 +71,17 @@ impl Target for SshTarget {
     }
 
     fn run_command(&self, command: &str, args: &[&str]) -> Result<String> {
+        let remote_cmd_exe = self.remote_tool(command);
+
         let remote_command_string = if command == "sh" && args.len() == 2 && args[0] == "-c" {
             format!("sh -c {}", shell_quote(args[1]))
         } else {
-            let mut all_parts = vec![command];
+            let mut all_parts = vec![remote_cmd_exe.as_str()];
             all_parts.extend_from_slice(args);
             all_parts.join(" ")
         };
 
-        let mut cmd = Command::new("ssh");
+        let mut cmd = Command::new(self.local_tool("ssh"));
         cmd.arg(&self.address).arg(&remote_command_string);
 
         logging::log_and_print_command(&cmd);
@@ -88,11 +118,15 @@ impl Target for SshTarget {
         }
 
         let artifacts_base = self.artifacts_base_path();
+        let find_bin = self.remote_tool("find");
+        let mkdir_bin = self.remote_tool("mkdir");
 
         let find_cmd = format!(
-            "mkdir -p {} && (cd {} && find . -type f) || true",
+            "{} -p {} && (cd {} && {} . -type f) || true",
+            mkdir_bin,
             shell_quote(&artifacts_base.to_string_lossy()),
-            shell_quote(&artifacts_base.to_string_lossy())
+            shell_quote(&artifacts_base.to_string_lossy()),
+            find_bin
         );
 
         let output = self.run_command("sh", &["-c", &find_cmd])?;
@@ -130,7 +164,7 @@ impl Target for SshTarget {
             writeln!(temp_file, "{}", path.to_string_lossy()).map_err(AppError::from)?;
         }
 
-        let mut rsync_cmd = Command::new("rsync");
+        let mut rsync_cmd = Command::new(self.local_tool("rsync"));
         rsync_cmd
             .arg("-rltpz")
             .arg("./")
@@ -156,8 +190,10 @@ impl Target for SshTarget {
         }
 
         let remote_artifacts_base = self.artifacts_base_path();
+        let chmod_bin = self.remote_tool("chmod");
         let chmod_cmd_str = format!(
-            "chmod -R a-w,a+rX {}",
+            "{} -R a-w,a+rX {}",
+            chmod_bin,
             shell_quote(&remote_artifacts_base.to_string_lossy())
         );
 
@@ -169,11 +205,11 @@ impl Target for SshTarget {
     fn sync_artifact(&self, local_path: &Path, relative_path: &Path) -> Result<()> {
         let remote_dest = self.artifacts_base_path().join(relative_path);
         let remote_parent = remote_dest.parent().unwrap();
-
+        // For bootstrapping sync, we assume `mkdir` exists or is passed
         let mkdir_cmd = format!("mkdir -p {}", shell_quote(&remote_parent.to_string_lossy()));
         self.run_command("sh", &["-c", &mkdir_cmd])?;
 
-        let mut scp_cmd = Command::new("scp");
+        let mut scp_cmd = Command::new(self.local_tool("scp"));
         if local_path.is_dir() {
             scp_cmd.arg("-r");
         }
@@ -195,10 +231,12 @@ impl Target for SshTarget {
             }));
         }
 
+        let chmod_bin = self.remote_tool("chmod");
         let mut chmod_cmds = Vec::new();
         if local_path.is_dir() {
             chmod_cmds.push(format!(
-                "chmod -R a-w,a+rX {}",
+                "{} -R a-w,a+rX {}",
+                chmod_bin,
                 shell_quote(&remote_dest.to_string_lossy())
             ));
 
@@ -209,7 +247,8 @@ impl Target for SshTarget {
                             let rel_path = entry.path().strip_prefix(local_path).unwrap();
                             let remote_file_path = remote_dest.join(rel_path);
                             chmod_cmds.push(format!(
-                                "chmod a+x {}",
+                                "{} a+x {}",
+                                chmod_bin,
                                 shell_quote(&remote_file_path.to_string_lossy())
                             ));
                         }
@@ -220,7 +259,8 @@ impl Target for SshTarget {
             let is_executable = local_path.metadata().is_ok_and(|m| (m.mode() & 0o111) != 0);
             let mode = if is_executable { "555" } else { "444" };
             chmod_cmds.push(format!(
-                "chmod {} {}",
+                "{} {} {}",
+                chmod_bin,
                 mode,
                 shell_quote(&remote_dest.to_string_lossy())
             ));
@@ -236,9 +276,10 @@ impl Target for SshTarget {
 
     fn read_remote_file_tail(&self, path: &Path, line_count: u32) -> Result<Vec<String>> {
         let quoted_path = shell_quote(&path.to_string_lossy());
+        let tail_bin = self.remote_tool("tail");
         let cmd_str = format!(
-            "[ -f {} ] && tail -n {} {} || true",
-            quoted_path, line_count, quoted_path
+            "[ -f {} ] && {} -n {} {} || true",
+            quoted_path, tail_bin, line_count, quoted_path
         );
         let output = self.run_command("sh", &["-c", &cmd_str])?;
         Ok(output.lines().map(String::from).collect())
@@ -251,14 +292,18 @@ impl Target for SshTarget {
                 "Path has no parent",
             )))
         })?;
+        let mkdir_bin = self.remote_tool("mkdir");
+        let cat_bin = self.remote_tool("cat");
 
         let remote_command = format!(
-            "mkdir -p {} && cat > {}",
+            "{} -p {} && {} > {}",
+            mkdir_bin,
             shell_quote(&parent.to_string_lossy()),
+            cat_bin,
             shell_quote(&path.to_string_lossy())
         );
 
-        let mut cmd = Command::new("ssh");
+        let mut cmd = Command::new(self.local_tool("ssh"));
         cmd.arg(&self.address)
             .arg(&remote_command)
             .stdin(std::process::Stdio::piped())
@@ -301,10 +346,15 @@ impl Target for SshTarget {
     }
 
     fn sync_directory(&self, local_path: &Path, remote_path: &Path) -> Result<()> {
-        let mkdir_cmd = format!("mkdir -p {}", shell_quote(&remote_path.to_string_lossy()));
+        let mkdir_bin = self.remote_tool("mkdir");
+        let mkdir_cmd = format!(
+            "{} -p {}",
+            mkdir_bin,
+            shell_quote(&remote_path.to_string_lossy())
+        );
         self.run_command("sh", &["-c", &mkdir_cmd])?;
 
-        let mut rsync_cmd = Command::new("rsync");
+        let mut rsync_cmd = Command::new(self.local_tool("rsync"));
         rsync_cmd
             .arg("-rltpz")
             .arg(format!("{}/", local_path.display()))
@@ -342,7 +392,7 @@ impl Target for SshTarget {
 
         let remote_dest_path = remote_bin_dir.join("repx");
 
-        let mut scp_cmd = Command::new("scp");
+        let mut scp_cmd = Command::new(self.local_tool("scp"));
         scp_cmd.arg(&runner_exe_path).arg(format!(
             "{}:{}",
             self.address,

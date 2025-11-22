@@ -27,6 +27,7 @@ struct ScatterGatherOrchestrator {
     runtime: Runtime,
     job_package_path: PathBuf,
     static_inputs: Value,
+    host_tools_bin_dir: Option<PathBuf>,
 }
 
 impl ScatterGatherOrchestrator {
@@ -50,7 +51,11 @@ impl ScatterGatherOrchestrator {
                     AppError::ConfigurationError("Docker runtime requires --image-tag".into())
                 })?,
             },
-            "bwrap" => Runtime::Bwrap,
+            "bwrap" => Runtime::Bwrap {
+                image_tag: args.image_tag.clone().ok_or_else(|| {
+                    AppError::ConfigurationError("Bwrap runtime requires --image-tag".into())
+                })?,
+            },
             other => {
                 return Err(AppError::ConfigurationError(format!(
                     "Unsupported runtime: {}",
@@ -58,6 +63,8 @@ impl ScatterGatherOrchestrator {
                 )))
             }
         };
+        let host_tools_root = args.base_path.join("artifacts").join("host-tools");
+        let host_tools_bin_dir = Some(host_tools_root.join(&args.host_tools_dir).join("bin"));
 
         Ok(Self {
             job_id,
@@ -70,6 +77,7 @@ impl ScatterGatherOrchestrator {
             runtime,
             job_package_path: args.job_package_path.clone(),
             static_inputs: Value::Object(Default::default()),
+            host_tools_bin_dir,
         })
     }
 
@@ -96,6 +104,7 @@ impl ScatterGatherOrchestrator {
             inputs_json_path: self.inputs_json_path.clone(),
             user_out_dir: user_out,
             repx_out_dir: repx_out,
+            host_tools_bin_dir: self.host_tools_bin_dir.clone(),
         })
     }
     async fn run_scatter(&self, exe_path: &Path) -> Result<(), AppError> {

@@ -78,18 +78,24 @@ pub struct Client {
 
 impl Client {
     pub fn new(config: Config, lab_path: PathBuf) -> Result<Self> {
+        let lab = lab::load_from_path(&lab_path).map_err(ClientError::Core)?;
+        let lab_arc = Arc::new(lab);
+
         let mut targets: HashMap<String, Arc<dyn Target>> = HashMap::new();
         for (name, target_config) in &config.targets {
             let target: Arc<dyn Target> = if name == "local" {
                 Arc::new(LocalTarget {
                     name: name.clone(),
                     config: target_config.clone(),
+                    local_tools_path: lab_arc.host_tools_path.clone(),
                 })
             } else if let Some(address) = &target_config.address {
                 Arc::new(SshTarget {
                     name: name.clone(),
                     address: address.clone(),
                     config: target_config.clone(),
+                    local_tools_path: lab_arc.host_tools_path.clone(),
+                    host_tools_dir_name: lab_arc.host_tools_dir_name.clone(),
                 })
             } else {
                 return Err(ClientError::Core(AppError::ConfigurationError(format!(
@@ -99,8 +105,6 @@ impl Client {
             };
             targets.insert(name.clone(), target);
         }
-
-        let lab = lab::load_from_path(&lab_path).map_err(ClientError::Core)?;
 
         let xdg_dirs = xdg::BaseDirectories::with_prefix("repx");
         let state_home = xdg_dirs.get_state_home().ok_or_else(|| {
@@ -119,7 +123,7 @@ impl Client {
         Ok(Self {
             config: Arc::new(config),
             lab_path: Arc::new(lab_path),
-            lab: Arc::new(lab),
+            lab: lab_arc,
             targets: Arc::new(targets),
             slurm_map: Arc::new(Mutex::new(slurm_map_data)),
         })

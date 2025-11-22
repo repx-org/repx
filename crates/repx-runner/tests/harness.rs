@@ -15,6 +15,10 @@ pub struct TestHarness {
 
 impl TestHarness {
     pub fn new() -> Self {
+        Self::with_execution_type("native")
+    }
+
+    pub fn with_execution_type(exec_type: &str) -> Self {
         let config_dir = tempdir().expect("Failed to create temp config dir");
         let cache_dir = tempdir().expect("Failed to create temp cache dir");
 
@@ -27,13 +31,14 @@ submission_target = "local"
 [targets.local]
 base_path = "{}"
 default_scheduler = "local"
-default_execution_type = "native"
+default_execution_type = "{}"
 
 [targets.local.local]
-execution_types = ["native"]
+execution_types = ["native", "bwrap"]
 local_concurrency = 2
 "#,
-            cache_dir.path().display()
+            cache_dir.path().display(),
+            exec_type
         );
         fs::write(repx_config_subdir.join("config.toml"), config_content)
             .expect("Failed to write temp config");
@@ -69,7 +74,6 @@ local_concurrency = 2
     pub fn stage_lab(&self) {
         let dest = self.cache_dir.path().join("artifacts");
         fs::create_dir_all(&dest).unwrap();
-
         let status = Command::new("rsync")
             .arg("-a")
             .arg("--delete")
@@ -78,8 +82,15 @@ local_concurrency = 2
             .status()
             .expect("rsync command failed");
         assert!(status.success(), "rsync of lab to cache failed");
-    }
 
+        let status_chmod = Command::new("chmod")
+            .arg("-R")
+            .arg("u+w")
+            .arg(&dest)
+            .status()
+            .expect("chmod command failed");
+        assert!(status_chmod.success(), "chmod of artifacts failed");
+    }
     pub fn stage_job_dirs(&self, job_id: &str) {
         let job_out_path = self.get_job_output_path(job_id);
         fs::create_dir_all(job_out_path.join("out")).unwrap();
@@ -150,8 +161,8 @@ local_concurrency = 2
         });
         let root_meta: Value =
             serde_json::from_str(&root_content).expect("Could not parse root metadata");
-
         let mut all_jobs = serde_json::Map::new();
+        let mut all_runs = serde_json::Map::new();
         let mut combined_metadata = root_meta
             .as_object()
             .expect("Root metadata is not a JSON object")
@@ -166,6 +177,10 @@ local_concurrency = 2
                     let run_meta: Value =
                         serde_json::from_str(&run_content).expect("Could not parse run metadata");
 
+                    if let Some(name) = run_meta.get("name").and_then(|n| n.as_str()) {
+                        all_runs.insert(name.to_string(), run_meta.clone());
+                    }
+
                     if let Some(jobs) = run_meta.get("jobs").and_then(|j| j.as_object()) {
                         all_jobs.extend(jobs.clone());
                     }
@@ -175,10 +190,9 @@ local_concurrency = 2
 
         combined_metadata.remove("runs");
         combined_metadata.insert("jobs".to_string(), Value::Object(all_jobs));
-
+        combined_metadata.insert("runs_data".to_string(), Value::Object(all_runs));
         Value::Object(combined_metadata)
     }
-
     pub fn get_staged_executable_path(&self, job_id: &str) -> PathBuf {
         let job_data = &self.metadata["jobs"][job_id];
         let path_in_lab_str = job_data["executables"]["main"]["path"]
@@ -188,5 +202,36 @@ local_concurrency = 2
             .path()
             .join("artifacts")
             .join(path_in_lab_str)
+    }
+    pub fn get_host_tools_dir_name(&self) -> String {
+        let host_tools_path = self.lab_path.join("host-tools");
+        let entry = fs::read_dir(host_tools_path)
+            .expect("Could not read host-tools dir")
+            .filter_map(Result::ok)
+            .find(|e| e.path().is_dir())
+            .expect("No directory found in host-tools");
+        entry.file_name().to_string_lossy().to_string()
+    }
+
+    pub fn get_any_image_tag(&self) -> Option<String> {
+        self.metadata
+            .get("runs_data")?
+            .as_object()?
+            .values()
+            .find_map(|run| {
+                let path_str = run.get("image")?.as_str()?;
+                let path = Path::new(path_str);
+                let file_name = path.file_name()?.to_str()?;
+
+                if let Some(stem) = file_name.strip_suffix(".tar.gz") {
+                    Some(stem.to_string())
+                } else if let Some(stem) = file_name.strip_suffix(".tar") {
+                    Some(stem.to_string())
+                } else if let Some(stem) = file_name.strip_suffix(".gz") {
+                    Some(stem.to_string())
+                } else {
+                    Some(file_name.to_string())
+                }
+            })
     }
 }

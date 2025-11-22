@@ -13,6 +13,18 @@ use walkdir::WalkDir;
 pub struct LocalTarget {
     pub(crate) name: String,
     pub(crate) config: repx_core::config::Target,
+    pub(crate) local_tools_path: PathBuf,
+}
+
+impl LocalTarget {
+    fn tool(&self, name: &str) -> PathBuf {
+        let tool_path = self.local_tools_path.join(name);
+        if tool_path.exists() {
+            tool_path
+        } else {
+            PathBuf::from(name)
+        }
+    }
 }
 
 impl Target for LocalTarget {
@@ -35,7 +47,8 @@ impl Target for LocalTarget {
     }
 
     fn run_command(&self, command: &str, args: &[&str]) -> Result<String> {
-        let mut cmd = Command::new(command);
+        let cmd_path = self.tool(command);
+        let mut cmd = Command::new(cmd_path);
         cmd.args(args);
         repx_core::logging::log_and_print_command(&cmd);
         let output = cmd.output().map_err(|e| AppError::ProcessLaunchFailed {
@@ -132,7 +145,7 @@ impl Target for LocalTarget {
     fn sync_directory(&self, local_path: &Path, remote_path: &Path) -> Result<()> {
         fs_err::create_dir_all(remote_path).map_err(AppError::from)?;
 
-        let mut rsync_cmd = Command::new("rsync");
+        let mut rsync_cmd = Command::new(self.tool("rsync"));
         rsync_cmd
             .arg("-rltp")
             .arg(format!("{}/", local_path.display()))
@@ -159,7 +172,7 @@ impl Target for LocalTarget {
         if !path.exists() {
             return Ok(vec![]);
         }
-        let mut cmd = Command::new("tail");
+        let mut cmd = Command::new(self.tool("tail"));
         cmd.arg("-n").arg(line_count.to_string()).arg(path);
         repx_core::logging::log_and_print_command(&cmd);
         let output = cmd.output().map_err(|e| AppError::ProcessLaunchFailed {
@@ -192,7 +205,7 @@ impl Target for LocalTarget {
         let dest_path = self.artifacts_base_path();
         fs_err::create_dir_all(&dest_path).map_err(AppError::from)?;
 
-        let mut rsync_cmd = Command::new("rsync");
+        let mut rsync_cmd = Command::new(self.tool("rsync"));
         rsync_cmd
             .arg("-rltp")
             .arg(format!("{}/", local_lab_path.display()))

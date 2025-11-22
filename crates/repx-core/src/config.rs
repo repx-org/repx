@@ -34,17 +34,16 @@ default_scheduler = "local"
   # The 'local' target runs jobs on your current machine.
   [targets.local]
   # The base path for the shared path on the target. Tilde expansion (~) is supported.
-  base_path = "~/Desktop/repx-store"
-  # Optional: set the default scheduler and execution type for this target.
+  base_path = "~/Desktop/repx-store"  # Optional: set the default scheduler and execution type for this target.
   default_scheduler = "local"
-  default_execution_type = "native"
+  default_execution_type = "bwrap"
 
     # Configuration for when the 'local' scheduler is used.
     [targets.local.local]
     # List of execution types supported by this scheduler on this target.
-    execution_types = ["native", "bwrap"]
+    execution_types = ["bwrap", "native"]
     # The maximum number of jobs to run in parallel.
-    # If not set, it defaults to the number of available CPU cores.
+# If not set, it defaults to the number of available CPU cores.
     local_concurrency = 4
 
     # Configuration for when the 'slurm' scheduler is used (if supported).

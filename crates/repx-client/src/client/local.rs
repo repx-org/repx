@@ -129,6 +129,8 @@ pub fn submit_local_batch_run(
                         cmd.arg("--image-tag").arg(tag);
                     }
                     cmd.arg("--base-path").arg(target.base_path());
+                    cmd.arg("--host-tools-dir")
+                        .arg(&client.lab.host_tools_dir_name);
 
                     if stage_type == "scatter-gather" {
                         let scatter_exe = job.executables.get("scatter").unwrap();

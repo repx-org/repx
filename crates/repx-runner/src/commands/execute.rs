@@ -50,7 +50,13 @@ async fn async_handle_execute(args: InternalExecuteArgs) -> Result<(), AppError>
                 )
             })?,
         },
-        "bwrap" => Runtime::Bwrap,
+        "bwrap" => Runtime::Bwrap {
+            image_tag: args.image_tag.ok_or_else(|| {
+                AppError::ConfigurationError(
+                    "Container execution with 'bwrap' requires an --image-tag.".to_string(),
+                )
+            })?,
+        },
         other => {
             return Err(AppError::ConfigurationError(format!(
                 "Unsupported runtime: {}",
@@ -58,6 +64,8 @@ async fn async_handle_execute(args: InternalExecuteArgs) -> Result<(), AppError>
             )))
         }
     };
+    let host_tools_root = args.base_path.join("artifacts").join("host-tools");
+    let host_tools_bin_dir = Some(host_tools_root.join(&args.host_tools_dir).join("bin"));
 
     let request = ExecutionRequest {
         job_id: job_id.clone(),
@@ -67,6 +75,7 @@ async fn async_handle_execute(args: InternalExecuteArgs) -> Result<(), AppError>
         inputs_json_path: inputs_json_path.clone(),
         user_out_dir,
         repx_out_dir: repx_dir.clone(),
+        host_tools_bin_dir,
     };
 
     let executor = Executor::new(request);

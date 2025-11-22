@@ -78,12 +78,38 @@ pub fn load_from_path(initial_path: &Path) -> Result<Lab, AppError> {
     let root_metadata_content = fs::read_to_string(&root_metadata_path)?;
     let root_meta: RootMetadata = serde_json::from_str(&root_metadata_content)?;
 
+    let host_tools_root = lab_path.join("host-tools");
+    if !host_tools_root.is_dir() {
+        return Err(AppError::Io(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            format!(
+                "'host-tools' directory not found in lab at '{}'",
+                host_tools_root.display()
+            ),
+        )));
+    }
+
+    let host_tools_entry = fs::read_dir(&host_tools_root)?
+        .filter_map(Result::ok)
+        .find(|e| e.path().is_dir())
+        .ok_or_else(|| {
+            AppError::Io(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "No tool directory found inside host-tools",
+            ))
+        })?;
+
+    let host_tools_dir_name = host_tools_entry.file_name().to_string_lossy().to_string();
+    let host_tools_path = host_tools_entry.path().join("bin");
+
     let mut lab = Lab {
         schema_version: root_meta.schema_version,
         git_hash: root_meta.git_hash,
         content_hash,
         runs: HashMap::new(),
         jobs: HashMap::new(),
+        host_tools_path,
+        host_tools_dir_name,
     };
 
     for run_rel_path in root_meta.runs {

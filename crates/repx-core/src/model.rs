@@ -132,6 +132,10 @@ pub struct Lab {
     pub content_hash: String,
     pub runs: HashMap<RunId, Run>,
     pub jobs: HashMap<JobId, Job>,
+    #[serde(skip)]
+    pub host_tools_path: PathBuf,
+    #[serde(skip)]
+    pub host_tools_dir_name: String,
 }
 
 impl Lab {

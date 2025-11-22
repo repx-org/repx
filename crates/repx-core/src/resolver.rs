@@ -185,9 +185,10 @@ mod tests {
                 (JobId("multi-abc-1".into()), job(&[])),
                 (JobId("multi-def-2".into()), job(&[])),
             ]),
+            host_tools_path: PathBuf::from("host-tools"),
+            host_tools_dir_name: "host-tools".to_string(),
         }
     }
-
     #[test]
     fn resolve_direct_run_id_success() {
         let lab = test_lab();

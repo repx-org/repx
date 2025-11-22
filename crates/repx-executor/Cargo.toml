@@ -11,3 +11,4 @@ tokio = { workspace = true }
 shellexpand = { workspace = true }
 nix = { workspace = true, features = ["fs"] }
 tempfile = { workspace = true }
+walkdir = { workspace = true }
