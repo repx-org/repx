@@ -13,6 +13,7 @@ let
           pkgs.pkgsStatic.gnused
           pkgs.pkgsStatic.gnugrep
           pkgs.pkgsStatic.bash
+          pkgs.pkgsStatic.gnutar
           pkgs.pkgsStatic.bubblewrap
           (pkgs.pkgsStatic.rsync.override { enableXXHash = false; })
           pkgs.pkgsStatic.openssh
@@ -27,6 +28,7 @@ let
         cp ${pkgs.pkgsStatic.gnused}/bin/sed $out/bin/
         cp ${pkgs.pkgsStatic.gnugrep}/bin/grep $out/bin/
         cp ${pkgs.pkgsStatic.bash}/bin/bash $out/bin/
+        cp ${pkgs.pkgsStatic.gnutar}/bin/tar $out/bin/
         cp ${pkgs.pkgsStatic.bubblewrap}/bin/bwrap $out/bin/
         cp ${pkgs.pkgsStatic.openssh}/bin/ssh $out/bin/
         cp ${(pkgs.pkgsStatic.rsync.override { enableXXHash = false; })}/bin/rsync $out/bin/
