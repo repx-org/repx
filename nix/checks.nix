@@ -7,7 +7,7 @@
           pkgs.statix
           pkgs.deadnix
         ];
-        src = ./.;
+        src = ./..;
       }
       ''
         cp -r $src ./src
@@ -16,7 +16,7 @@
         echo "Running Statix..."
         statix check .
         echo "Running Deadnix..."
-        deadnix .
+        deadnix --fail .
         touch $out
       '';
 }
