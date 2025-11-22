@@ -10,6 +10,10 @@
     "data.total_sum" = "$out/total_sum.txt";
   };
 
+  runDependencies = with pkgs; [
+    gawk
+  ];
+
   run =
     { inputs, outputs, ... }:
     ''
