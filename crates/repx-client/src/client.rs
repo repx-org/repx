@@ -254,12 +254,23 @@ impl Client {
             })
             .map(|(id, job)| (id.clone(), *job))
             .collect();
-
         if jobs_to_submit.is_empty() && scheduler == "slurm" {
             return Ok(
                 "All schedulable jobs for this submission are already complete.".to_string(),
             );
         }
+
+        send(ClientEvent::DeployingBinary);
+        let remote_repx_binary_path = target.deploy_repx_binary()?;
+        log_info!(
+            "repx binary deployed to: {}",
+            remote_repx_binary_path.display()
+        );
+
+        send(ClientEvent::SyncingArtifacts { total: 1 });
+        target.sync_lab_root(&self.lab_path)?;
+        send(ClientEvent::SyncingFinished);
+
         for (job_id, job) in &jobs_to_run {
             if job.stage_type == "scatter-gather" {
                 inputs::generate_and_write_inputs_json(
@@ -281,16 +292,7 @@ impl Client {
                 )?;
             }
         }
-        send(ClientEvent::DeployingBinary);
-        let remote_repx_binary_path = target.deploy_repx_binary()?;
-        log_info!(
-            "repx binary deployed to: {}",
-            remote_repx_binary_path.display()
-        );
 
-        send(ClientEvent::SyncingArtifacts { total: 1 });
-        target.sync_lab_root(&self.lab_path)?;
-        send(ClientEvent::SyncingFinished);
         match scheduler {
             "slurm" => slurm::submit_slurm_batch_run(
                 self,

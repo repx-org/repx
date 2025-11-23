@@ -67,6 +67,12 @@ pub trait Target: Send + Sync {
     fn sync_directory(&self, local_path: &Path, remote_path: &Path) -> Result<()>;
     fn read_remote_file_tail(&self, path: &Path, line_count: u32) -> Result<Vec<String>>;
 
+    fn spawn_repx_job(
+        &self,
+        repx_binary_path: &Path,
+        args: &[String],
+    ) -> Result<std::process::Child>;
+
     fn sync_artifacts_batch(
         &self,
         local_lab_path: &Path,

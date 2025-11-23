@@ -163,10 +163,13 @@ impl Target for SshTarget {
         for path in artifacts {
             writeln!(temp_file, "{}", path.to_string_lossy()).map_err(AppError::from)?;
         }
+        temp_file.flush().map_err(AppError::from)?;
 
         let mut rsync_cmd = Command::new(self.local_tool("rsync"));
         rsync_cmd
-            .arg("-rltpz")
+            .arg("-rLtpz")
+            .arg("--files-from")
+            .arg(temp_file.path())
             .arg("./")
             .arg(format!(
                 "{}:{}",
@@ -273,6 +276,32 @@ impl Target for SshTarget {
 
         Ok(())
     }
+    fn spawn_repx_job(
+        &self,
+        repx_binary_path: &Path,
+        args: &[String],
+    ) -> Result<std::process::Child> {
+        let remote_args: Vec<String> = args.iter().map(|a| shell_quote(a)).collect();
+        let remote_cmd = format!(
+            "{} {}",
+            shell_quote(&repx_binary_path.to_string_lossy()),
+            remote_args.join(" ")
+        );
+
+        let mut cmd = Command::new(self.local_tool("ssh"));
+        cmd.arg(&self.address).arg(remote_cmd);
+        cmd.stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped());
+
+        logging::log_and_print_command(&cmd);
+
+        Ok(cmd.spawn().map_err(|e| {
+            ClientError::Core(AppError::ProcessLaunchFailed {
+                command_name: "ssh".to_string(),
+                source: e,
+            })
+        })?)
+    }
 
     fn read_remote_file_tail(&self, path: &Path, line_count: u32) -> Result<Vec<String>> {
         let quoted_path = shell_quote(&path.to_string_lossy());
@@ -344,19 +373,11 @@ impl Target for SshTarget {
         }
         Ok(())
     }
-
     fn sync_directory(&self, local_path: &Path, remote_path: &Path) -> Result<()> {
-        let mkdir_bin = self.remote_tool("mkdir");
-        let mkdir_cmd = format!(
-            "{} -p {}",
-            mkdir_bin,
-            shell_quote(&remote_path.to_string_lossy())
-        );
-        self.run_command("sh", &["-c", &mkdir_cmd])?;
-
         let mut rsync_cmd = Command::new(self.local_tool("rsync"));
         rsync_cmd
-            .arg("-rltpz")
+            .arg("-rLtpz")
+            .arg("--mkpath")
             .arg(format!("{}/", local_path.display()))
             .arg(format!("{}:{}", self.address, remote_path.display()));
 

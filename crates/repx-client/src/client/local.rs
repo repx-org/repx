@@ -9,7 +9,7 @@ use repx_core::{
 };
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
-use std::process::{Child, Command};
+use std::process::Child;
 use std::sync::Arc;
 
 pub fn submit_local_batch_run(
@@ -114,23 +114,30 @@ pub fn submit_local_batch_run(
                     let image_tag = image_path_opt
                         .and_then(|p| p.file_stem())
                         .and_then(|s| s.to_str());
-
-                    let mut cmd = Command::new(repx_binary_path);
+                    let mut args = Vec::new();
 
                     if stage_type == "scatter-gather" {
-                        cmd.arg("internal-scatter-gather");
+                        args.push("internal-scatter-gather".to_string());
                     } else {
-                        cmd.arg("internal-execute");
+                        args.push("internal-execute".to_string());
                     };
 
-                    cmd.arg("--job-id").arg(job_id.0.as_str());
-                    cmd.arg("--runtime").arg(execution_type);
+                    args.push("--job-id".to_string());
+                    args.push(job_id.0.clone());
+
+                    args.push("--runtime".to_string());
+                    args.push(execution_type.to_string());
+
                     if let Some(tag) = image_tag {
-                        cmd.arg("--image-tag").arg(tag);
+                        args.push("--image-tag".to_string());
+                        args.push(tag.to_string());
                     }
-                    cmd.arg("--base-path").arg(target.base_path());
-                    cmd.arg("--host-tools-dir")
-                        .arg(&client.lab.host_tools_dir_name);
+
+                    args.push("--base-path".to_string());
+                    args.push(target.base_path().to_string_lossy().to_string());
+
+                    args.push("--host-tools-dir".to_string());
+                    args.push(client.lab.host_tools_dir_name.clone());
 
                     if stage_type == "scatter-gather" {
                         let scatter_exe = job.executables.get("scatter").unwrap();
@@ -147,32 +154,35 @@ pub fn submit_local_batch_run(
                         let worker_outputs_json =
                             serde_json::to_string(&worker_exe.outputs).map_err(AppError::from)?;
 
-                        cmd.arg("--job-package-path")
-                            .arg(job_package_path_on_target);
-                        cmd.arg("--scatter-exe-path").arg(scatter_exe_path);
-                        cmd.arg("--worker-exe-path").arg(worker_exe_path);
-                        cmd.arg("--gather-exe-path").arg(gather_exe_path);
-                        cmd.arg("--worker-outputs-json").arg(worker_outputs_json);
+                        args.push("--job-package-path".to_string());
+                        args.push(job_package_path_on_target.to_string_lossy().to_string());
 
-                        cmd.arg("--scheduler").arg("local");
-                        cmd.arg("--worker-sbatch-opts").arg("");
+                        args.push("--scatter-exe-path".to_string());
+                        args.push(scatter_exe_path.to_string_lossy().to_string());
+
+                        args.push("--worker-exe-path".to_string());
+                        args.push(worker_exe_path.to_string_lossy().to_string());
+
+                        args.push("--gather-exe-path".to_string());
+                        args.push(gather_exe_path.to_string_lossy().to_string());
+
+                        args.push("--worker-outputs-json".to_string());
+                        args.push(worker_outputs_json);
+
+                        args.push("--scheduler".to_string());
+                        args.push("local".to_string());
+
+                        args.push("--worker-sbatch-opts".to_string());
+                        args.push("".to_string());
                     } else {
                         let main_exe = job.executables.get("main").unwrap();
                         let executable_path_on_target =
                             target.artifacts_base_path().join(&main_exe.path);
-                        cmd.arg("--executable-path").arg(executable_path_on_target);
+                        args.push("--executable-path".to_string());
+                        args.push(executable_path_on_target.to_string_lossy().to_string());
                     }
 
-                    cmd.stdout(std::process::Stdio::piped())
-                        .stderr(std::process::Stdio::piped());
-
-                    let child = cmd.spawn().map_err(|e| {
-                        ClientError::Core(AppError::ProcessLaunchFailed {
-                            command_name: repx_binary_path.to_string_lossy().to_string(),
-                            source: e,
-                        })
-                    })?;
-
+                    let child = target.spawn_repx_job(repx_binary_path, &args)?;
                     submitted_count += 1;
                     send(ClientEvent::JobStarted {
                         job_id: job_id.clone(),

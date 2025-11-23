@@ -553,7 +553,19 @@ impl Executor {
     ) -> Result<TokioCommand> {
         let mut cmd = TokioCommand::new(runtime);
         let slurm_job_id = std::env::var("SLURM_JOB_ID").unwrap_or_else(|_| "local".to_string());
-        let xdg_runtime_dir = format!("/tmp/podman-runtime-{}", slurm_job_id);
+
+        let xdg_runtime_dir = PathBuf::from(format!("/tmp/podman-runtime-{}", slurm_job_id));
+
+        if !xdg_runtime_dir.exists() {
+            std::fs::create_dir_all(&xdg_runtime_dir).map_err(ExecutorError::Io)?;
+
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let perms = std::fs::Permissions::from_mode(0o700);
+                std::fs::set_permissions(&xdg_runtime_dir, perms).map_err(ExecutorError::Io)?;
+            }
+        }
 
         cmd.arg("run")
             .arg("--rm")
