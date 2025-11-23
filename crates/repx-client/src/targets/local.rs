@@ -176,17 +176,15 @@ impl Target for LocalTarget {
         cmd.args(args);
         cmd.stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped());
-
         repx_core::logging::log_and_print_command(&cmd);
 
-        Ok(cmd.spawn().map_err(|e| {
+        cmd.spawn().map_err(|e| {
             ClientError::Core(AppError::ProcessLaunchFailed {
                 command_name: repx_binary_path.to_string_lossy().to_string(),
                 source: e,
             })
-        })?)
+        })
     }
-
     fn read_remote_file_tail(&self, path: &Path, line_count: u32) -> Result<Vec<String>> {
         if !path.exists() {
             return Ok(vec![]);

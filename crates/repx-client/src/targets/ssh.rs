@@ -292,17 +292,15 @@ impl Target for SshTarget {
         cmd.arg(&self.address).arg(remote_cmd);
         cmd.stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped());
-
         logging::log_and_print_command(&cmd);
 
-        Ok(cmd.spawn().map_err(|e| {
+        cmd.spawn().map_err(|e| {
             ClientError::Core(AppError::ProcessLaunchFailed {
                 command_name: "ssh".to_string(),
                 source: e,
             })
-        })?)
+        })
     }
-
     fn read_remote_file_tail(&self, path: &Path, line_count: u32) -> Result<Vec<String>> {
         let quoted_path = shell_quote(&path.to_string_lossy());
         let tail_bin = self.remote_tool("tail");
