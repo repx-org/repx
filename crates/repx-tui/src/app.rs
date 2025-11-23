@@ -11,6 +11,7 @@ use repx_core::{
     theme::Theme,
 };
 use std::collections::{HashSet, VecDeque};
+use std::path::PathBuf;
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -72,7 +73,6 @@ pub enum LogPollerCommand {
     Stop,
 }
 type LogUpdate = (JobId, Result<Vec<String>, ClientError>);
-
 pub enum SubmissionResult {
     Success {
         submitted_job_ids: HashSet<JobId>,
@@ -84,6 +84,9 @@ pub enum SubmissionResult {
     },
 }
 
+pub enum ExternalAction {
+    Explore(PathBuf),
+}
 pub struct App {
     pub client: Arc<Client>,
     pub theme: Theme,
@@ -104,6 +107,7 @@ pub struct App {
     pub is_loading: bool,
     resources: Option<Resources>,
     pub focused_panel: PanelFocus,
+    pub pending_action: Option<ExternalAction>,
 }
 
 impl App {
@@ -186,7 +190,6 @@ impl App {
 
         let lab = client.lab()?.clone();
         let tick_rate = client.config().tui_tick_rate();
-
         let mut app = Self {
             client: Arc::new(client),
             theme,
@@ -207,6 +210,7 @@ impl App {
             is_loading: true,
             resources,
             focused_panel: PanelFocus::Jobs,
+            pending_action: None,
         };
 
         app.jobs_state.init_from_lab(&app.lab);
@@ -769,9 +773,71 @@ impl App {
     pub fn debug_selected(&mut self) {}
 
     pub fn show_path_selected(&mut self) {}
-
     pub fn follow_logs_selected(&mut self) {}
+    pub fn yank_selected_path(&mut self) {
+        if let Some(path) = self.get_selected_job_path() {
+            let path_str = path.to_string_lossy().to_string();
 
+            thread::spawn(move || {
+                let mut copied = false;
+                match arboard::Clipboard::new() {
+                    Ok(mut clipboard) => {
+                        if let Err(e) = clipboard.set_text(path_str.clone()) {
+                            log_warn!("Failed to yank path to clipboard (arboard): {}", e);
+                        } else {
+                            copied = true;
+                        }
+                    }
+                    Err(e) => {
+                        log_warn!("Failed to initialize clipboard: {}", e);
+                    }
+                }
+
+                if copied {
+                    log_info!("Yanked path: {}", path_str);
+                }
+            });
+        } else {
+            log_info!("No job selected to yank path from.");
+        }
+    }
+
+    pub fn explore_selected_path(&mut self) {
+        if let Some(path) = self.get_selected_job_path() {
+            if path.exists() {
+                self.pending_action = Some(ExternalAction::Explore(path));
+            } else {
+                log_warn!("Path does not exist: {}", path.display());
+            }
+        } else {
+            log_info!("No job selected to explore.");
+        }
+    }
+
+    pub fn consume_pending_action(&mut self) -> Option<ExternalAction> {
+        self.pending_action.take()
+    }
+
+    fn get_selected_job_path(&self) -> Option<PathBuf> {
+        let selected_idx = self.jobs_state.table_state.selected()?;
+        let row = self.jobs_state.display_rows.get(selected_idx)?;
+
+        match &row.item {
+            TuiRowItem::Job { job } => {
+                let target_name = self.targets_state.get_active_target_name();
+                let config = self.client.config();
+                let target_config = config.targets.get(&target_name)?;
+                Some(
+                    target_config
+                        .base_path
+                        .join("outputs")
+                        .join(job.full_id.to_string())
+                        .join("out"),
+                )
+            }
+            TuiRowItem::Run { .. } => None,
+        }
+    }
     fn update_context_for_job(&mut self, master_index: Option<usize>) {
         if let Some(master_index) = master_index {
             if let Some(job) = self.jobs_state.jobs.get_mut(master_index) {

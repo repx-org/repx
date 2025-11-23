@@ -925,16 +925,14 @@ fn draw_space_menu_popup(f: &mut Frame, area: Rect, app: &App) {
         .border_style(get_style(app, &app.theme.elements.popups.border));
 
     let inner_area = block.inner(popup_area);
-
     let shortcuts = [
         ("r", "Run Selected"),
         ("c", "Cancel Selected"),
-        ("d", "Debug Shell"),
-        ("p", "Show Path"),
+        ("y", "Yank Path"),
+        ("e", "Explore (Yazi)"),
         ("l", "Follow Logs"),
         ("ESC", "Close Menu"),
     ];
-
     let mut rows = vec![];
     for chunk in shortcuts.chunks(3) {
         let mut cells = chunk

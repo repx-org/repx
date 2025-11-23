@@ -135,6 +135,14 @@ fn handle_space_menu_key_event(key: KeyEvent, app: &mut App) {
             app.follow_logs_selected();
             app.input_mode = InputMode::Normal;
         }
+        KeyCode::Char('y') => {
+            app.yank_selected_path();
+            app.input_mode = InputMode::Normal;
+        }
+        KeyCode::Char('e') => {
+            app.explore_selected_path();
+            app.input_mode = InputMode::Normal;
+        }
         KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char(' ') => {
             app.input_mode = InputMode::Normal;
         }

@@ -3,8 +3,7 @@ mod event;
 mod model;
 mod ui;
 mod widgets;
-
-use crate::app::LogPollerCommand;
+use crate::app::{ExternalAction, LogPollerCommand};
 use crate::{
     app::{App, SubmissionResult},
     event::handle_key_event,
@@ -132,7 +131,6 @@ fn main() -> Result<(), AppError> {
             thread::sleep(Duration::from_millis(200));
         }
     });
-
     let (submission_tx, submission_rx) = mpsc::channel::<SubmissionResult>();
 
     let mut app = App::new(
@@ -157,7 +155,6 @@ fn main() -> Result<(), AppError> {
     run_app(&mut terminal, &mut app)?;
 
     should_quit.store(true, Ordering::Relaxed);
-
     restore_terminal(&mut terminal)?;
 
     Ok(())
@@ -170,11 +167,21 @@ fn setup_terminal() -> io::Result<Terminal<CrosstermBackend<Stdout>>> {
     let backend = CrosstermBackend::new(stdout);
     Terminal::new(backend)
 }
-
 fn run_app(terminal: &mut Terminal<CrosstermBackend<Stdout>>, app: &mut App) -> io::Result<()> {
     let mut last_tick = Instant::now();
     loop {
         terminal.draw(|f| ui::draw(f, app))?;
+
+        if let Some(action) = app.consume_pending_action() {
+            match action {
+                ExternalAction::Explore(path) => {
+                    suspend_tui(terminal)?;
+                    let _ = std::process::Command::new("yazi").arg(path).status();
+                    resume_tui(terminal)?;
+                    terminal.clear()?;
+                }
+            }
+        }
 
         let timeout = app
             .tick_rate
@@ -199,6 +206,27 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<Stdout>>, app: &mut App) -> 
     }
 }
 
+fn suspend_tui(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> io::Result<()> {
+    disable_raw_mode()?;
+    execute!(
+        terminal.backend_mut(),
+        LeaveAlternateScreen,
+        DisableMouseCapture
+    )?;
+    terminal.show_cursor()?;
+    Ok(())
+}
+
+fn resume_tui(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> io::Result<()> {
+    enable_raw_mode()?;
+    execute!(
+        terminal.backend_mut(),
+        EnterAlternateScreen,
+        EnableMouseCapture
+    )?;
+    terminal.hide_cursor()?;
+    Ok(())
+}
 fn restore_terminal(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> io::Result<()> {
     repx_core::log_info!("--- Repx TUI Shutting Down ---");
     disable_raw_mode()?;
