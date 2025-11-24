@@ -40,6 +40,9 @@ pkgs.testers.runNixOSTest {
           pkgs.bubblewrap
           pkgs.rsync
           pkgs.bash
+          pkgs.coreutils
+          pkgs.findutils
+          pkgs.gnugrep
         ];
 
         users.users.repxuser = {
@@ -72,10 +75,14 @@ pkgs.testers.runNixOSTest {
           controlMachine = "cluster";
           procTrackType = "proctrack/pgid";
           nodeName = [ "cluster CPUs=2 RealMemory=3000 State=UNKNOWN" ];
-          partitionName = [ "default Nodes=cluster Default=YES MaxTime=INFINITE State=UP" ];
+          partitionName = [ "main Nodes=cluster Default=YES MaxTime=INFINITE State=UP" ];
+
           extraConfig = ''
             SlurmdTimeout=60
             SlurmctldTimeout=60
+            # Ensure we can run as the repxuser
+            JobCredentialPrivateKey=/etc/slurm/slurm.key
+            JobCredentialPublicCertificate=/etc/slurm/slurm.cert
           '';
         };
       };
@@ -103,8 +110,10 @@ pkgs.testers.runNixOSTest {
     cluster.wait_for_unit("slurmctld.service")
     cluster.wait_for_unit("slurmd.service")
 
+    cluster.succeed("sinfo")
+
     def run_slurm_test(runtime):
-        print(f"--- Testing Remote Slurm: {runtime} ---")
+        print(f"\n>>> Testing Remote Slurm Runtime: {runtime} <<<")
 
         config = f"""
         submission_target = "cluster"
@@ -118,12 +127,57 @@ pkgs.testers.runNixOSTest {
         execution_types = ["{runtime}"]
         """
 
+        resources = """
+        [defaults]
+        partition = "main"
+        """
+
         client.succeed("mkdir -p /root/.config/repx")
         client.succeed(f"cat <<EOF > /root/.config/repx/config.toml\n{config}\nEOF")
+        client.succeed(f"cat <<EOF > /root/.config/repx/resources.toml\n{resources}\nEOF")
 
+        print(f"[{runtime}] Submitting jobs...")
         client.succeed("repx-runner run simulation-run --lab ${referenceLab}")
 
-        cluster.succeed("find /home/repxuser/repx-store/outputs -name SUCCESS | grep .")
+        print(f"[{runtime}] Waiting for jobs to finish in Slurm queue...")
+
+        cluster.succeed("""
+            for i in {1..60}; do
+                if ! squeue -h -u repxuser | grep .; then
+                    echo "Queue empty, jobs finished."
+                    exit 0
+                fi
+                sleep 2
+            done
+            echo "Timeout waiting for Slurm jobs to finish."
+            exit 1
+        """)
+
+        print(f"[{runtime}] Verifying output...")
+
+        rc, _ = cluster.execute("find /home/repxuser/repx-store/outputs -name SUCCESS | grep .")
+
+        if rc != 0:
+            print(f"!!! [{runtime}] TEST FAILED. Dumping debug info:")
+
+            print("\n>>> SLURM JOB HISTORY (sacct):")
+            print(cluster.succeed("sacct --format=JobID,JobName,State,ExitCode"))
+
+            print("\n>>> SLURM NODE STATE (sinfo):")
+            print(cluster.succeed("sinfo"))
+
+            print("\n>>> OUTPUT DIRECTORY TREE:")
+            print(cluster.succeed("find /home/repxuser/repx-store/outputs -maxdepth 4"))
+
+            print("\n>>> SLURM OUTPUT LOGS (Standard Out):")
+            print(cluster.succeed("find /home/repxuser/repx-store/outputs -name 'slurm-*.out' -exec echo '--- {} ---' \; -exec cat {} \;"))
+
+            print("\n>>> REPX STDERR LOGS (Execution Errors):")
+            print(cluster.succeed("find /home/repxuser/repx-store/outputs -name 'stderr.log' -exec echo '--- {} ---' \; -exec cat {} \;"))
+
+            raise Exception(f"Run failed for runtime: {runtime}")
+        else:
+            print(f"[{runtime}] Success! Jobs completed successfully.")
 
         cluster.succeed("rm -rf /home/repxuser/repx-store/outputs/*")
         cluster.succeed("rm -rf /home/repxuser/repx-store/cache/*")
