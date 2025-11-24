@@ -177,7 +177,6 @@ impl Client {
     ) -> Result<String> {
         self.submit_batch_run(vec![run_spec], target_name, scheduler, options)
     }
-
     pub fn submit_batch_run(
         &self,
         run_specs: Vec<String>,
@@ -210,6 +209,17 @@ impl Client {
                 "All selected jobs are already complete or no jobs were specified.".to_string(),
             );
         }
+
+        send(ClientEvent::DeployingBinary);
+        let remote_repx_binary_path = target.deploy_repx_binary()?;
+        log_info!(
+            "repx binary deployed to: {}",
+            remote_repx_binary_path.display()
+        );
+
+        send(ClientEvent::SyncingArtifacts { total: 1 });
+        target.sync_lab_root(&self.lab_path)?;
+        send(ClientEvent::SyncingFinished);
 
         let raw_statuses = self.get_statuses_for_active_target(target_name)?;
         let job_statuses = engine::determine_job_statuses(&self.lab, &raw_statuses);
@@ -259,17 +269,6 @@ impl Client {
                 "All schedulable jobs for this submission are already complete.".to_string(),
             );
         }
-
-        send(ClientEvent::DeployingBinary);
-        let remote_repx_binary_path = target.deploy_repx_binary()?;
-        log_info!(
-            "repx binary deployed to: {}",
-            remote_repx_binary_path.display()
-        );
-
-        send(ClientEvent::SyncingArtifacts { total: 1 });
-        target.sync_lab_root(&self.lab_path)?;
-        send(ClientEvent::SyncingFinished);
 
         for (job_id, job) in &jobs_to_run {
             if job.stage_type == "scatter-gather" {

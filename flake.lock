@@ -92,11 +92,11 @@
       },
       "locked": {
         "dir": "examples/reference",
-        "lastModified": 1763816461,
-        "narHash": "sha256-pTkDv3WXUWPG7i+vptdc0L/q/P75dyteFjUaf8CaF3E=",
+        "lastModified": 1763892777,
+        "narHash": "sha256-ex2J3EEHV29lzRY5rSDOwGzlkAEJoiRIiaWiKd9tcCY=",
         "owner": "repx-org",
         "repo": "repx",
-        "rev": "15acfdb2b24c2427867f2f5f42d01e0ffece1372",
+        "rev": "a0b4d42bc1bdb356a1262e185d731ceb26530b05",
         "type": "github"
       },
       "original": {
