@@ -60,70 +60,79 @@ else
         ''
       else
         pkgs.lib.cartesianProduct allParams;
-
-    repxForDiscovery = repx-lib.mkPipelineHelpers {
-      inherit pkgs repx-lib;
-    };
-
-    getDrvsFromPipeline =
-      pipeline:
-      pkgs.lib.flatten (
-        pkgs.lib.map (stageResult: if pkgs.lib.isDerivation stageResult then stageResult else [ ]) (
-          pkgs.lib.attrValues pipeline
-        )
-      );
-
-    loadedPipelines = pkgs.lib.map (
-      p:
-      pkgs.callPackage p {
-        repx = repxForDiscovery;
-      }
-    ) pipelines;
   in
-  {
-    inherit name interRunDepTypes;
+  if allCombinations == [ ] then
+    throw ''
+      Error in 'mkRun' for run "${name}":
+      The resulting parameter sweep is empty.
+      This happens if the 'pipelines' list is empty, or if any parameter in 'params' is an empty list.
+      'pkgs.lib.cartesianProduct' produces no combinations if *any* input list is empty.
+    ''
+  else
+    let
+      repxForDiscovery = repx-lib.mkPipelineHelpers {
+        inherit pkgs repx-lib;
+      };
 
-    image =
-      if containerized then
-        pkgs.dockerTools.buildImage {
-          name = name + "-image";
-          tag = "latest";
-          copyToRoot =
-            (pkgs.lib.flatten (map getDrvsFromPipeline loadedPipelines))
-            ++ [
-              pkgs.jq
-              pkgs.bash
-              pkgs.coreutils
-              pkgs.findutils
-              pkgs.gnused
-              pkgs.gawk
-              pkgs.gnugrep
-            ]
-            ++ paramsDependencies;
-          config = {
-            Cmd = [ "${pkgs.bash}/bin/bash" ];
-          };
+      getDrvsFromPipeline =
+        pipeline:
+        pkgs.lib.flatten (
+          pkgs.lib.map (stageResult: if pkgs.lib.isDerivation stageResult then stageResult else [ ]) (
+            pkgs.lib.attrValues pipeline
+          )
+        );
+
+      loadedPipelines = pkgs.lib.map (
+        p:
+        pkgs.callPackage p {
+          repx = repxForDiscovery;
         }
-      else
-        null;
+      ) pipelines;
+    in
+    {
+      inherit name interRunDepTypes;
 
-    runs = pkgs.lib.map (
-      combo:
-      let
-        pipelinePath = combo.pipeline;
-        paramInputs = pkgs.lib.removeAttrs combo [ "pipeline" ];
-        repxForPipeline = repx-lib.mkPipelineHelpers {
-          inherit
-            pkgs
-            repx-lib
-            paramInputs
-            dependencyJobs
-            interRunDepTypes
-            ;
-        };
-      in
-      pkgs.callPackage pipelinePath {
-        repx = repxForPipeline;
-      }
-    ) allCombinations;
-  }
+      image =
+        if containerized then
+          pkgs.dockerTools.buildImage {
+            name = name + "-image";
+            tag = "latest";
+            copyToRoot =
+              (pkgs.lib.flatten (map getDrvsFromPipeline loadedPipelines))
+              ++ [
+                pkgs.jq
+                pkgs.bash
+                pkgs.coreutils
+                pkgs.findutils
+                pkgs.gnused
+                pkgs.gawk
+                pkgs.gnugrep
+              ]
+              ++ paramsDependencies;
+            config = {
+              Cmd = [ "${pkgs.bash}/bin/bash" ];
+            };
+          }
+        else
+          null;
+
+      runs = pkgs.lib.map (
+        combo:
+        let
+          pipelinePath = combo.pipeline;
+          paramInputs = pkgs.lib.removeAttrs combo [ "pipeline" ];
+          repxForPipeline = repx-lib.mkPipelineHelpers {
+            inherit
+              pkgs
+              repx-lib
+              paramInputs
+              dependencyJobs
+              interRunDepTypes
+              ;
+          };
+        in
+        pkgs.callPackage pipelinePath {
+          repx = repxForPipeline;
+        }
+      ) allCombinations;
+    }
