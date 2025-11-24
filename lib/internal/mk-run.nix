@@ -40,6 +40,22 @@ else
       pipeline = pipelines;
     };
 
+    autoParamsDependencies =
+      let
+        extractDeps =
+          val:
+          if pkgs.lib.isDerivation val then
+            [ val ]
+          else if builtins.isPath val then
+            [ val ]
+          else if builtins.isString val then
+            builtins.attrNames (builtins.getContext val)
+          else
+            [ ];
+        flatParams = pkgs.lib.flatten (builtins.attrValues params);
+      in
+      pkgs.lib.unique (pkgs.lib.flatten (map extractDeps flatParams));
+
     allCombinations =
       let
         invalidParams = pkgs.lib.filter (param: !pkgs.lib.isList param.value) (
@@ -94,10 +110,10 @@ else
 
       image =
         if containerized then
-          pkgs.dockerTools.buildImage {
+          pkgs.dockerTools.buildLayeredImage {
             name = name + "-image";
             tag = "latest";
-            copyToRoot =
+            contents =
               (pkgs.lib.flatten (map getDrvsFromPipeline loadedPipelines))
               ++ [
                 pkgs.jq
@@ -108,7 +124,8 @@ else
                 pkgs.gawk
                 pkgs.gnugrep
               ]
-              ++ paramsDependencies;
+              ++ paramsDependencies
+              ++ autoParamsDependencies;
             config = {
               Cmd = [ "${pkgs.bash}/bin/bash" ];
             };
