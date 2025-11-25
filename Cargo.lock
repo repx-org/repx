@@ -1517,6 +1517,8 @@ dependencies = [
  "log",
  "nix",
  "repx-core",
+ "serde",
+ "serde_json",
  "shellexpand",
  "tempfile",
  "thiserror",

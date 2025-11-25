@@ -1,5 +1,6 @@
 use nix::fcntl::{Flock, FlockArg};
 use repx_core::{log_debug, log_info, model::JobId};
+use serde::Deserialize;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -361,44 +362,77 @@ impl Executor {
             )));
         }
 
-        let layer_tar_path = walkdir::WalkDir::new(temp_extract_dir.path())
-            .into_iter()
-            .filter_map(|e| e.ok())
-            .find(|e| e.file_name() == "layer.tar")
-            .map(|e| e.path().to_path_buf())
-            .ok_or_else(|| {
-                ExecutorError::Io(std::io::Error::new(
-                    std::io::ErrorKind::NotFound,
-                    "Could not find 'layer.tar' inside the extracted image archive.",
-                ))
-            })?;
-
-        tokio::fs::create_dir_all(&extract_dir).await?;
-        let mut cmd2 = TokioCommand::new(&tar_path);
-        cmd2.arg("-xf")
-            .arg(&layer_tar_path)
-            .arg("-C")
-            .arg(&extract_dir)
-            .arg("--no-same-owner")
-            .arg("--no-same-permissions")
-            .arg("--mode=0755")
-            .arg("--delay-directory-restore")
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
-        self.restrict_command_environment(&mut cmd2, &["tar", "gzip"]);
-
-        let output2 = cmd2.output().await?;
-        if !output2.status.success() {
-            let _ = tokio::fs::remove_dir_all(&extract_dir).await;
+        let manifest_path = temp_extract_dir.path().join("manifest.json");
+        if !manifest_path.exists() {
             return Err(ExecutorError::Io(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                format!(
-                    "Failed to extract inner 'layer.tar'. Stderr: {}",
-                    String::from_utf8_lossy(&output2.stderr)
-                ),
+                std::io::ErrorKind::NotFound,
+                "Could not find 'manifest.json' inside the extracted image archive.",
             )));
         }
 
+        #[derive(Deserialize)]
+        struct ManifestEntry {
+            #[serde(rename = "Layers")]
+            layers: Vec<String>,
+        }
+
+        let manifest_content = tokio::fs::read_to_string(&manifest_path).await?;
+        let manifest: Vec<ManifestEntry> =
+            serde_json::from_str(&manifest_content).map_err(|e| {
+                ExecutorError::Io(std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+            })?;
+
+        if manifest.is_empty() {
+            return Err(ExecutorError::Io(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "manifest.json is empty or invalid array",
+            )));
+        }
+
+        let layers = &manifest[0].layers;
+
+        tokio::fs::create_dir_all(&extract_dir).await?;
+
+        for layer in layers {
+            let layer_path = temp_extract_dir.path().join(layer);
+            if !layer_path.exists() {
+                log_debug!(
+                    "Layer {} listed in manifest but not found, skipping.",
+                    layer
+                );
+                continue;
+            }
+
+            log_debug!("Extracting layer: {:?}", layer_path);
+
+            let mut cmd_layer = TokioCommand::new(&tar_path);
+            cmd_layer
+                .arg("-xf")
+                .arg(&layer_path)
+                .arg("-C")
+                .arg(&extract_dir)
+                .arg("--no-same-owner")
+                .arg("--no-same-permissions")
+                .arg("--mode=0755")
+                .arg("--delay-directory-restore")
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped());
+
+            self.restrict_command_environment(&mut cmd_layer, &["tar", "gzip"]);
+
+            let output = cmd_layer.output().await?;
+            if !output.status.success() {
+                let _ = tokio::fs::remove_dir_all(&extract_dir).await;
+                return Err(ExecutorError::Io(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    format!(
+                        "Failed to extract layer '{}'. Stderr: {}",
+                        layer,
+                        String::from_utf8_lossy(&output.stderr)
+                    ),
+                )));
+            }
+        }
         for dir in &["dev", "proc", "tmp"] {
             let p = extract_dir.join(dir);
             if !p.exists() {
