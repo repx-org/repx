@@ -87,17 +87,25 @@ let
       dependencyJobs = pkgs.lib.mapAttrs' (
         depName: _: pkgs.lib.nameValuePair depName acc."${depName}".jobs
       ) runNode.deps;
-      runArgs = pkgs.callPackage placeholder.runPath { inherit pkgs repx-lib; };
+      utils = repx-lib.mkUtils { inherit pkgs; };
+      repxLibScope = repx-lib // {
+        inherit utils;
+      };
+
+      runArgs = pkgs.callPackage placeholder.runPath {
+        inherit pkgs;
+        repx-lib = repxLibScope;
+      };
 
       evaluatedRun = repx-lib.mkRun (
         {
-          inherit pkgs repx-lib;
+          inherit pkgs;
+          repx-lib = repxLibScope;
           name = runName;
           inherit dependencyJobs interRunDepTypes;
         }
         // runArgs
       );
-
       extractJobs =
         runDef:
         let

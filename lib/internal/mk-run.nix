@@ -36,9 +36,26 @@ if invalidKeys != [ ] then
   ''
 else
   let
-    allParams = params // {
+    allParamsRaw = params // {
       pipeline = pipelines;
     };
+
+    processedParams = pkgs.lib.mapAttrs (
+      _: val:
+      if (builtins.isAttrs val) && (val._repx_param or false) then
+        {
+          inherit (val) values;
+          context = val.context or [ ];
+        }
+      else
+        {
+          values = val;
+          context = [ ];
+        }
+    ) allParamsRaw;
+
+    allParams = pkgs.lib.mapAttrs (_: p: p.values) processedParams;
+    smartParamContext = pkgs.lib.flatten (pkgs.lib.mapAttrsToList (_: p: p.context) processedParams);
 
     autoParamsDependencies =
       let
@@ -46,15 +63,16 @@ else
           val:
           if pkgs.lib.isDerivation val then
             [ val ]
-          else if builtins.isPath val then
-            [ val ]
-          else if builtins.isString val then
-            builtins.attrNames (builtins.getContext val)
+          else if builtins.isList val then
+            pkgs.lib.concatMap extractDeps val
+          else if builtins.isAttrs val then
+            pkgs.lib.concatMap extractDeps (builtins.attrValues val)
           else
             [ ];
-        flatParams = pkgs.lib.flatten (builtins.attrValues params);
+
+        flatParams = builtins.attrValues allParams;
       in
-      pkgs.lib.unique (pkgs.lib.flatten (map extractDeps flatParams));
+      pkgs.lib.unique ((pkgs.lib.flatten (map extractDeps flatParams)) ++ smartParamContext);
 
     allCombinations =
       let
@@ -110,22 +128,30 @@ else
 
       image =
         if containerized then
+          let
+            # We bundle parameter dependencies into a reference file.
+            # This ensures they are copied to the Nix store of the container
+            # (because they are in the closure of this file),
+            # but they are NOT symlinked to the root filesystem (e.g. /bin, /lib).
+            # This prevents file collisions at the root when multiple data inputs
+            # share filenames (e.g. two inputs both having a "docs" folder).
+            paramDepsClosure = pkgs.writeTextDir "share/repx/param-dependencies" (
+              builtins.toJSON (paramsDependencies ++ autoParamsDependencies)
+            );
+          in
           pkgs.dockerTools.buildLayeredImage {
             name = name + "-image";
             tag = "latest";
-            contents =
-              (pkgs.lib.flatten (map getDrvsFromPipeline loadedPipelines))
-              ++ [
-                pkgs.jq
-                pkgs.bash
-                pkgs.coreutils
-                pkgs.findutils
-                pkgs.gnused
-                pkgs.gawk
-                pkgs.gnugrep
-              ]
-              ++ paramsDependencies
-              ++ autoParamsDependencies;
+            contents = (pkgs.lib.flatten (map getDrvsFromPipeline loadedPipelines)) ++ [
+              pkgs.jq
+              pkgs.bash
+              pkgs.coreutils
+              pkgs.findutils
+              pkgs.gnused
+              pkgs.gawk
+              pkgs.gnugrep
+              paramDepsClosure
+            ];
             config = {
               Cmd = [ "${pkgs.bash}/bin/bash" ];
             };

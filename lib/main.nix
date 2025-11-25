@@ -5,11 +5,17 @@ let
   };
 
   mkRun = import ./internal/mk-run.nix;
+  mkUtils = import ./utils.nix;
 
   mkLab = import ./lab.nix;
 in
 rec {
-  inherit mkRun mkLab callRun;
+  inherit
+    mkRun
+    mkLab
+    callRun
+    mkUtils
+    ;
   mkPipelineHelpers =
     args:
     let
