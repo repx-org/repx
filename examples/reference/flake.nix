@@ -22,8 +22,6 @@
       };
       repx-lib = repx-nix.lib;
 
-      # Evaluate the lab definition here.
-      # mkLab returns a set: { lab = drv; labUnified = drv; labNative = drv; }
       labOutputs = (import ./nix/lab.nix) {
         inherit pkgs repx-lib;
         gitHash = self.rev or self.dirtyRev or "unknown";
@@ -31,12 +29,7 @@
     in
     {
       packages.${system} = {
-        # We must select the specific derivation (.lab) from the outputs
         lab = labOutputs.lab;
-        # Optionally expose the others
-        # labNative = labOutputs.labNative;
-
-        # Set a default package
         default = labOutputs.lab;
       };
 

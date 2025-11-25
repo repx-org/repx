@@ -1,10 +1,25 @@
-{ pkgs, repx-lib }:
+{
+  pkgs,
+  repx-lib,
+}:
+let
+  utils = repx-lib.utils;
+in
 {
   name = "simulation-run";
+  pipelines = [ ./pipelines/pipe-simulation.nix ];
 
-  pipelines = [
-    ./pipelines/pipe-simulation.nix
-  ];
-
-  params = { };
+  params = {
+    offset = utils.range 1 2;
+    mode = utils.list [
+      "fast"
+      "slow"
+    ];
+    template_dir = utils.dirs ../pkgs/headers;
+    config_file = utils.scan {
+      src = ../pkgs/configs;
+      match = ".*\.json";
+      type = "file";
+    };
+  };
 }

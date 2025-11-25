@@ -1,15 +1,23 @@
 { pkgs }:
 {
   pname = "stage-A-producer";
+  params = {
+    offset = 0;
+    template_dir = "";
+  };
 
   outputs = {
-    "data.numbers" = "$out/numbers.txt";
+    "data_a" = "$out/numbers.txt";
   };
 
   run =
-    { outputs, ... }:
+    { outputs, params, ... }:
     ''
-      echo "Stage A: Producing number list 1-5"
-      printf "1\n2\n3\n4\n5\n" > "${outputs."data.numbers"}"
-    '';
+      echo "Stage A: Offset ${toString params.offset}, Template ${params.template_dir}"
+
+      # Generate numbers 1-5 + offset
+      for i in {1..5}; do
+        echo $((i + ${toString params.offset}))
+      done > "${outputs."data_a"}"
+'';
 }
