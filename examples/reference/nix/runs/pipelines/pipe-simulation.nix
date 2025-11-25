@@ -5,14 +5,10 @@ repx.mkPipe rec {
   producer_b = repx.callStage ./stages/stage-B-producer.nix [ ];
 
   consumer = repx.callStage ./stages/stage-C-consumer.nix [
-    [
-      producer_a
-      "data.numbers"
-      "list_a"
-    ]
+    producer_a
     [
       producer_b
-      "data.numbers"
+      "raw_output"
       "list_b"
     ]
   ];
@@ -20,7 +16,7 @@ repx.mkPipe rec {
   partial_sums = repx.callStage ./stages/stage-D-scatter-sum.nix [
     [
       consumer
-      "data.combined_list"
+      "combined_list"
       "number_list_file"
     ]
   ];

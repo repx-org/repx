@@ -25,7 +25,6 @@
         import argparse
         import json
         import sys
-        import os
         import matplotlib.pyplot as plt
         from pathlib import Path
 
@@ -36,65 +35,60 @@
             parser.add_argument("--output", required=True)
             args = parser.parse_args()
 
-            print(f"Loading metadata from: {args.meta}")
-
-            try:
-                with open(args.meta, 'r') as f:
-                    data = json.load(f)
-            except Exception as e:
-                print(f"Failed to load metadata: {e}")
-                sys.exit(1)
+            with open(args.meta, 'r') as f:
+                data = json.load(f)
 
             jobs = data.get('jobs', {})
-            target_job_id = None
-            target_job_data = None
+            results = []
 
-            print("Searching for 'stage-C-consumer'...")
+            store_path = Path(args.store)
+            outputs_dir = store_path / "outputs"
+
+            print(f"Scanning for results in: {outputs_dir}")
+
             for jid, jdata in jobs.items():
-                pname = jdata.get('name', "") or ""
-                if "stage-C-consumer" in pname:
-                    target_job_id = jid
-                    target_job_data = jdata
-                    break
+                if "stage-E-total-sum" in jdata.get('name', ""):
 
-            if not target_job_id:
-                print("Error: No job matching 'stage-C-consumer' found.")
-                sys.exit(1)
+                    out_defs = jdata.get('executables', {}).get('main', {}).get('outputs', {})
 
-            print(f"Found job: {target_job_id}")
+                    if 'data.total_sum' in out_defs:
+                        raw_out_path = out_defs['data.total_sum']
+                        if raw_out_path.startswith("$out/"):
+                            rel_path = raw_out_path[5:]
+                        else:
+                            rel_path = raw_out_path.replace("$out/", "")
 
-            try:
-                outputs_def = target_job_data.get('executables', {}).get('main', {}).get('outputs', {})
-                if not outputs_def:
-                     outputs_def = target_job_data.get('outputs', {})
+                        job_output_dir = outputs_dir / jid
 
-                template = outputs_def.get("data.combined_list")
-                if not template:
-                    raise KeyError("data.combined_list")
-            except KeyError:
-                print("Error: Job does not have output 'data.combined_list'")
-                sys.exit(1)
+                        if not job_output_dir.exists():
+                             candidates = list(outputs_dir.glob(f"{jid}-*"))
+                             if candidates:
+                                 job_output_dir = candidates[0]
 
-            filename = template.replace("$out/", "")
-            data_path = Path(args.store) / "outputs" / target_job_id / "out" / filename
+                        full_path = job_output_dir / "out" / rel_path
 
-            print(f"Reading data from: {data_path}")
+                        if full_path.exists():
+                             try:
+                                 with open(full_path) as f:
+                                     val = f.read().strip()
+                                     if val:
+                                         results.append(float(val))
+                             except ValueError:
+                                 print(f"Skipping invalid number in {full_path}")
+                        else:
+                            pass
 
-            try:
-                with open(data_path, 'r') as f:
-                    lines = f.readlines()
-                    numbers = [int(x.strip()) for x in lines if x.strip()]
-            except FileNotFoundError:
-                print(f"Error: Data file not found at {data_path}")
-                sys.exit(1)
+            print(f"Total results found: {len(results)}")
 
-            print(f"Plotting {len(numbers)} numbers...")
-            plt.figure(figsize=(10, 6))
-            plt.plot(numbers, marker='o', linestyle='-')
-            plt.title(f"Reference Analysis (Raw Python) of {target_job_id}")
-            plt.xlabel("Index")
-            plt.ylabel("Value (Sum)")
-            plt.grid(True)
+            plt.figure()
+            if results:
+                plt.hist(results, bins=10)
+                plt.title(f"Histogram of Total Sums (N={len(results)})")
+                plt.xlabel("Total Sum")
+                plt.ylabel("Frequency")
+            else:
+                plt.text(0.5, 0.5, 'No Data Found', ha='center', va='center')
+                plt.title("Histogram (Empty)")
 
             plt.savefig(args.output)
             print(f"Plot saved to {args.output}")

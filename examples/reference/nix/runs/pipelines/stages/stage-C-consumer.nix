@@ -3,19 +3,18 @@
   pname = "stage-C-consumer";
 
   inputs = {
-    list_a = ""; # From A
-    list_b = ""; # From B
+    data_a = "";
+    list_b = "";
   };
 
   outputs = {
-    "data.combined_list" = "$out/combined_list.txt";
+    "combined_list" = "$out/combined_list.txt";
   };
 
   run =
     { inputs, outputs, ... }:
     ''
-      echo "Stage C: Concatenating lists from A and B"
-      cat "${inputs.list_a}" "${inputs.list_b}" > "${outputs."data.combined_list"}"
-      echo "Combined list created."
+      echo "Stage C: Concatenating A and B"
+      cat "${inputs.data_a}" "${inputs.list_b}" > "${outputs."combined_list"}"
     '';
 }
