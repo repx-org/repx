@@ -60,8 +60,15 @@ let
       throw "Stage file '${toString stageFile}' did not return a declarative attribute set."
     else
       let
+        declaredParams = stageDef.params or { };
+        globalParams = args.paramInputs or { };
+
+        resolvedParams = pkgs.lib.mapAttrs (
+          name: default: if builtins.hasAttr name globalParams then globalParams.${name} else default
+        ) declaredParams;
+
         stageDefWithDeps = stageDef // {
-          paramInputs = (stageDef.params or { }) // (args.paramInputs or { });
+          paramInputs = resolvedParams;
           dependencyDerivations = pkgs.lib.unique processed.dependencyDerivations;
           stageInputs = processed.finalFlatInputs;
           inherit (processed) inputMappings;
