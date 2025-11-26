@@ -99,7 +99,7 @@ impl JobsState {
             job.status = status_str.to_string();
         }
     }
-pub fn next(&mut self) {
+    pub fn next(&mut self) {
         let max_len = self.display_rows.len();
         if max_len == 0 {
             self.table_state.select(None);

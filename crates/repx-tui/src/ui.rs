@@ -471,7 +471,7 @@ fn draw_context_panel(f: &mut Frame, area: Rect, app: &App) {
     } else {
         Paragraph::new("Select a job to see its context.")
     };
-f.render_widget(content, inner_area);
+    f.render_widget(content, inner_area);
 }
 fn draw_logs_panel(f: &mut Frame, area: Rect, app: &App) {
     let logs_border_style = get_style(app, &app.theme.elements.panels.logs);
@@ -697,10 +697,8 @@ fn draw_right_column(f: &mut Frame, area: Rect, app: &mut App) {
     let table_area = right_chunks[0];
     let scrollbar_area = right_chunks[1];
     let jobs_table = if app.jobs_state.is_tree_view {
-        let header = Row::new(vec![
-            "", "jobid:", "Item:", "Parameters:", "Status:",
-        ])
-        .style(Style::default().add_modifier(Modifier::BOLD));
+        let header = Row::new(vec!["", "jobid:", "Item:", "Parameters:", "Status:"])
+            .style(Style::default().add_modifier(Modifier::BOLD));
         let constraints = [
             Constraint::Length(1),
             Constraint::Length(8),
@@ -728,7 +726,12 @@ fn draw_right_column(f: &mut Frame, area: Rect, app: &mut App) {
             .highlight_symbol("")
     } else {
         let header = Row::new(vec![
-            "", "jobid:", "Item:", "Run:", "Parameters:", "Status:",
+            "",
+            "jobid:",
+            "Item:",
+            "Run:",
+            "Parameters:",
+            "Status:",
         ])
         .style(Style::default().add_modifier(Modifier::BOLD));
         let constraints = [
@@ -756,7 +759,7 @@ fn draw_right_column(f: &mut Frame, area: Rect, app: &mut App) {
             })
             .highlight_symbol("")
     };
-f.render_stateful_widget(jobs_table, table_area, &mut app.jobs_state.table_state);
+    f.render_stateful_widget(jobs_table, table_area, &mut app.jobs_state.table_state);
 
     let viewport_height = table_area.height.saturating_sub(1) as usize;
     app.jobs_state.viewport_height = viewport_height;

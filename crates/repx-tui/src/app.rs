@@ -802,7 +802,7 @@ impl App {
             };
 
             thread::spawn(move || {
-let mut copied = false;
+                let mut copied = false;
                 match arboard::Clipboard::new() {
                     Ok(mut clipboard) => {
                         if let Err(e) = clipboard.set_text(path_str.clone()) {
@@ -845,7 +845,7 @@ let mut copied = false;
             log_info!("No job selected to explore.");
         }
     }
-pub fn consume_pending_action(&mut self) -> Option<ExternalAction> {
+    pub fn consume_pending_action(&mut self) -> Option<ExternalAction> {
         self.pending_action.take()
     }
 
