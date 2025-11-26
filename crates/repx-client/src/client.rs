@@ -240,30 +240,37 @@ impl Client {
         let jobs_to_run_ids: std::collections::HashSet<JobId> =
             jobs_to_run.keys().cloned().collect();
 
-        let jobs_to_submit: HashMap<JobId, &Job> = jobs_to_run
-            .iter()
-            .filter(|(_job_id, job)| {
-                let entrypoint_exe = job
-                    .executables
-                    .get("main")
-                    .or_else(|| job.executables.get("scatter"))
-                    .ok_or_else(|| {
-                        AppError::ConfigurationError(format!(
-                            "Job '{}' has no 'main' or 'scatter' executable defined.",
-                            _job_id
-                        ))
-                    })
-                    .unwrap();
+        let jobs_to_submit: HashMap<JobId, &Job> = if scheduler == "slurm" {
+            jobs_to_run
+                .iter()
+                .map(|(id, job)| (id.clone(), *job))
+                .collect()
+        } else {
+            jobs_to_run
+                .iter()
+                .filter(|(_job_id, job)| {
+                    let entrypoint_exe = job
+                        .executables
+                        .get("main")
+                        .or_else(|| job.executables.get("scatter"))
+                        .ok_or_else(|| {
+                            AppError::ConfigurationError(format!(
+                                "Job '{}' has no 'main' or 'scatter' executable defined.",
+                                _job_id
+                            ))
+                        })
+                        .unwrap();
 
-                let has_deps_in_batch = entrypoint_exe
-                    .inputs
-                    .iter()
-                    .filter_map(|m| m.job_id.as_ref())
-                    .any(|job_id| jobs_to_run_ids.contains(job_id));
-                !has_deps_in_batch
-            })
-            .map(|(id, job)| (id.clone(), *job))
-            .collect();
+                    let has_deps_in_batch = entrypoint_exe
+                        .inputs
+                        .iter()
+                        .filter_map(|m| m.job_id.as_ref())
+                        .any(|job_id| jobs_to_run_ids.contains(job_id));
+                    !has_deps_in_batch
+                })
+                .map(|(id, job)| (id.clone(), *job))
+                .collect()
+        };
         if jobs_to_submit.is_empty() && scheduler == "slurm" {
             return Ok(
                 "All schedulable jobs for this submission are already complete.".to_string(),

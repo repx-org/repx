@@ -103,7 +103,7 @@ pub struct InternalScatterGatherArgs {
     pub host_tools_dir: String,
     #[arg(long)]
     pub scheduler: String,
-    #[arg(long)]
+    #[arg(long, allow_hyphen_values = true)]
     pub worker_sbatch_opts: String,
     #[arg(long)]
     pub job_package_path: PathBuf,

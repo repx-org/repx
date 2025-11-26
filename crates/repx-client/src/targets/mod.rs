@@ -1,13 +1,31 @@
 use crate::error::Result;
 use repx_core::{engine, model::JobId};
+use sha2::{Digest, Sha256};
 use std::{
     collections::{HashMap, HashSet},
+    io::Read,
     path::{Path, PathBuf},
     sync::mpsc::Sender,
 };
 use whoami;
 pub mod local;
 pub mod ssh;
+
+pub(crate) fn compute_file_hash(path: &Path) -> Result<String> {
+    let mut file = fs_err::File::open(path).map_err(repx_core::error::AppError::from)?;
+    let mut hasher = Sha256::new();
+    let mut buffer = [0; 8192];
+    loop {
+        let count = file
+            .read(&mut buffer)
+            .map_err(repx_core::error::AppError::from)?;
+        if count == 0 {
+            break;
+        }
+        hasher.update(&buffer[..count]);
+    }
+    Ok(format!("{:x}", hasher.finalize()))
+}
 
 pub(crate) fn find_local_runner_binary() -> Result<PathBuf> {
     use repx_core::error::AppError;

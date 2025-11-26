@@ -453,7 +453,25 @@ impl Executor {
         let bwrap_path = self.get_host_tool_path("bwrap")?;
         let mut cmd = TokioCommand::new(bwrap_path);
 
+        let mut inner_path =
+            String::from("/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin");
+        if let Some(host_tools) = &self.request.host_tools_bin_dir {
+            inner_path = format!("{}:{}", host_tools.display(), inner_path);
+        }
+
         cmd.arg("--unshare-all")
+            .arg("--clearenv")
+            .arg("--setenv")
+            .arg("PATH")
+            .arg(inner_path)
+            .arg("--setenv")
+            .arg("HOME")
+            .arg("/")
+            .arg("--setenv")
+            .arg("TERM")
+            .arg("xterm")
+            .arg("--hostname")
+            .arg("repx-container")
             .arg("--overlay-src")
             .arg(rootfs_path)
             .arg("--tmp-overlay")
@@ -493,7 +511,6 @@ impl Executor {
 
         Ok(cmd)
     }
-
     async fn ensure_image_loaded(&self, runtime: &str, image_tag: &str) -> Result<()> {
         let image_hash = image_tag.split(':').next_back().unwrap_or(image_tag);
         let lock_path = std::env::temp_dir().join(format!("repx-load-{}.lock", image_hash));
@@ -603,7 +620,16 @@ impl Executor {
 
         cmd.arg("run")
             .arg("--rm")
-            .env("XDG_RUNTIME_DIR", &xdg_runtime_dir)
+            .arg("--hostname")
+            .arg("repx-container")
+            .arg("--env")
+            .arg("TERM=xterm");
+
+        if runtime.ends_with("podman") {
+            cmd.arg("--unsetenv").arg("container");
+        }
+
+        cmd.env("XDG_RUNTIME_DIR", &xdg_runtime_dir)
             .arg("--volume")
             .arg(format!(
                 "{}:{}",

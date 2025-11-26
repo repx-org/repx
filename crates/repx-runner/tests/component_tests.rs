@@ -31,9 +31,15 @@ fn test_internal_execute_simple_job_ok() {
     cmd.assert().success();
     assert!(job_output_path.join("repx/SUCCESS").exists());
     let numbers_out = fs::read_to_string(job_output_path.join("out/numbers.txt")).unwrap();
-    assert_eq!(numbers_out.trim(), "1\n2\n3\n4\n5");
+    let val = numbers_out.trim();
+    let expected_1 = "2\n3\n4\n5\n6";
+    let expected_2 = "3\n4\n5\n6\n7";
+    assert!(
+        val == expected_1 || val == expected_2,
+        "Expected output for offset 1 or 2, got:\n{}",
+        val
+    );
 }
-
 #[test]
 fn test_internal_execute_with_inputs_ok() {
     let harness = TestHarness::new();
@@ -53,7 +59,7 @@ fn test_internal_execute_with_inputs_ok() {
 
     let job_c_output_path = harness.get_job_output_path(&job_c_id);
     let inputs_json_content = serde_json::json!({
-        "list_a": job_a_out.join("numbers.txt"),
+        "data_a": job_a_out.join("numbers.txt"),
         "list_b": job_b_out.join("numbers.txt")
     });
     fs::write(

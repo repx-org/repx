@@ -65,6 +65,14 @@ impl JobsState {
         self.jobs = all_jobs;
     }
 
+    pub fn reset_statuses(&mut self) {
+        for job in self.jobs.iter_mut() {
+            job.status = "Unknown".to_string();
+            job.worker = "-".to_string();
+            job.elapsed = "-".to_string();
+        }
+    }
+
     pub fn apply_statuses(
         &mut self,
         lab: &Lab,

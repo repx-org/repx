@@ -208,7 +208,6 @@ impl Target for SshTarget {
     fn sync_artifact(&self, local_path: &Path, relative_path: &Path) -> Result<()> {
         let remote_dest = self.artifacts_base_path().join(relative_path);
         let remote_parent = remote_dest.parent().unwrap();
-        // For bootstrapping sync, we assume `mkdir` exists or is passed
         let mkdir_cmd = format!("mkdir -p {}", shell_quote(&remote_parent.to_string_lossy()));
         self.run_command("sh", &["-c", &mkdir_cmd])?;
 
@@ -402,14 +401,26 @@ impl Target for SshTarget {
     }
     fn deploy_repx_binary(&self) -> Result<PathBuf> {
         let runner_exe_path = super::find_local_runner_binary()?;
-        let remote_bin_dir = self.base_path().join("bin");
+        let hash = super::compute_file_hash(&runner_exe_path)?;
+
+        let remote_versioned_dir = self.base_path().join("bin").join(&hash);
+        let remote_dest_path = remote_versioned_dir.join("repx-runner");
+
+        let check_cmd = format!(
+            "test -f {} && echo 'exists'",
+            shell_quote(&remote_dest_path.to_string_lossy())
+        );
+        if let Ok(output) = self.run_command("sh", &["-c", &check_cmd]) {
+            if output.trim() == "exists" {
+                return Ok(remote_dest_path);
+            }
+        }
+
         let mkdir_cmd = format!(
             "mkdir -p {}",
-            shell_quote(&remote_bin_dir.to_string_lossy())
+            shell_quote(&remote_versioned_dir.to_string_lossy())
         );
         self.run_command("sh", &["-c", &mkdir_cmd])?;
-
-        let remote_dest_path = remote_bin_dir.join("repx");
 
         let mut scp_cmd = Command::new(self.local_tool("scp"));
         scp_cmd.arg(&runner_exe_path).arg(format!(

@@ -233,10 +233,21 @@ impl App {
 
     pub fn check_for_updates(&mut self) {
         if let Ok(update_result) = self.status_rx.try_recv() {
-            let was_loading = self.is_loading;
-            self.is_loading = false;
             match update_result {
-                Ok((_target_name, job_statuses)) => {
+                Ok((target_name, job_statuses)) => {
+                    let active_target = self.targets_state.get_active_target_name();
+                    if target_name != active_target {
+                        log_info!(
+                            "Ignoring status update from '{}' (active: '{}')",
+                            target_name,
+                            active_target
+                        );
+                        return;
+                    }
+
+                    let was_loading = self.is_loading;
+                    self.is_loading = false;
+
                     log_info!("Received status update. Applying new statuses.");
                     self.jobs_state.apply_statuses(&self.lab, job_statuses);
                     if was_loading {
@@ -246,12 +257,12 @@ impl App {
                     self.jobs_state.rebuild_display_list(&self.lab);
                 }
                 Err(e) => {
+                    self.is_loading = false;
                     log_warn!("Background status update failed: {}", e);
                 }
             }
         }
     }
-
     pub fn check_for_log_updates(&mut self) {
         if let Ok((job_id, log_result)) = self.log_result_rx.try_recv() {
             if let Some(job) = self
@@ -444,8 +455,10 @@ impl App {
             "Active target changed to: {}",
             self.targets_state.get_active_target_name()
         );
+        self.is_loading = true;
+        self.jobs_state.reset_statuses();
+        self.jobs_state.rebuild_display_list(&self.lab);
     }
-
     pub fn set_focused_panel(&mut self, panel: PanelFocus) {
         self.focused_panel = panel;
     }

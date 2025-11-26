@@ -246,13 +246,17 @@ impl Target for LocalTarget {
     }
     fn deploy_repx_binary(&self) -> Result<PathBuf> {
         let runner_exe_path = super::find_local_runner_binary()?;
-        let bin_dir = self.base_path().join("bin");
-        fs_err::create_dir_all(&bin_dir).map_err(AppError::from)?;
+        let hash = super::compute_file_hash(&runner_exe_path)?;
 
-        let dest_path = bin_dir.join("repx");
+        let versioned_bin_dir = self.base_path().join("bin").join(&hash);
+        let dest_path = versioned_bin_dir.join("repx-runner");
 
+        if dest_path.exists() {
+            return Ok(dest_path);
+        }
+
+        fs_err::create_dir_all(&versioned_bin_dir).map_err(AppError::from)?;
         fs_err::copy(&runner_exe_path, &dest_path).map_err(AppError::from)?;
-
         let perms = std::os::unix::fs::PermissionsExt::from_mode(0o755);
         fs_err::set_permissions(&dest_path, perms).map_err(AppError::from)?;
 

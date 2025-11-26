@@ -10,7 +10,7 @@ use repx_core::{
     model::{Job, JobId},
 };
 use sha2::{Digest, Sha256};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io::Write;
 use std::path::Path;
 use std::str::FromStr;
@@ -83,6 +83,7 @@ pub fn submit_slurm_batch_run(
     fs_err::create_dir_all(&local_batch_dir).map_err(AppError::from)?;
 
     let mut plan = OrchestrationPlan::new(target.base_path(), &client.lab.content_hash);
+    let job_ids_in_batch: HashSet<JobId> = jobs_to_submit.keys().cloned().collect();
 
     for (job_id, job) in &jobs_to_submit {
         let job_root_on_target = target.base_path().join("outputs").join(&job_id.0);
@@ -155,7 +156,7 @@ pub fn submit_slurm_batch_run(
             let worker_opts_str = worker_directives.to_shell_string();
 
             let command = format!(
-                "{} internal-scatter-gather {} {} --worker-sbatch-opts '{}' --scheduler slurm",
+                "{} internal-scatter-gather {} {} --worker-sbatch-opts='{}' --scheduler slurm",
                 remote_repx_command, repx_args, scatter_gather_args, worker_opts_str
             );
             (command, main_directives)
@@ -195,9 +196,8 @@ pub fn submit_slurm_batch_run(
         file.write_all(script_content.as_bytes())
             .map_err(AppError::from)?;
 
-        plan.add_job(job_id.clone(), job, script_hash);
+        plan.add_job(job_id.clone(), job, script_hash, &job_ids_in_batch);
     }
-
     let plan_filename = "plan.json";
     let plan_content = serde_json::to_string_pretty(&plan).map_err(AppError::from)?;
     fs_err::write(local_batch_dir.join(plan_filename), plan_content).map_err(AppError::from)?;
