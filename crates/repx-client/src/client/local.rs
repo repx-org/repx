@@ -173,6 +173,11 @@ pub fn submit_local_batch_run(
                 args.push("--base-path".to_string());
                 args.push(target.base_path().to_string_lossy().to_string());
 
+                if let Some(local_path) = &target.config().node_local_path {
+                    args.push("--node-local-path".to_string());
+                    args.push(local_path.to_string_lossy().to_string());
+                }
+
                 args.push("--host-tools-dir".to_string());
                 args.push(client.lab.host_tools_dir_name.clone());
 

@@ -106,7 +106,7 @@ pub fn submit_slurm_batch_run(
         let image_tag = image_path_opt
             .and_then(|p| p.file_stem())
             .and_then(|s| s.to_str());
-        let repx_args = format!(
+        let mut repx_args = format!(
             "--job-id {} --runtime {} {} --base-path {} --host-tools-dir {}",
             job_id,
             execution_type,
@@ -116,6 +116,9 @@ pub fn submit_slurm_batch_run(
             target.base_path().display(),
             client.lab.host_tools_dir_name
         );
+        if let Some(local_path) = &target.config().node_local_path {
+            repx_args.push_str(&format!(" --node-local-path {}", local_path.display()));
+        }
         let (repx_command_to_wrap, directives) = if job.stage_type == "scatter-gather" {
             let scatter_exe = job.executables.get("scatter").ok_or_else(|| {
                 AppError::ConfigurationError(

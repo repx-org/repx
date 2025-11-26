@@ -29,6 +29,7 @@ struct ScatterGatherOrchestrator {
     job_package_path: PathBuf,
     static_inputs: Value,
     host_tools_bin_dir: Option<PathBuf>,
+    node_local_path: Option<PathBuf>,
 }
 impl ScatterGatherOrchestrator {
     fn new(args: &InternalScatterGatherArgs) -> Result<Self, AppError> {
@@ -81,6 +82,7 @@ impl ScatterGatherOrchestrator {
             job_package_path: args.job_package_path.clone(),
             static_inputs: Value::Object(Default::default()),
             host_tools_bin_dir,
+            node_local_path: args.node_local_path.clone(),
         })
     }
     fn init_dirs(&mut self) -> Result<(), AppError> {
@@ -107,6 +109,7 @@ impl ScatterGatherOrchestrator {
             job_id: self.job_id.clone(),
             runtime: self.runtime.clone(),
             base_path: self.base_path.clone(),
+            node_local_path: self.node_local_path.clone(),
             job_package_path: self.job_package_path.clone(),
             inputs_json_path: self.inputs_json_path.clone(),
             user_out_dir: user_out,

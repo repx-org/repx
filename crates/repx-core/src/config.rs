@@ -34,7 +34,12 @@ default_scheduler = "local"
   # The 'local' target runs jobs on your current machine.
   [targets.local]
   # The base path for the shared path on the target. Tilde expansion (~) is supported.
-  base_path = "~/Desktop/repx-store"  # Optional: set the default scheduler and execution type for this target.
+  base_path = "~/Desktop/repx-store"
+  # Optional: For HPC clusters with slow shared storage, specify a fast local scratch path.
+  # This is used to cache container images on the node's local SSD/NVMe.
+  # node_local_path = "/mnt/local/$USER/repx"
+
+  # Optional: set the default scheduler and execution type for this target.
   default_scheduler = "local"
   default_execution_type = "bwrap"
 
@@ -56,6 +61,8 @@ default_scheduler = "local"
   # address = "safari"
   # # The base path for the shared path on the target.
   # base_path = "/mnt/galactica/demirlie/Desktop/repx-store"
+  # # Fast local storage on compute nodes (e.g., NVMe). Critical for 'bwrap' performance on NFS.
+  # node_local_path = "/mnt/local/$USER/repx"
   # default_scheduler = "slurm"
   # default_execution_type = "podman"
   #
@@ -111,6 +118,7 @@ pub struct SchedulerConfig {
 pub struct Target {
     pub address: Option<String>,
     pub base_path: PathBuf,
+    pub node_local_path: Option<PathBuf>,
     pub default_scheduler: Option<String>,
     pub default_execution_type: Option<String>,
     #[serde(default)]
@@ -264,6 +272,14 @@ pub fn load_config() -> Result<Config, AppError> {
         target.base_path = PathBuf::from_str(&expanded_path_str).map_err(|e| {
             AppError::ConfigurationError(format!("Invalid path '{}': {}", expanded_path_str, e))
         })?;
+
+        if let Some(local_path) = &target.node_local_path {
+            let local_str = local_path.display().to_string();
+            let expanded_local = shellexpand::tilde(&local_str).into_owned();
+            target.node_local_path = Some(PathBuf::from_str(&expanded_local).map_err(|e| {
+                AppError::ConfigurationError(format!("Invalid path '{}': {}", expanded_local, e))
+            })?);
+        }
 
         if target.address.is_none() && !target.base_path.is_absolute() {
             return Err(AppError::ConfigurationError(format!(

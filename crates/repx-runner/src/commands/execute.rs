@@ -71,6 +71,7 @@ async fn async_handle_execute(args: InternalExecuteArgs) -> Result<(), AppError>
         job_id: job_id.clone(),
         runtime,
         base_path: args.base_path,
+        node_local_path: args.node_local_path,
         job_package_path,
         inputs_json_path: inputs_json_path.clone(),
         user_out_dir,

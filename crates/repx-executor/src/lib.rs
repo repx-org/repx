@@ -57,6 +57,7 @@ pub struct ExecutionRequest {
     pub job_id: JobId,
     pub runtime: Runtime,
     pub base_path: PathBuf,
+    pub node_local_path: Option<PathBuf>,
     pub job_package_path: PathBuf,
     pub inputs_json_path: PathBuf,
     pub user_out_dir: PathBuf,
@@ -293,11 +294,22 @@ impl Executor {
     async fn ensure_bwrap_rootfs_extracted(&self, image_tag: &str) -> Result<PathBuf> {
         let image_hash = image_tag.split(':').next_back().unwrap_or(image_tag);
 
-        let images_cache_dir = self.request.base_path.join("cache").join("images");
-        let extract_dir = images_cache_dir.join(image_hash).join("rootfs");
+        let images_cache_dir = if let Some(local) = &self.request.node_local_path {
+            local.join("repx").join("cache").join("images")
+        } else {
+            self.request.base_path.join("cache").join("images")
+        };
+
+        let image_dir = images_cache_dir.join(image_hash);
+        let extract_dir = image_dir.join("rootfs");
+        let success_marker = image_dir.join("SUCCESS");
         let lock_path = std::env::temp_dir().join(format!("repx-extract-{}.lock", image_hash));
 
         tokio::fs::create_dir_all(&images_cache_dir).await?;
+
+        if success_marker.exists() && extract_dir.exists() {
+            return Ok(extract_dir);
+        }
 
         let mut lock_file = std::fs::File::create(&lock_path)?;
         let _lock = loop {
@@ -319,7 +331,7 @@ impl Executor {
             }
         };
 
-        if extract_dir.exists() {
+        if success_marker.exists() && extract_dir.exists() {
             return Ok(extract_dir);
         }
 
@@ -391,6 +403,10 @@ impl Executor {
 
         let layers = &manifest[0].layers;
 
+        // Clean up partials if any
+        if extract_dir.exists() {
+            tokio::fs::remove_dir_all(&extract_dir).await?;
+        }
         tokio::fs::create_dir_all(&extract_dir).await?;
 
         for layer in layers {
@@ -439,6 +455,8 @@ impl Executor {
                 tokio::fs::create_dir(&p).await?;
             }
         }
+
+        std::fs::File::create(&success_marker).map_err(ExecutorError::Io)?;
 
         log_info!("Successfully extracted rootfs for '{}'", image_tag);
         Ok(extract_dir)

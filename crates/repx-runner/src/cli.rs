@@ -84,6 +84,8 @@ pub struct InternalExecuteArgs {
     #[arg(long)]
     pub base_path: PathBuf,
     #[arg(long)]
+    pub node_local_path: Option<PathBuf>,
+    #[arg(long)]
     pub host_tools_dir: String,
     #[arg(long)]
     pub executable_path: PathBuf,
@@ -99,6 +101,8 @@ pub struct InternalScatterGatherArgs {
     pub image_tag: Option<String>,
     #[arg(long)]
     pub base_path: PathBuf,
+    #[arg(long)]
+    pub node_local_path: Option<PathBuf>,
     #[arg(long)]
     pub host_tools_dir: String,
     #[arg(long)]
