@@ -77,8 +77,12 @@ def test_cli_debug_runner_simple_stage(lab_path: Path, tmp_path: Path):
     output_file = cache_dir / consumer_job_id / "out" / "combined_list.txt"
     assert output_file.exists(), "Expected output file was not created."
 
+    offset = target_job.effective_params.get("offset", 0)
+    list_a = [str(i + offset) for i in range(1, 6)]
+    list_b = [str(i) for i in range(6, 11)]
+    expected_content = list_a + list_b
+
     content = output_file.read_text().strip().split("\n")
-    expected_content = [str(i) for i in range(1, 11)]
     assert content == expected_content, (
         f"Expected output {expected_content}, but got '{content}'."
     )

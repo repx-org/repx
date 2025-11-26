@@ -71,11 +71,11 @@
         "nixpkgs": "nixpkgs_3"
       },
       "locked": {
-        "lastModified": 1763812999,
-        "narHash": "sha256-X/YrOJDvx3qXxUihFeXCsDABGsFrg5K3PaIWJm5Y9QU=",
+        "lastModified": 1764078305,
+        "narHash": "sha256-gGdr9BFFofhDgvn1RnaPcEuPTVtb/4QW54piFk8muGk=",
         "owner": "repx-org",
         "repo": "repx-nix",
-        "rev": "e5febf0da27d462909e9b8b3f5c52898b3d0b845",
+        "rev": "b175eff547bbc97ac34c4ad51a61d39a4986df07",
         "type": "github"
       },
       "original": {
@@ -92,11 +92,11 @@
       },
       "locked": {
         "dir": "examples/reference",
-        "lastModified": 1763816461,
-        "narHash": "sha256-pTkDv3WXUWPG7i+vptdc0L/q/P75dyteFjUaf8CaF3E=",
+        "lastModified": 1764156825,
+        "narHash": "sha256-KgUgPpqKeTfJpnBDrGeHugscLjE1Vm7WNstnov65VRU=",
         "owner": "repx-org",
         "repo": "repx",
-        "rev": "15acfdb2b24c2427867f2f5f42d01e0ffece1372",
+        "rev": "4ba820fd69ee468d80a91279756ddeb5a9a543cb",
         "type": "github"
       },
       "original": {
