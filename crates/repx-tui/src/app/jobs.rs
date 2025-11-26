@@ -47,13 +47,13 @@ impl JobsState {
                     .split_once('-')
                     .map_or((short_id.as_str(), ""), |(id, name)| (id, name));
 
+                let job_def = lab.jobs.get(&job_id).unwrap();
                 let tui_job = TuiJob {
                     full_id: job_id.clone(),
                     id: id_part.to_string(),
                     name: name_part.to_string(),
                     run: run_id.to_string(),
-                    worker: "-".to_string(),
-                    elapsed: "-".to_string(),
+                    params: job_def.params.clone(),
                     status: "Unknown".to_string(),
                     context_depends_on: "-".to_string(),
                     context_dependents: "-".to_string(),
@@ -68,8 +68,6 @@ impl JobsState {
     pub fn reset_statuses(&mut self) {
         for job in self.jobs.iter_mut() {
             job.status = "Unknown".to_string();
-            job.worker = "-".to_string();
-            job.elapsed = "-".to_string();
         }
     }
 
@@ -89,21 +87,19 @@ impl JobsState {
                 }
             }
 
-            let (status_str, worker) = match full_job_statuses.get(&job.full_id) {
-                Some(JobStatus::Succeeded { location }) => ("Succeeded", location.clone()),
-                Some(JobStatus::Failed { location }) => ("Failed", location.clone()),
-                Some(JobStatus::Pending) => ("Pending", "-".to_string()),
-                Some(JobStatus::Queued) => ("Queued", "-".to_string()),
-                Some(JobStatus::Running) => ("Running", "-".to_string()),
-                Some(JobStatus::Blocked { .. }) => ("Blocked", "-".to_string()),
-                None => ("Unknown", "-".to_string()),
+            let status_str = match full_job_statuses.get(&job.full_id) {
+                Some(JobStatus::Succeeded { .. }) => "Succeeded",
+                Some(JobStatus::Failed { .. }) => "Failed",
+                Some(JobStatus::Pending) => "Pending",
+                Some(JobStatus::Queued) => "Queued",
+                Some(JobStatus::Running) => "Running",
+                Some(JobStatus::Blocked { .. }) => "Blocked",
+                None => "Unknown",
             };
             job.status = status_str.to_string();
-            job.worker = worker.split(':').next_back().unwrap_or(&worker).to_string();
         }
     }
-
-    pub fn next(&mut self) {
+pub fn next(&mut self) {
         let max_len = self.display_rows.len();
         if max_len == 0 {
             self.table_state.select(None);

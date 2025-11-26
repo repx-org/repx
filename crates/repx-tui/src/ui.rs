@@ -436,9 +436,8 @@ fn draw_context_panel(f: &mut Frame, area: Rect, app: &App) {
     f.render_widget(block, area);
 
     let content = if let Some(job) = selected_job {
-        Paragraph::new(vec![
+        let mut lines = vec![
             Line::from(vec![Span::raw("Run: "), Span::raw(job.run.clone())]),
-            Line::from(vec![Span::raw("Elapsed: "), Span::raw(job.elapsed.clone())]),
             Line::from(vec![
                 Span::raw("Depends on: "),
                 Span::raw(job.context_depends_on.clone()),
@@ -447,11 +446,32 @@ fn draw_context_panel(f: &mut Frame, area: Rect, app: &App) {
                 Span::raw("Dependents: "),
                 Span::raw(job.context_dependents.clone()),
             ]),
-        ])
+            Line::from(Span::raw("")),
+            Line::from(Span::styled(
+                "Parameters:",
+                Style::default().add_modifier(Modifier::BOLD),
+            )),
+        ];
+
+        if let Some(obj) = job.params.as_object() {
+            for (k, v) in obj {
+                let val_str = if let Some(s) = v.as_str() {
+                    s.to_string()
+                } else {
+                    v.to_string()
+                };
+                lines.push(Line::from(vec![
+                    Span::styled(format!("  {}: ", k), Style::default().fg(Color::Cyan)),
+                    Span::raw(val_str),
+                ]));
+            }
+        }
+
+        Paragraph::new(lines)
     } else {
         Paragraph::new("Select a job to see its context.")
     };
-    f.render_widget(content, inner_area);
+f.render_widget(content, inner_area);
 }
 fn draw_logs_panel(f: &mut Frame, area: Rect, app: &App) {
     let logs_border_style = get_style(app, &app.theme.elements.panels.logs);
@@ -678,15 +698,14 @@ fn draw_right_column(f: &mut Frame, area: Rect, app: &mut App) {
     let scrollbar_area = right_chunks[1];
     let jobs_table = if app.jobs_state.is_tree_view {
         let header = Row::new(vec![
-            "", "jobid:", "Item:", "Worker:", "Elapsed:", "Status:",
+            "", "jobid:", "Item:", "Parameters:", "Status:",
         ])
         .style(Style::default().add_modifier(Modifier::BOLD));
         let constraints = [
             Constraint::Length(1),
             Constraint::Length(8),
-            Constraint::Min(35),
-            Constraint::Min(10),
-            Constraint::Length(10),
+            Constraint::Length(35),
+            Constraint::Min(20),
             Constraint::Length(10),
         ];
         let rows = build_tree_rows(
@@ -709,16 +728,15 @@ fn draw_right_column(f: &mut Frame, area: Rect, app: &mut App) {
             .highlight_symbol("")
     } else {
         let header = Row::new(vec![
-            "", "jobid:", "Item:", "Run:", "Worker:", "Elapsed:", "Status:",
+            "", "jobid:", "Item:", "Run:", "Parameters:", "Status:",
         ])
         .style(Style::default().add_modifier(Modifier::BOLD));
         let constraints = [
             Constraint::Length(1),
             Constraint::Length(8),
-            Constraint::Min(25),
-            Constraint::Min(15),
-            Constraint::Min(10),
-            Constraint::Length(10),
+            Constraint::Length(25),
+            Constraint::Length(15),
+            Constraint::Min(20),
             Constraint::Length(10),
         ];
         let rows = build_flat_rows(
@@ -738,8 +756,7 @@ fn draw_right_column(f: &mut Frame, area: Rect, app: &mut App) {
             })
             .highlight_symbol("")
     };
-
-    f.render_stateful_widget(jobs_table, table_area, &mut app.jobs_state.table_state);
+f.render_stateful_widget(jobs_table, table_area, &mut app.jobs_state.table_state);
 
     let viewport_height = table_area.height.saturating_sub(1) as usize;
     app.jobs_state.viewport_height = viewport_height;
@@ -758,6 +775,32 @@ fn draw_right_column(f: &mut Frame, area: Rect, app: &mut App) {
         scrollbar_area,
         &mut scrollbar_state,
     );
+}
+
+fn format_params_single_line(v: &serde_json::Value) -> String {
+    if let Some(obj) = v.as_object() {
+        obj.iter()
+            .map(|(k, v)| {
+                let val_str = if let Some(s) = v.as_str() {
+                    if s.contains('/') {
+                        std::path::Path::new(s)
+                            .file_name()
+                            .and_then(|os| os.to_str())
+                            .unwrap_or(s)
+                            .to_string()
+                    } else {
+                        s.to_string()
+                    }
+                } else {
+                    v.to_string()
+                };
+                format!("{}={}", k, val_str)
+            })
+            .collect::<Vec<_>>()
+            .join(",")
+    } else {
+        String::new()
+    }
 }
 
 fn build_flat_rows<'a>(
@@ -791,14 +834,14 @@ fn build_flat_rows<'a>(
                 _ => get_style(app, &app.theme.elements.job_status.unknown),
             };
             let status_cell = Cell::from(Span::styled(job.status.clone(), status_style));
+            let params_str = format_params_single_line(&job.params);
 
             Row::new(vec![
                 selector,
                 Cell::from(job.id.clone()),
                 Cell::from(job.name.clone()),
                 Cell::from(job.run.clone()),
-                Cell::from(job.worker.clone()),
-                Cell::from(job.elapsed.clone()),
+                Cell::from(params_str),
                 status_cell,
             ])
         })
@@ -854,7 +897,6 @@ fn build_tree_rows<'a>(
                     ])),
                     Cell::from(""),
                     Cell::from(""),
-                    Cell::from(""),
                 ]));
 
                 ancestor_is_last_stack.push(row_data.is_last_child);
@@ -905,8 +947,8 @@ fn build_tree_rows<'a>(
                     "Submitting..." => get_style(app, &app.theme.elements.job_status.submitting),
                     _ => get_style(app, &app.theme.elements.job_status.unknown),
                 };
-                let worker = Cell::from(job.worker.clone());
-                let elapsed = Cell::from(job.elapsed.clone());
+                let params_str = format_params_single_line(&job.params);
+                let params = Cell::from(params_str);
                 let status = Cell::from(Span::styled(job.status.clone(), status_style));
 
                 rows.push(Row::new(vec![
@@ -916,8 +958,7 @@ fn build_tree_rows<'a>(
                         Span::raw(format!(" {}{}{} ", corrected_prefix, branch, item_marker)),
                         Span::styled(display_text, item_style),
                     ])),
-                    worker,
-                    elapsed,
+                    params,
                     status,
                 ]));
             }
@@ -925,7 +966,6 @@ fn build_tree_rows<'a>(
     }
     rows
 }
-
 fn draw_space_menu_popup(f: &mut Frame, area: Rect, app: &App) {
     let popup_height = 10;
     let horizontal_padding = 2;

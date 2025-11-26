@@ -75,11 +75,10 @@ pub struct TuiJob {
     pub id: String,
     pub name: String,
     pub run: String,
-    pub worker: String,
-    pub elapsed: String,
+    pub params: serde_json::Value,
     pub status: String,
     pub context_depends_on: String,
-    pub context_dependents: String,
+pub context_dependents: String,
     pub logs: Vec<String>,
 }
 #[derive(Clone, Debug)]
