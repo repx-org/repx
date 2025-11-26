@@ -253,7 +253,7 @@ fn dracula_theme() -> Theme {
                     styles: vec![],
                 },
                 cell_highlight_bg: ElementStyle {
-                    color: "yellow".to_string(),
+                    color: "comment".to_string(),
                     styles: vec![],
                 },
                 selector: ElementStyle {

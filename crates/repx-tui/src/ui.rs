@@ -75,7 +75,11 @@ fn draw_overview_panel(f: &mut Frame, area: Rect, app: &mut App) {
             .map(|t| t.base_path.display().to_string())
             .unwrap_or_else(|| "[unknown]".to_string())
     };
-    let githash_short = app.lab.git_hash.chars().take(7).collect::<String>();
+    let githash_short = if let Some(hash) = app.lab.git_hash.strip_suffix("-dirty") {
+        format!("{}-dirty", hash.chars().take(7).collect::<String>())
+    } else {
+        app.lab.git_hash.chars().take(13).collect::<String>()
+    };
     let rate_text = format!("{}ms", app.tick_rate.as_millis());
     let current_time = Local::now().format("%H:%M:%S").to_string();
     let overview_block = Block::default()
@@ -96,13 +100,17 @@ fn draw_overview_panel(f: &mut Frame, area: Rect, app: &mut App) {
                 Span::styled("store: ", Style::default().fg(Color::White)),
                 Span::styled(
                     format!("{} ", store_path_str),
-                    Style::default().add_modifier(Modifier::DIM),
+                    Style::default()
+                        .fg(Color::White)
+                        .add_modifier(Modifier::DIM),
                 ),
                 Span::styled("┌─┐", overview_border_style),
                 Span::styled("githash: ", Style::default().fg(Color::White)),
                 Span::styled(
                     format!("{}{}", githash_short, loading_indicator),
-                    Style::default().add_modifier(Modifier::DIM),
+                    Style::default()
+                        .fg(Color::White)
+                        .add_modifier(Modifier::DIM),
                 ),
                 Span::styled("┌", overview_border_style),
             ])
@@ -111,7 +119,12 @@ fn draw_overview_panel(f: &mut Frame, area: Rect, app: &mut App) {
         .title_top(
             Line::from(vec![
                 Span::styled("┐", overview_border_style),
-                Span::styled(current_time, Style::default().add_modifier(Modifier::DIM)),
+                Span::styled(
+                    current_time,
+                    Style::default()
+                        .fg(Color::White)
+                        .add_modifier(Modifier::BOLD),
+                ),
                 Span::styled("┌", overview_border_style),
             ])
             .alignment(Alignment::Center),
@@ -119,12 +132,22 @@ fn draw_overview_panel(f: &mut Frame, area: Rect, app: &mut App) {
         .title_top(
             Line::from(vec![
                 Span::styled("┐", overview_border_style),
-                Span::styled("-", Style::default().add_modifier(Modifier::DIM)),
+                Span::styled(
+                    "-",
+                    Style::default()
+                        .fg(Color::White)
+                        .add_modifier(Modifier::DIM),
+                ),
                 Span::styled(
                     format!(" {} ", rate_text),
                     Style::default().fg(Color::White),
                 ),
-                Span::styled("+", Style::default().add_modifier(Modifier::DIM)),
+                Span::styled(
+                    "+",
+                    Style::default()
+                        .fg(Color::White)
+                        .add_modifier(Modifier::DIM),
+                ),
                 Span::styled("┌─", overview_border_style),
             ])
             .alignment(Alignment::Right),

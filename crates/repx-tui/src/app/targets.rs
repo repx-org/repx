@@ -15,7 +15,7 @@ impl TargetsState {
         let mut state = Self {
             items,
             table_state: TableState::default(),
-            focused_column: 1,
+            focused_column: 3,
             is_editing_cell: false,
             active_target_ref,
         };
