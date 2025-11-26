@@ -174,16 +174,27 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<Stdout>>, app: &mut App) -> 
 
         if let Some(action) = app.consume_pending_action() {
             match action {
-                ExternalAction::Explore(path) => {
+                ExternalAction::ExploreLocal(path) => {
                     suspend_tui(terminal)?;
                     let _ = std::process::Command::new("yazi").arg(path).status();
                     resume_tui(terminal)?;
                     terminal.clear()?;
                 }
+                ExternalAction::ExploreRemote { address, path } => {
+                    suspend_tui(terminal)?;
+                    let remote_path = path.to_string_lossy().replace('\\', "/");
+                    let remote_cmd = format!("yazi '{}'", remote_path);
+                    let _ = std::process::Command::new("ssh")
+                        .arg("-t")
+                        .arg(address)
+                        .arg(remote_cmd)
+                        .status();
+                    resume_tui(terminal)?;
+                    terminal.clear()?;
+                }
             }
         }
-
-        let timeout = app
+let timeout = app
             .tick_rate
             .checked_sub(last_tick.elapsed())
             .unwrap_or_else(|| Duration::from_secs(0));

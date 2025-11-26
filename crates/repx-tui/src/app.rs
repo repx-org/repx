@@ -85,7 +85,8 @@ pub enum SubmissionResult {
 }
 
 pub enum ExternalAction {
-    Explore(PathBuf),
+    ExploreLocal(PathBuf),
+    ExploreRemote { address: String, path: PathBuf },
 }
 pub struct App {
     pub client: Arc<Client>,
@@ -789,10 +790,19 @@ impl App {
     pub fn follow_logs_selected(&mut self) {}
     pub fn yank_selected_path(&mut self) {
         if let Some(path) = self.get_selected_job_path() {
-            let path_str = path.to_string_lossy().to_string();
+            let target_name = self.targets_state.get_active_target_name();
+            let config = self.client.config();
+            let target_config = config.targets.get(&target_name);
+
+            let is_remote = target_config.and_then(|t| t.address.as_ref()).is_some();
+            let path_str = if is_remote {
+                path.to_string_lossy().replace('\\', "/")
+            } else {
+                path.to_string_lossy().to_string()
+            };
 
             thread::spawn(move || {
-                let mut copied = false;
+let mut copied = false;
                 match arboard::Clipboard::new() {
                     Ok(mut clipboard) => {
                         if let Err(e) = clipboard.set_text(path_str.clone()) {
@@ -817,8 +827,17 @@ impl App {
 
     pub fn explore_selected_path(&mut self) {
         if let Some(path) = self.get_selected_job_path() {
-            if path.exists() {
-                self.pending_action = Some(ExternalAction::Explore(path));
+            let target_name = self.targets_state.get_active_target_name();
+            let config = self.client.config();
+            let target_config = config.targets.get(&target_name);
+
+            if let Some(addr) = target_config.and_then(|t| t.address.as_ref()) {
+                self.pending_action = Some(ExternalAction::ExploreRemote {
+                    address: addr.clone(),
+                    path,
+                });
+            } else if path.exists() {
+                self.pending_action = Some(ExternalAction::ExploreLocal(path));
             } else {
                 log_warn!("Path does not exist: {}", path.display());
             }
@@ -826,8 +845,7 @@ impl App {
             log_info!("No job selected to explore.");
         }
     }
-
-    pub fn consume_pending_action(&mut self) -> Option<ExternalAction> {
+pub fn consume_pending_action(&mut self) -> Option<ExternalAction> {
         self.pending_action.take()
     }
 
