@@ -8,7 +8,7 @@ rec {
     context = [ ];
   };
 
-  scan =
+  _scanRuntime =
     {
       src,
       type ? "any",
@@ -75,16 +75,49 @@ rec {
       context = contextList;
     };
 
+  scan = _scanRuntime;
   dirs =
     src:
-    scan {
-      inherit src;
-      type = "directory";
-    };
+    let
+      isDerivation = pkgs.lib.isDerivation src;
+      isStorePathStr = builtins.isString src && pkgs.lib.hasPrefix builtins.storeDir src;
+    in
+    if isDerivation || isStorePathStr then
+      _scanRuntime {
+        inherit src;
+        type = "directory";
+      }
+    else
+      let
+        entries = builtins.readDir src;
+        onlyDirs = pkgs.lib.filterAttrs (_: v: v == "directory") entries;
+        mkGranularWrapper =
+          originalName: _:
+          let
+            cleanSrc = builtins.path {
+              name = "source";
+              path = src + "/${originalName}";
+            };
+
+            wrapper = pkgs.runCommandLocal "submission-wrapper" { } ''
+              dest="$out/${pkgs.lib.escapeShellArg originalName}"
+              mkdir -p "$dest"
+              cp -rT ${cleanSrc} "$dest"
+            '';
+          in
+          wrapper;
+
+        granularWrappers = pkgs.lib.mapAttrsToList mkGranularWrapper onlyDirs;
+      in
+      {
+        _repx_param = true;
+        values = granularWrappers;
+        context = [ ];
+      };
 
   files =
     src:
-    scan {
+    _scanRuntime {
       inherit src;
       type = "file";
     };
