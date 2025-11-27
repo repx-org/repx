@@ -8,16 +8,22 @@ pub struct TargetsState {
     pub focused_column: usize,
     pub is_editing_cell: bool,
     pub active_target_ref: Arc<Mutex<String>>,
+    pub active_scheduler_ref: Arc<Mutex<String>>,
 }
 
 impl TargetsState {
-    pub fn new(items: Vec<TuiTarget>, active_target_ref: Arc<Mutex<String>>) -> Self {
+    pub fn new(
+        items: Vec<TuiTarget>,
+        active_target_ref: Arc<Mutex<String>>,
+        active_scheduler_ref: Arc<Mutex<String>>,
+    ) -> Self {
         let mut state = Self {
             items,
             table_state: TableState::default(),
             focused_column: 3,
             is_editing_cell: false,
             active_target_ref,
+            active_scheduler_ref,
         };
         if !state.items.is_empty() {
             state.table_state.select(Some(0));
@@ -82,6 +88,10 @@ impl TargetsState {
                                 % target.available_schedulers.len();
                             target.selected_executor_idx = 0;
                         }
+                        if target.state == crate::model::TargetState::Active {
+                            *self.active_scheduler_ref.lock().unwrap() =
+                                target.get_selected_scheduler().as_str().to_string();
+                        }
                     }
                     _ => {}
                 }
@@ -115,6 +125,10 @@ impl TargetsState {
                             };
                             target.selected_executor_idx = 0;
                         }
+                        if target.state == crate::model::TargetState::Active {
+                            *self.active_scheduler_ref.lock().unwrap() =
+                                target.get_selected_scheduler().as_str().to_string();
+                        }
                     }
                     _ => {}
                 }
@@ -127,6 +141,8 @@ impl TargetsState {
             if let Some(target) = self.items.get(idx) {
                 let new_name = target.name.clone();
                 *self.active_target_ref.lock().unwrap() = new_name.clone();
+                *self.active_scheduler_ref.lock().unwrap() =
+                    target.get_selected_scheduler().as_str().to_string();
 
                 for t in self.items.iter_mut() {
                     if t.name == new_name {

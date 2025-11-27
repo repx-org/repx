@@ -124,6 +124,7 @@ impl App {
         resources: Option<Resources>,
         initial_active_target: String,
         active_target_ref: Arc<Mutex<String>>,
+        active_scheduler_ref: Arc<Mutex<String>>,
     ) -> Result<Self, ClientError> {
         log_info!("Initializing new App instance.");
         let targets = client
@@ -196,7 +197,7 @@ impl App {
             theme,
             lab,
             jobs_state: JobsState::new(),
-            targets_state: TargetsState::new(targets, active_target_ref),
+            targets_state: TargetsState::new(targets, active_target_ref, active_scheduler_ref),
             status_history: VecDeque::new(),
             completion_rate_history: VecDeque::new(),
             last_completed_count: 0,

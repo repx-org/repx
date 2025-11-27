@@ -36,7 +36,7 @@ pub fn submit_local_batch_run(
         })
         .cloned()
         .collect();
-    let raw_statuses = client.get_statuses_for_active_target(target.name())?;
+    let raw_statuses = client.get_statuses_for_active_target(target.name(), Some("local"))?;
     let all_job_statuses = engine::determine_job_statuses(&client.lab, &raw_statuses);
     let mut completed_jobs: HashSet<JobId> = all_job_statuses
         .into_iter()

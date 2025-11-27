@@ -164,8 +164,9 @@ impl Client {
     pub fn get_statuses_for_active_target(
         &self,
         active_target_name: &str,
+        active_scheduler: Option<&str>,
     ) -> Result<HashMap<JobId, engine::JobStatus>> {
-        status::get_statuses_for_active_target(self, active_target_name)
+        status::get_statuses_for_active_target(self, active_target_name, active_scheduler)
     }
 
     pub fn submit_run(
@@ -221,7 +222,7 @@ impl Client {
         target.sync_lab_root(&self.lab_path)?;
         send(ClientEvent::SyncingFinished);
 
-        let raw_statuses = self.get_statuses_for_active_target(target_name)?;
+        let raw_statuses = self.get_statuses_for_active_target(target_name, Some(scheduler))?;
         let job_statuses = engine::determine_job_statuses(&self.lab, &raw_statuses);
         let jobs_to_run: HashMap<JobId, &Job> = full_dependency_set
             .into_iter()

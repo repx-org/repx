@@ -67,8 +67,18 @@ fn main() -> Result<(), AppError> {
         .submission_target
         .clone()
         .unwrap_or_else(|| "local".to_string());
+
+    let initial_target_config = client.config().targets.get(&initial_active_target);
+    let initial_active_scheduler = initial_target_config
+        .and_then(|t| t.default_scheduler.clone())
+        .or_else(|| client.config().default_scheduler.clone())
+        .unwrap_or_else(|| "local".to_string());
+
     let active_target = Arc::new(Mutex::new(initial_active_target.clone()));
     let active_target_clone_for_status = active_target.clone();
+
+    let active_scheduler = Arc::new(Mutex::new(initial_active_scheduler.clone()));
+    let active_scheduler_clone_for_status = active_scheduler.clone();
 
     thread::spawn(move || loop {
         if should_quit_clone_for_status.load(Ordering::Relaxed) {
@@ -76,9 +86,10 @@ fn main() -> Result<(), AppError> {
         }
 
         let target_name = active_target_clone_for_status.lock().unwrap().clone();
+        let scheduler_name = active_scheduler_clone_for_status.lock().unwrap().clone();
 
         let statuses = status_client_clone
-            .get_statuses_for_active_target(&target_name)
+            .get_statuses_for_active_target(&target_name, Some(&scheduler_name))
             .map(|job_statuses| (target_name, job_statuses));
         if status_tx.send(statuses).is_err() {
             break;
@@ -144,6 +155,7 @@ fn main() -> Result<(), AppError> {
         resources,
         initial_active_target,
         active_target,
+        active_scheduler,
     )
     .map_err(|e| AppError::ExecutionFailed {
         message: "TUI app initialization failed".to_string(),

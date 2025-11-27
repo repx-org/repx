@@ -64,6 +64,7 @@ pub fn get_statuses(
 pub fn get_statuses_for_active_target(
     client: &Client,
     active_target_name: &str,
+    active_scheduler: Option<&str>,
 ) -> Result<HashMap<JobId, engine::JobStatus>> {
     let mut job_statuses = HashMap::new();
     let target = client
@@ -90,13 +91,24 @@ pub fn get_statuses_for_active_target(
         !is_done
     });
 
+    let has_tracked_slurm_jobs = slurm_map_guard
+        .values()
+        .any(|(t, _)| t == active_target_name);
+
     drop(slurm_map_guard);
 
     if map_was_changed {
         client.save_slurm_map()?;
     }
 
-    if target.config().slurm.is_some() {
+    let should_query_slurm = target.config().slurm.is_some()
+        && match active_scheduler {
+            Some("slurm") => true,
+            Some(_) => false,
+            None => has_tracked_slurm_jobs,
+        };
+
+    if should_query_slurm {
         let queued_jobs = target.squeue()?;
         for (job_id, squeue_info) in queued_jobs {
             job_statuses
