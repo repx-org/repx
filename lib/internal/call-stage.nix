@@ -1,6 +1,7 @@
 args: stageFile: dependencies:
 let
   inherit (args) pkgs;
+  common = import ./common.nix;
   processDependenciesFn = import ./process-dependencies.nix;
   mkSimpleStage = import ../stage-simple.nix { inherit pkgs; };
   mkScatterGatherStage = import ../stage-scatter-gather.nix { inherit pkgs; };
@@ -31,18 +32,13 @@ let
         "runDependencies"
       ];
       validKeys = if isScatterGather then scatterGatherStageKeys else simpleStageKeys;
-      actualKeys = builtins.attrNames def;
-      invalidKeys = pkgs.lib.subtractLists validKeys actualKeys;
     in
-    if invalidKeys != [ ] then
-      throw ''
-        Stage definition from file '${toString stageFile}' has unknown attributes: ${builtins.toJSON invalidKeys}.
-        Valid attributes for a ${
-          if isScatterGather then "scatter-gather" else "simple"
-        } stage are: ${builtins.toJSON validKeys}.
-      ''
-    else
-      def;
+    common.validateArgs {
+      inherit pkgs validKeys;
+      name = "Stage definition from file '${toString stageFile}'";
+      args = def;
+      contextStr = "(Type: ${if isScatterGather then "scatter-gather" else "simple"})";
+    };
 
   consumerInputs =
     if stageDef ? "scatter" then stageDef.scatter.inputs or { } else stageDef.inputs or { };

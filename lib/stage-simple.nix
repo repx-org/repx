@@ -78,15 +78,8 @@ let
   depders = pkgs.lib.filter pkgs.lib.isDerivation dependencyDerivations;
   dependencyManifestJson = builtins.toJSON (map toString depders);
 
-  baseContainerPkgs = with pkgs; [
-    bash
-    coreutils
-    findutils
-    gnused
-    gawk
-    gnugrep
-    jq
-  ];
+  common = import ./internal/common.nix;
+  baseContainerPkgs = common.mkRuntimePackages pkgs;
 
   shellBuiltins = [
     "cd"
@@ -158,8 +151,7 @@ pkgs.stdenv.mkDerivation rec {
     pkgs.shellcheck
     pkgs.oils-for-unix
     pkgs.python3
-  ]
-  ++ baseContainerPkgs;
+  ] ++ baseContainerPkgs;
 
   doCheck = true;
 

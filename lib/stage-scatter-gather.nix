@@ -1,45 +1,35 @@
 { pkgs }:
 stageDef:
 let
+  common = import ./internal/common.nix;
   groupPname = stageDef.pname;
   version = stageDef.version or "1.1";
-  scatterDef = stageDef.scatter;
-  workerDef = stageDef.worker;
-  gatherDef = stageDef.gather;
+
+  subStageKeys = [
+    "pname"
+    "inputs"
+    "outputs"
+    "run"
+    "runDependencies"
+  ];
+
+  validateSubStage =
+    name: args:
+    common.validateArgs {
+      inherit pkgs args;
+      inherit (stageDef) pname;
+      validKeys = subStageKeys;
+      contextStr = "in '${name}' definition of scatter-gather stage";
+    };
+
+  scatterDef = validateSubStage "scatter" stageDef.scatter;
+  workerDef = validateSubStage "worker" stageDef.worker;
+  gatherDef = validateSubStage "gather" stageDef.gather;
+
   paramInputs = stageDef.paramInputs or { };
 
-  subStageValidationError =
-    let
-      check =
-        subStageName: subStageDef:
-        let
-          validKeys = [
-            "pname"
-            "inputs"
-            "outputs"
-            "run"
-            "runDependencies"
-          ];
-          actualKeys = builtins.attrNames subStageDef;
-          invalidKeys = pkgs.lib.subtractLists actualKeys validKeys;
-        in
-        if invalidKeys != [ ] then
-          ''
-            In scatter-gather stage "${groupPname}", the "${subStageName}" definition has unknown attributes: ${builtins.toJSON invalidKeys}.
-            Valid attributes are: ${builtins.toJSON validKeys}.
-          ''
-        else
-          null;
-    in
-    pkgs.lib.findFirst (e: e != null) null [
-      (check "scatter" scatterDef)
-      (check "worker" workerDef)
-      (check "gather" gatherDef)
-    ];
 in
-if subStageValidationError != null then
-  throw subStageValidationError
-else if !(scatterDef.outputs ? "worker__arg") then
+if !(scatterDef.outputs ? "worker__arg") then
   throw ''
     Scatter-gather stage "${groupPname}" is invalid.
     The 'scatter' section MUST define a special output named "worker__arg".
