@@ -78,6 +78,8 @@ let
   depders = pkgs.lib.filter pkgs.lib.isDerivation dependencyDerivations;
   dependencyManifestJson = builtins.toJSON (map toString depders);
 
+  analyzerScript = ./internal/analyze_deps.py;
+
   common = import ./internal/common.nix;
   baseContainerPkgs = common.mkRuntimePackages pkgs;
 
@@ -150,7 +152,7 @@ pkgs.stdenv.mkDerivation rec {
   nativeBuildInputs = [
     pkgs.shellcheck
     pkgs.oils-for-unix
-    pkgs.python3
+    (pkgs.python3.withPackages (ps: [ ps.bashlex ]))
   ] ++ baseContainerPkgs;
 
   doCheck = true;
@@ -159,67 +161,13 @@ pkgs.stdenv.mkDerivation rec {
 
   checkPhase = ''
     runHook preCheck
-    echo "--- Running checks for [${pname}] ---"
-
-    echo "Running shellcheck..."
-    shellcheck -W 0 ${fullScript}
-
-    echo "Running OSH dependency analysis..."
+    echo "--- [DEBUG] Running Dependency Checks ---"
 
     osh -n --ast-format text ${fullScript} > script.ast
 
-    python3 ${pkgs.writeText "verify_deps.py" ''
-      import sys, re, shutil, os, ast
+    python3 ${analyzerScript} script.ast --json dependency_report.json
 
-      allowed_builtins = set(os.environ.get("ALLOWED_BUILTINS", "").split())
-
-      try:
-          with open("script.ast", "r") as f:
-              ast_text = f.read()
-      except FileNotFoundError:
-          print("Error: Could not read script.ast")
-          sys.exit(1)
-
-      pattern = re.compile(r'blame_tok:\(Token id:[\w_]+ length:(\d+) col:(\d+) line:\(SourceLine .*? content:(".*?")\s+src:', re.DOTALL)
-
-      commands = set()
-      for match in pattern.finditer(ast_text):
-          try:
-              length = int(match.group(1))
-              col = int(match.group(2))
-              line_content = ast.literal_eval(match.group(3))
-
-              if col < len(line_content):
-                  cmd = line_content[col : col + length]
-                  commands.add(cmd)
-          except Exception as e:
-              continue
-
-      errors = []
-      for cmd in commands:
-          if not cmd: continue
-          if cmd.startswith("/") or cmd.startswith("."): continue # Absolute paths ok
-          if cmd.startswith("$"): continue # Variables ok (dynamic)
-          if cmd in allowed_builtins: continue
-
-          if shutil.which(cmd): continue
-
-          errors.append(cmd)
-
-      if errors:
-          print("\n" + "="*60)
-          print(f"dependency-check ERROR in [${pname}]")
-          print("The following commands are used but not found in the container or dependencies:")
-          for e in errors:
-              print(f"  - {e}")
-          print("\nSolution: Add these packages to 'runDependencies' in your stage definition.")
-          print("="*60 + "\n")
-          sys.exit(1)
-      else:
-          print("Dependency check passed.")
-    ''}
-
-    echo "--- All checks passed for [${pname}] ---"
+    echo "--- Checks finished ---"
     runHook postCheck
   '';
 }

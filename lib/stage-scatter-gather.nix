@@ -17,7 +17,7 @@ let
     name: args:
     common.validateArgs {
       inherit pkgs args;
-      inherit (stageDef) pname;
+      name = stageDef.pname;
       validKeys = subStageKeys;
       contextStr = "in '${name}' definition of scatter-gather stage";
     };

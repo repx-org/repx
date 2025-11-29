@@ -28,6 +28,7 @@
       checks = forAllSystems (
         pkgs:
         (import ./nix/checks.nix { inherit pkgs; })
+        // (import ./tests/check-deps.nix { inherit pkgs; })
         // {
           integration = pkgs.callPackage ./tests/integration.nix {
             inherit pkgs repx-lib;
