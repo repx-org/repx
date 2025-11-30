@@ -103,11 +103,11 @@
         "nixpkgs": "nixpkgs_2"
       },
       "locked": {
-        "lastModified": 1764254401,
-        "narHash": "sha256-Y89YhIAez+nKyrOMykJAktKdfCFbPv7LZVZo4Hqo/WU=",
+        "lastModified": 1764494935,
+        "narHash": "sha256-GQqh7aq/q4GuvjAteN8K3le9K+aVkZrtxuRj2acWfEs=",
         "owner": "repx-org",
         "repo": "repx-nix",
-        "rev": "404300af0d497f1d446069d61db888cadbbf4cf5",
+        "rev": "81fb603f29a78ec4966b423f6fe6b027d548baf1",
         "type": "github"
       },
       "original": {

@@ -10,8 +10,6 @@
     "result.sum" = "$out/sum.txt";
   };
 
-  runDependencies = [ pkgs.gawk ];
-
   run =
     { inputs, outputs, ... }:
     ''
