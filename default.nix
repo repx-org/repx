@@ -24,6 +24,11 @@ pkgs.python3Packages.buildPythonPackage {
     rarfile
     reportlab
     pandas
+    graphviz
+  ];
+
+  makeWrapperArgs = [
+    "--prefix PATH : ${pkgs.lib.makeBinPath [ pkgs.graphviz ]}"
   ];
 
   nativeCheckInputs = [
@@ -42,6 +47,7 @@ pkgs.python3Packages.buildPythonPackage {
 
   pythonImportsCheck = [
     "repx_py.models"
+    "repx_py.visualize"
   ];
 
   meta = {
