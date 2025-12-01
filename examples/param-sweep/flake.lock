@@ -20,32 +20,32 @@
     },
     "nixpkgs": {
       "locked": {
-        "lastModified": 1763334038,
-        "narHash": "sha256-LBVOyaH6NFzQ3X/c6vfMZ9k4SV2ofhpxeL9YnhHNJQQ=",
+        "lastModified": 1764522689,
+        "narHash": "sha256-SqUuBFjhl/kpDiVaKLQBoD8TLD+/cTUzzgVFoaHrkqY=",
         "owner": "NixOS",
         "repo": "nixpkgs",
-        "rev": "4c8cdd5b1a630e8f72c9dd9bf582b1afb3127d2c",
+        "rev": "8bb5646e0bed5dbd3ab08c7a7cc15b75ab4e1d0f",
         "type": "github"
       },
       "original": {
         "owner": "NixOS",
-        "ref": "nixos-25.05",
+        "ref": "nixos-25.11",
         "repo": "nixpkgs",
         "type": "github"
       }
     },
     "nixpkgs_2": {
       "locked": {
-        "lastModified": 1747953325,
-        "narHash": "sha256-y2ZtlIlNTuVJUZCqzZAhIw5rrKP4DOSklev6c8PyCkQ=",
+        "lastModified": 1764522689,
+        "narHash": "sha256-SqUuBFjhl/kpDiVaKLQBoD8TLD+/cTUzzgVFoaHrkqY=",
         "owner": "NixOS",
         "repo": "nixpkgs",
-        "rev": "55d1f923c480dadce40f5231feb472e81b0bab48",
+        "rev": "8bb5646e0bed5dbd3ab08c7a7cc15b75ab4e1d0f",
         "type": "github"
       },
       "original": {
         "owner": "NixOS",
-        "ref": "nixos-25.05",
+        "ref": "nixos-25.11",
         "repo": "nixpkgs",
         "type": "github"
       }
@@ -103,11 +103,11 @@
         "nixpkgs": "nixpkgs_2"
       },
       "locked": {
-        "lastModified": 1764494935,
-        "narHash": "sha256-GQqh7aq/q4GuvjAteN8K3le9K+aVkZrtxuRj2acWfEs=",
+        "lastModified": 1764610500,
+        "narHash": "sha256-ccn4EvNEDKX3xZjgxrcxwSHg7BVZHp1/upubgJ07Sa8=",
         "owner": "repx-org",
         "repo": "repx-nix",
-        "rev": "81fb603f29a78ec4966b423f6fe6b027d548baf1",
+        "rev": "351b625542aedc5a4d4fdab9e10989e49f830c59",
         "type": "github"
       },
       "original": {
@@ -142,11 +142,11 @@
         "repx-reference": "repx-reference"
       },
       "locked": {
-        "lastModified": 1764157373,
-        "narHash": "sha256-38rOK5elQS8WGZcw+guB9/5Zu1QrhwySO1mo6jbtkUk=",
+        "lastModified": 1764608258,
+        "narHash": "sha256-/rtWUxisiULve4OgIiccsJ/NdCNTwBJygeMxHcaGGfU=",
         "owner": "repx-org",
         "repo": "repx-py",
-        "rev": "e45c493e3da8f073d2fdb330e6bf04fe7db70229",
+        "rev": "ab81db35265bb92044bb8a093f0eaf40617fc4fe",
         "type": "github"
       },
       "original": {
