@@ -80,9 +80,6 @@ pkgs.testers.runNixOSTest {
           extraConfig = ''
             SlurmdTimeout=60
             SlurmctldTimeout=60
-            # Ensure we can run as the repxuser
-            JobCredentialPrivateKey=/etc/slurm/slurm.key
-            JobCredentialPublicCertificate=/etc/slurm/slurm.cert
           '';
         };
       };
