@@ -13,7 +13,7 @@ pkgs.testers.runNixOSTest {
       {
         virtualisation.diskSize = 8192;
         virtualisation.memorySize = 2048;
-        virtualisation.cores = 2;
+        virtualisation.cores = 4;
         environment.systemPackages = [
           repxRunner
           pkgs.openssh
@@ -26,7 +26,7 @@ pkgs.testers.runNixOSTest {
       {
         virtualisation.diskSize = 8192;
         virtualisation.memorySize = 4096;
-        virtualisation.cores = 2;
+        virtualisation.cores = 4;
 
         networking.hostName = "cluster";
         networking.firewall.enable = false;
@@ -74,7 +74,7 @@ pkgs.testers.runNixOSTest {
           client.enable = true;
           controlMachine = "cluster";
           procTrackType = "proctrack/pgid";
-          nodeName = [ "cluster CPUs=2 RealMemory=3000 State=UNKNOWN" ];
+          nodeName = [ "cluster CPUs=4 RealMemory=3000 State=UNKNOWN" ];
           partitionName = [ "main Nodes=cluster Default=YES MaxTime=INFINITE State=UP" ];
 
           extraConfig = ''
@@ -139,7 +139,7 @@ pkgs.testers.runNixOSTest {
         print(f"[{runtime}] Waiting for jobs to finish in Slurm queue...")
 
         cluster.succeed("""
-            for i in {1..60}; do
+            for i in {1..900}; do
                 if ! squeue -h -u repxuser | grep .; then
                     echo "Queue empty, jobs finished."
                     exit 0

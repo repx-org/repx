@@ -4,7 +4,7 @@ use repx_core::{error::AppError, log_debug, log_error, log_info, model::JobId};
 use repx_executor::{ExecutionRequest, Executor, Runtime};
 use serde_json::Value;
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashMap,
     fs,
     path::{Path, PathBuf},
     process::Command,
@@ -223,16 +223,77 @@ impl ScatterGatherOrchestrator {
 }
 
 async fn async_handle_scatter_gather(args: InternalScatterGatherArgs) -> Result<(), AppError> {
-    log_debug!("INTERNAL SCATTER-GATHER starting for job '{}'", args.job_id);
+    log_debug!(
+        "INTERNAL SCATTER-GATHER (Phase: {}) starting for job '{}'",
+        args.phase,
+        args.job_id
+    );
 
     let mut orch = ScatterGatherOrchestrator::new(&args)?;
-    orch.init_dirs()?;
 
+    if args.phase == "gather" {
+        orch.init_dirs()?;
+        let work_items_str = fs::read_to_string(orch.scatter_out_dir.join("work_items.json"))?;
+        let work_items: Vec<Value> = serde_json::from_str(&work_items_str)?;
+
+        let mut worker_out_dirs = Vec::new();
+        for i in 0..work_items.len() {
+            let worker_root = orch.job_root.join(format!("worker-{}", i));
+            let worker_repx = worker_root.join("repx");
+            if !worker_repx.join("SUCCESS").exists() {
+                let msg = format!("Worker #{} SUCCESS marker not found.", i);
+                log_error!("{}", msg);
+                fs::File::create(orch.repx_dir.join("FAIL"))?;
+                if let Some(anchor) = args.anchor_id {
+                    let _ = Command::new("scancel").arg(anchor.to_string()).output();
+                }
+                return Err(AppError::ExecutionFailed {
+                    message: msg,
+                    log_path: Some(worker_repx),
+                    log_summary: "Worker did not complete successfully".into(),
+                });
+            }
+            worker_out_dirs.push(worker_root.join("out"));
+        }
+
+        match orch
+            .run_gather(
+                &args.gather_exe_path,
+                &worker_out_dirs,
+                &args.worker_outputs_json,
+            )
+            .await
+        {
+            Ok(_) => {
+                fs::File::create(orch.repx_dir.join("SUCCESS"))?;
+                if let Some(anchor) = args.anchor_id {
+                    log_info!("Releasing anchor job {}", anchor);
+                    let _ = Command::new("scontrol")
+                        .arg("release")
+                        .arg(anchor.to_string())
+                        .output();
+                }
+            }
+            Err(e) => {
+                fs::File::create(orch.repx_dir.join("FAIL"))?;
+                if let Some(anchor) = args.anchor_id {
+                    let _ = Command::new("scancel").arg(anchor.to_string()).output();
+                }
+                return Err(e);
+            }
+        }
+        return Ok(());
+    }
+
+    orch.init_dirs()?;
     log_info!("Orchestrating scatter-gather stage '{}'", orch.job_id);
 
     if let Err(e) = orch.run_scatter(&args.scatter_exe_path).await {
         let _ = fs::File::create(orch.scatter_repx_dir.join("FAIL"));
         fs::File::create(orch.repx_dir.join("FAIL"))?;
+        if let Some(anchor) = args.anchor_id {
+            let _ = Command::new("scancel").arg(anchor.to_string()).output();
+        }
         log_error!("Scatter failed: {}", e);
         return Err(e);
     }
@@ -254,16 +315,41 @@ async fn async_handle_scatter_gather(args: InternalScatterGatherArgs) -> Result<
             &mut worker_repx_dirs,
         )
         .await?;
+
+        for (i, repx_dir) in worker_repx_dirs.iter().enumerate() {
+            if !repx_dir.join("SUCCESS").exists() {
+                let _ = fs::File::create(orch.repx_dir.join("FAIL"));
+                return Err(AppError::ExecutionFailed {
+                    message: format!("Worker #{} failed", i),
+                    log_path: Some(repx_dir.clone()),
+                    log_summary: "Worker failure".into(),
+                });
+            }
+        }
+        if let Err(e) = orch
+            .run_gather(
+                &args.gather_exe_path,
+                &worker_out_dirs,
+                &args.worker_outputs_json,
+            )
+            .await
+        {
+            fs::File::create(orch.repx_dir.join("FAIL"))?;
+            return Err(e);
+        }
+        fs::File::create(orch.repx_dir.join("SUCCESS"))?;
     } else if args.scheduler == "slurm" {
-        run_slurm_workers(
+        let slurm_ids = submit_slurm_workers_async(
             &orch,
             &work_items,
             &args.worker_exe_path,
             &args.worker_sbatch_opts,
-            &mut worker_out_dirs,
-            &mut worker_repx_dirs,
         )
         .await?;
+
+        submit_slurm_gather_job(&orch, &args, &slurm_ids).await?;
+
+        log_info!("Orchestrator finished submitting workers and gather job. Exiting to free slot.");
     } else {
         return Err(AppError::ConfigurationError(format!(
             "Unknown scheduler: {}",
@@ -271,40 +357,140 @@ async fn async_handle_scatter_gather(args: InternalScatterGatherArgs) -> Result<
         )));
     }
 
-    for (i, repx_dir) in worker_repx_dirs.iter().enumerate() {
-        if !repx_dir.join("SUCCESS").exists() {
-            let _ = fs::File::create(orch.repx_dir.join("FAIL"));
-            let msg = format!(
-                "Worker #{} did not produce a SUCCESS marker. Aborting gather.",
-                i
-            );
-            log_error!("{}", msg);
-            return Err(AppError::ExecutionFailed {
-                message: msg,
-                log_path: Some(repx_dir.clone()),
-                log_summary: "Worker failed or crashed".into(),
-            });
-        }
+    Ok(())
+}
+
+async fn submit_slurm_gather_job(
+    orch: &ScatterGatherOrchestrator,
+    args: &InternalScatterGatherArgs,
+    worker_ids: &[String],
+) -> Result<(), AppError> {
+    let current_exe = std::env::current_exe()?;
+    let current_exe_str = current_exe.to_string_lossy();
+
+    let mut gather_cmd_parts = vec![
+        current_exe_str.to_string(),
+        "internal-scatter-gather".to_string(),
+        "--phase".to_string(),
+        "gather".to_string(),
+        "--job-id".to_string(),
+        args.job_id.clone(),
+        "--runtime".to_string(),
+        args.runtime.clone(),
+        "--base-path".to_string(),
+        args.base_path.to_string_lossy().to_string(),
+        "--host-tools-dir".to_string(),
+        args.host_tools_dir.clone(),
+        "--scheduler".to_string(),
+        "slurm".to_string(),
+        "--worker-sbatch-opts".to_string(),
+        "''".to_string(),
+        "--job-package-path".to_string(),
+        args.job_package_path.to_string_lossy().to_string(),
+        "--scatter-exe-path".to_string(),
+        args.scatter_exe_path.to_string_lossy().to_string(),
+        "--worker-exe-path".to_string(),
+        args.worker_exe_path.to_string_lossy().to_string(),
+        "--gather-exe-path".to_string(),
+        args.gather_exe_path.to_string_lossy().to_string(),
+        "--worker-outputs-json".to_string(),
+        format!("'{}'", args.worker_outputs_json),
+    ];
+
+    if let Some(tag) = &args.image_tag {
+        gather_cmd_parts.push("--image-tag".to_string());
+        gather_cmd_parts.push(tag.clone());
+    }
+    if let Some(local) = &args.node_local_path {
+        gather_cmd_parts.push("--node-local-path".to_string());
+        gather_cmd_parts.push(local.to_string_lossy().to_string());
+    }
+    if let Some(anchor) = args.anchor_id {
+        gather_cmd_parts.push("--anchor-id".to_string());
+        gather_cmd_parts.push(anchor.to_string());
     }
 
-    if let Err(e) = orch
-        .run_gather(
-            &args.gather_exe_path,
-            &worker_out_dirs,
-            &args.worker_outputs_json,
-        )
-        .await
-    {
-        fs::File::create(orch.repx_dir.join("FAIL"))?;
-        log_error!("Gather failed: {}", e);
-        return Err(e);
+    let cmd_str = gather_cmd_parts.join(" ");
+
+    let mut sbatch = Command::new("sbatch");
+    sbatch.arg("--parsable");
+    if !worker_ids.is_empty() {
+        sbatch.arg(format!("--dependency=afterany:{}", worker_ids.join(":")));
     }
-    fs::File::create(orch.repx_dir.join("SUCCESS"))?;
-    log_info!(
-        "Scatter-gather stage '{}' completed successfully.",
-        orch.job_id
-    );
+    sbatch
+        .arg(format!("--job-name={}-gather", orch.job_id.0))
+        .arg(format!(
+            "--output={}/gather/repx/slurm-%j.out",
+            orch.job_root.display()
+        ))
+        .arg("--wrap")
+        .arg(cmd_str);
+
+    let output = sbatch.output()?;
+    if !output.status.success() {
+        return Err(AppError::ExecutionFailed {
+            message: "Failed to submit Gather job".to_string(),
+            log_path: None,
+            log_summary: String::from_utf8_lossy(&output.stderr).to_string(),
+        });
+    }
+
     Ok(())
+}
+
+async fn submit_slurm_workers_async(
+    orch: &ScatterGatherOrchestrator,
+    work_items: &[Value],
+    worker_exe: &Path,
+    sbatch_opts: &str,
+) -> Result<Vec<String>, AppError> {
+    let mut slurm_ids = Vec::new();
+
+    for (i, item) in work_items.iter().enumerate() {
+        let (w_out, w_repx, w_inputs) = orch.prepare_worker(i, item)?;
+
+        let executor = orch.create_executor(w_out.clone(), w_repx.clone());
+        let args = vec![
+            w_out.to_string_lossy().to_string(),
+            w_inputs.to_string_lossy().to_string(),
+        ];
+        let cmd = executor
+            .build_command_for_script(worker_exe, &args)
+            .await
+            .map_err(|e| AppError::ExecutionFailed {
+                message: format!("Failed to build command for worker #{}", i),
+                log_path: None,
+                log_summary: e.to_string(),
+            })?;
+        let cmd_str = command_to_shell_string(&cmd);
+        let wrapped_cmd = format!(
+            "( {} && touch {}/SUCCESS ) || ( touch {}/FAIL; exit 1 )",
+            cmd_str,
+            w_repx.display(),
+            w_repx.display()
+        );
+
+        let mut sbatch = Command::new("sbatch");
+        sbatch
+            .arg("--parsable")
+            .args(sbatch_opts.split_whitespace())
+            .arg(format!("--job-name={}-w{}", orch.job_id.0, i))
+            .arg(format!("--output={}/slurm-%j.out", w_repx.display()))
+            .arg("--wrap")
+            .arg(wrapped_cmd);
+
+        let output = sbatch.output()?;
+        if !output.status.success() {
+            return Err(AppError::ExecutionFailed {
+                message: format!("sbatch submission for worker #{} failed", i),
+                log_path: None,
+                log_summary: String::from_utf8_lossy(&output.stderr).to_string(),
+            });
+        }
+        slurm_ids.push(String::from_utf8_lossy(&output.stdout).trim().to_string());
+    }
+    log_info!("Submitted {} workers to Slurm.", slurm_ids.len());
+    Ok(slurm_ids)
 }
 async fn run_local_workers(
     orch: &ScatterGatherOrchestrator,
@@ -364,181 +550,6 @@ async fn run_local_workers(
             }
         }
     }
-    Ok(())
-}
-async fn run_slurm_workers(
-    orch: &ScatterGatherOrchestrator,
-    work_items: &[Value],
-    worker_exe: &Path,
-    sbatch_opts: &str,
-    out_dirs: &mut Vec<PathBuf>,
-    repx_dirs: &mut Vec<PathBuf>,
-) -> Result<(), AppError> {
-    let mut slurm_ids = Vec::new();
-
-    for (i, item) in work_items.iter().enumerate() {
-        let (w_out, w_repx, w_inputs) = orch.prepare_worker(i, item)?;
-        out_dirs.push(w_out.clone());
-        repx_dirs.push(w_repx.clone());
-
-        let executor = orch.create_executor(w_out.clone(), w_repx.clone());
-        let args = vec![
-            w_out.to_string_lossy().to_string(),
-            w_inputs.to_string_lossy().to_string(),
-        ];
-        let cmd = executor
-            .build_command_for_script(worker_exe, &args)
-            .await
-            .map_err(|e| AppError::ExecutionFailed {
-                message: format!("Failed to build command for worker #{}", i),
-                log_path: None,
-                log_summary: e.to_string(),
-            })?;
-        let cmd_str = command_to_shell_string(&cmd);
-        let wrapped_cmd = format!(
-            "( {} && touch {}/SUCCESS ) || ( touch {}/FAIL; exit 1 )",
-            cmd_str,
-            w_repx.display(),
-            w_repx.display()
-        );
-
-        let mut sbatch = Command::new("sbatch");
-        sbatch
-            .arg("--parsable")
-            .args(sbatch_opts.split_whitespace())
-            .arg(format!("--job-name={}-w{}", orch.job_id.0, i))
-            .arg(format!("--output={}/slurm-%j.out", w_repx.display()))
-            .arg("--wrap")
-            .arg(wrapped_cmd);
-
-        let output = sbatch.output()?;
-        if !output.status.success() {
-            return Err(AppError::ExecutionFailed {
-                message: format!("sbatch submission for worker #{} failed", i),
-                log_path: None,
-                log_summary: String::from_utf8_lossy(&output.stderr).to_string(),
-            });
-        }
-        slurm_ids.push(String::from_utf8_lossy(&output.stdout).trim().to_string());
-    }
-
-    log_info!(
-        "[3/4] Waiting for {} SLURM worker jobs to complete...",
-        slurm_ids.len()
-    );
-
-    let mut pending_indices: HashSet<usize> = (0..slurm_ids.len()).collect();
-
-    while !pending_indices.is_empty() {
-        let mut finished_indices = Vec::new();
-        let mut check_squeue_indices = Vec::new();
-
-        for &i in &pending_indices {
-            let repx_dir = &repx_dirs[i];
-            if repx_dir.join("SUCCESS").exists() {
-                finished_indices.push(i);
-            } else if repx_dir.join("FAIL").exists() {
-                fs::File::create(orch.repx_dir.join("FAIL"))?;
-                return Err(AppError::ExecutionFailed {
-                    message: format!("Worker #{} reported failure via FAIL marker", i),
-                    log_path: Some(repx_dir.clone()),
-                    log_summary: "Worker failed".into(),
-                });
-            } else {
-                check_squeue_indices.push(i);
-            }
-        }
-
-        for i in finished_indices {
-            pending_indices.remove(&i);
-        }
-
-        if pending_indices.is_empty() {
-            break;
-        }
-
-        let user = std::env::var("USER").unwrap_or_else(|_| "unknown".to_string());
-        let squeue_output = Command::new("squeue")
-            .arg("-h")
-            .arg("-u")
-            .arg(&user)
-            .arg("-o")
-            .arg("%i %T")
-            .output()?;
-
-        if !squeue_output.status.success() {
-            log_error!(
-                "squeue failed: {}",
-                String::from_utf8_lossy(&squeue_output.stderr)
-            );
-        } else {
-            let output_str = String::from_utf8_lossy(&squeue_output.stdout);
-            let mut job_states = HashMap::new();
-            for line in output_str.lines() {
-                let parts: Vec<&str> = line.split_whitespace().collect();
-                if parts.len() >= 2 {
-                    job_states.insert(parts[0].to_string(), parts[1].to_uppercase());
-                }
-            }
-
-            for i in check_squeue_indices {
-                let slurm_id = &slurm_ids[i];
-                match job_states.get(slurm_id) {
-                    Some(state) => {
-                        if matches!(
-                            state.as_str(),
-                            "FAILED"
-                                | "CANCELLED"
-                                | "TIMEOUT"
-                                | "NODE_FAIL"
-                                | "PREEMPTED"
-                                | "BOOT_FAIL"
-                                | "DEADLINE"
-                                | "OUT_OF_MEMORY"
-                        ) {
-                            fs::File::create(orch.repx_dir.join("FAIL"))?;
-                            return Err(AppError::ExecutionFailed {
-                                message: format!(
-                                    "Worker #{} (ID {}) failed with SLURM state {}",
-                                    i, slurm_id, state
-                                ),
-                                log_path: None,
-                                log_summary: "SLURM failure".into(),
-                            });
-                        }
-                    }
-                    None => {
-                        let repx_dir = &repx_dirs[i];
-                        if repx_dir.join("SUCCESS").exists() {
-                            pending_indices.remove(&i);
-                        } else if repx_dir.join("FAIL").exists() {
-                            fs::File::create(orch.repx_dir.join("FAIL"))?;
-                            return Err(AppError::ExecutionFailed {
-                                message: format!("Worker #{} reported failure", i),
-                                log_path: Some(repx_dir.clone()),
-                                log_summary: "FAIL marker found".into(),
-                            });
-                        } else {
-                            fs::File::create(orch.repx_dir.join("FAIL"))?;
-                            return Err(AppError::ExecutionFailed {
-                                message: format!(
-                                    "Worker #{} (ID {}) disappeared from queue without marker",
-                                    i, slurm_id
-                                ),
-                                log_path: Some(repx_dir.clone()),
-                                log_summary: "Silent job failure".into(),
-                            });
-                        }
-                    }
-                }
-            }
-        }
-
-        if !pending_indices.is_empty() {
-            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
-        }
-    }
-
     Ok(())
 }
 fn command_to_shell_string(cmd: &TokioCommand) -> String {

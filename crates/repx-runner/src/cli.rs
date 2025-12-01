@@ -119,4 +119,10 @@ pub struct InternalScatterGatherArgs {
     pub gather_exe_path: PathBuf,
     #[arg(long)]
     pub worker_outputs_json: String,
+
+    #[arg(long)]
+    pub anchor_id: Option<u32>,
+
+    #[arg(long, default_value = "all")]
+    pub phase: String,
 }

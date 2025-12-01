@@ -159,7 +159,7 @@ pub fn submit_slurm_batch_run(
             let worker_opts_str = worker_directives.to_shell_string();
 
             let command = format!(
-                "{} internal-scatter-gather {} {} --worker-sbatch-opts='{}' --scheduler slurm",
+                "{} internal-scatter-gather {} {} --worker-sbatch-opts='{}' --scheduler slurm --anchor-id $REPX_ANCHOR_ID",
                 remote_repx_command, repx_args, scatter_gather_args, worker_opts_str
             );
             (command, main_directives)

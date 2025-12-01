@@ -56,6 +56,48 @@ pub fn handle_internal_orchestrate(args: InternalOrchestrateArgs) -> Result<(), 
                 .map(|id| id.to_string())
                 .collect();
 
+            let mut anchor_id = None;
+
+            if job_plan.job_type == "scatter-gather" {
+                let mut anchor_cmd = Command::new("sbatch");
+                anchor_cmd
+                    .arg("--parsable")
+                    .arg("--hold")
+                    .arg(format!("--job-name=anchor-{}", job_id.0))
+                    .arg("--time=00:01:00")
+                    .arg("--output=/dev/null")
+                    .arg("--error=/dev/null")
+                    .arg("--wrap=exit 0");
+
+                let anchor_out =
+                    anchor_cmd
+                        .output()
+                        .map_err(|e| AppError::ProcessLaunchFailed {
+                            command_name: "sbatch (anchor)".to_string(),
+                            source: e,
+                        })?;
+
+                if !anchor_out.status.success() {
+                    let stderr = String::from_utf8_lossy(&anchor_out.stderr);
+                    return Err(AppError::ExecutionFailed {
+                        message: format!("Failed to submit anchor for job '{}'", job_id),
+                        log_path: None,
+                        log_summary: stderr.to_string(),
+                    });
+                }
+                let aid_str = String::from_utf8_lossy(&anchor_out.stdout)
+                    .trim()
+                    .to_string();
+                let aid = aid_str
+                    .parse::<u32>()
+                    .map_err(|_| AppError::ExecutionFailed {
+                        message: format!("Failed to parse Anchor ID for job '{}'", job_id),
+                        log_path: None,
+                        log_summary: aid_str.clone(),
+                    })?;
+                anchor_id = Some(aid);
+            }
+
             let mut sbatch_cmd = Command::new("sbatch");
             sbatch_cmd.arg("--parsable");
 
@@ -63,6 +105,11 @@ pub fn handle_internal_orchestrate(args: InternalOrchestrateArgs) -> Result<(), 
                 sbatch_cmd.arg(format!("--dependency=afterok:{}", dep_ids.join(":")));
                 sbatch_cmd.arg("--kill-on-invalid-dep=yes");
             }
+
+            if let Some(aid) = anchor_id {
+                sbatch_cmd.arg(format!("--export=ALL,REPX_ANCHOR_ID={}", aid));
+            }
+
             sbatch_cmd.arg(&script_path);
 
             let output = sbatch_cmd
@@ -93,9 +140,10 @@ pub fn handle_internal_orchestrate(args: InternalOrchestrateArgs) -> Result<(), 
                     log_summary: format!("sbatch output was: '{}'", slurm_id_str),
                 })?;
 
-            submitted_slurm_ids.insert(job_id.clone(), slurm_id);
+            let track_id = anchor_id.unwrap_or(slurm_id);
+            submitted_slurm_ids.insert(job_id.clone(), track_id);
 
-            println!("{} {}", job_id, slurm_id);
+            println!("{} {}", job_id, track_id);
         }
         wave_num += 1;
     }

@@ -6,6 +6,8 @@ use std::path::{Path, PathBuf};
 pub struct JobPlan {
     pub script_hash: String,
     pub dependencies: Vec<JobId>,
+    #[serde(default)]
+    pub job_type: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -47,6 +49,7 @@ impl OrchestrationPlan {
             JobPlan {
                 script_hash,
                 dependencies,
+                job_type: job_def.stage_type.clone(),
             },
         );
     }
