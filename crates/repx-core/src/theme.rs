@@ -322,14 +322,14 @@ pub fn load_theme(config: &Config) -> Result<Theme, AppError> {
         let user_theme_value: toml::Value = toml::from_str(&user_theme_str)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
 
-        let mut base_theme_value = toml::Value::try_from(&base_theme)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+        let mut base_theme_value =
+            toml::Value::try_from(&base_theme).map_err(std::io::Error::other)?;
 
         merge_values(&mut base_theme_value, &user_theme_value);
 
         base_theme = base_theme_value
             .try_into::<Theme>()
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+            .map_err(std::io::Error::other)?;
     }
 
     Ok(base_theme)

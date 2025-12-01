@@ -185,8 +185,7 @@ fn create_default_theme_if_missing(xdg_dirs: &BaseDirectories) -> Result<(), App
     if xdg_dirs.find_config_file(THEME_FILE_NAME).is_none() {
         let theme_path = xdg_dirs.place_config_file(THEME_FILE_NAME)?;
         let default_theme = theme::default_theme();
-        let theme_toml = toml::to_string_pretty(&default_theme)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+        let theme_toml = toml::to_string_pretty(&default_theme).map_err(std::io::Error::other)?;
         fs::write(theme_path, theme_toml)?;
     }
     Ok(())
@@ -296,8 +295,7 @@ pub fn save_config(config: &Config) -> Result<(), AppError> {
     let xdg_dirs = BaseDirectories::with_prefix("repx");
     let config_path = xdg_dirs.place_config_file(CONFIG_FILE_NAME)?;
 
-    let toml_string = toml::to_string_pretty(config)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+    let toml_string = toml::to_string_pretty(config).map_err(std::io::Error::other)?;
     fs::write(config_path, toml_string)?;
     Ok(())
 }

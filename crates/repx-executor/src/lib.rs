@@ -323,10 +323,10 @@ impl Executor {
                     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
                 }
                 Err((_, e)) => {
-                    return Err(ExecutorError::Io(std::io::Error::new(
-                        std::io::ErrorKind::Other,
-                        format!("Failed to acquire extraction lock: {}", e),
-                    )))
+                    return Err(ExecutorError::Io(std::io::Error::other(format!(
+                        "Failed to acquire extraction lock: {}",
+                        e
+                    ))))
                 }
             }
         };
@@ -365,13 +365,10 @@ impl Executor {
         self.restrict_command_environment(&mut cmd, &["tar", "gzip"]);
         let output = cmd.output().await?;
         if !output.status.success() {
-            return Err(ExecutorError::Io(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                format!(
-                    "Failed to extract outer image tarball. Stderr: {}",
-                    String::from_utf8_lossy(&output.stderr)
-                ),
-            )));
+            return Err(ExecutorError::Io(std::io::Error::other(format!(
+                "Failed to extract outer image tarball. Stderr: {}",
+                String::from_utf8_lossy(&output.stderr)
+            ))));
         }
 
         let manifest_path = temp_extract_dir.path().join("manifest.json");
@@ -439,14 +436,11 @@ impl Executor {
             let output = cmd_layer.output().await?;
             if !output.status.success() {
                 let _ = tokio::fs::remove_dir_all(&extract_dir).await;
-                return Err(ExecutorError::Io(std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    format!(
-                        "Failed to extract layer '{}'. Stderr: {}",
-                        layer,
-                        String::from_utf8_lossy(&output.stderr)
-                    ),
-                )));
+                return Err(ExecutorError::Io(std::io::Error::other(format!(
+                    "Failed to extract layer '{}'. Stderr: {}",
+                    layer,
+                    String::from_utf8_lossy(&output.stderr)
+                ))));
             }
         }
         for dir in &["dev", "proc", "tmp"] {
@@ -545,10 +539,10 @@ impl Executor {
                     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
                 }
                 Err((_, e)) => {
-                    return Err(ExecutorError::Io(std::io::Error::new(
-                        std::io::ErrorKind::Other,
-                        format!("Failed to acquire file lock: {}", e),
-                    )))
+                    return Err(ExecutorError::Io(std::io::Error::other(format!(
+                        "Failed to acquire file lock: {}",
+                        e
+                    ))))
                 }
             }
         };
@@ -581,10 +575,10 @@ impl Executor {
             let load_output = load_cmd.output().await?;
             if !load_output.status.success() {
                 let stderr = String::from_utf8_lossy(&load_output.stderr);
-                return Err(ExecutorError::Io(std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    format!("'{} load' failed: {}", runtime, stderr),
-                )));
+                return Err(ExecutorError::Io(std::io::Error::other(format!(
+                    "'{} load' failed: {}",
+                    runtime, stderr
+                ))));
             }
 
             let output_str = String::from_utf8_lossy(&load_output.stdout);
