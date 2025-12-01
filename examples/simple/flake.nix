@@ -2,7 +2,7 @@
   description = "A simple RepX example using repx-py for analysis";
 
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.05";
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.11";
     repx-nix.url = "github:repx-org/repx-nix";
     repx-py.url = "github:repx-org/repx-py";
   };
