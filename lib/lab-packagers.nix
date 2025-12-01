@@ -4,6 +4,15 @@
 }:
 let
   mkHostTools =
+    let
+      rsyncStatic =
+        (pkgs.pkgsStatic.rsync.override {
+          enableXXHash = false;
+        }).overrideAttrs
+          (_: {
+            doCheck = false;
+          });
+    in
     pkgs.runCommand "host-tools"
       {
         buildInputs = [
@@ -16,7 +25,7 @@ let
           pkgs.pkgsStatic.gnutar
           pkgs.pkgsStatic.gzip
           pkgs.pkgsStatic.bubblewrap
-          (pkgs.pkgsStatic.rsync.override { enableXXHash = false; })
+          rsyncStatic
           pkgs.pkgsStatic.openssh
         ];
       }
@@ -33,7 +42,7 @@ let
         cp ${pkgs.pkgsStatic.gzip}/bin/.gzip-wrapped $out/bin/gzip
         cp ${pkgs.pkgsStatic.bubblewrap}/bin/bwrap $out/bin/
         cp ${pkgs.pkgsStatic.openssh}/bin/ssh $out/bin/
-        cp ${(pkgs.pkgsStatic.rsync.override { enableXXHash = false; })}/bin/rsync $out/bin/
+        cp ${rsyncStatic}/bin/rsync $out/bin/
       '';
 
   buildLabCoreAndManifest =

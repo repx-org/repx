@@ -153,7 +153,8 @@ pkgs.stdenv.mkDerivation rec {
     pkgs.shellcheck
     pkgs.oils-for-unix
     (pkgs.python3.withPackages (ps: [ ps.bashlex ]))
-  ] ++ baseContainerPkgs;
+  ]
+  ++ baseContainerPkgs;
 
   doCheck = true;
 
