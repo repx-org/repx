@@ -451,4 +451,57 @@ impl Target for SshTarget {
 
         Ok(remote_dest_path)
     }
+
+    fn register_gc_root(&self, project_id: &str, lab_hash: &str) -> Result<()> {
+        let gcroots_dir = self
+            .base_path()
+            .join("gcroots")
+            .join("auto")
+            .join(project_id);
+        let timestamp = chrono::Local::now().format("%Y-%m-%d_%H-%M-%S").to_string();
+        let link_name = format!("{}_{}", timestamp, lab_hash);
+        let link_path = gcroots_dir.join(&link_name);
+
+        let artifacts_base = self.artifacts_base_path();
+        let lab_dir = artifacts_base.join("lab");
+        let find_manifest_cmd = format!(
+            "find {} -name '*{}*-lab-metadata.json' | head -n 1",
+            shell_quote(&lab_dir.to_string_lossy()),
+            lab_hash
+        );
+        let manifest_output = self.run_command("sh", &["-c", &find_manifest_cmd])?;
+        let manifest_path_str = manifest_output.trim();
+
+        let target_path_str = if !manifest_path_str.is_empty() {
+            manifest_path_str.to_string()
+        } else {
+            artifacts_base.join(lab_hash).to_string_lossy().to_string()
+        };
+
+        let script = format!(
+            r#"
+            mkdir -p {0}
+            ln -sfn {1} {2}
+
+            cd {0}
+            ls -1 | sort -r | tail -n +6 | xargs -r rm
+            "#,
+            shell_quote(&gcroots_dir.to_string_lossy()),
+            shell_quote(&target_path_str),
+            shell_quote(&link_path.to_string_lossy())
+        );
+
+        self.run_command("sh", &["-c", &script])?;
+        Ok(())
+    }
+
+    fn garbage_collect(&self) -> Result<String> {
+        let repx_bin = self.deploy_repx_binary()?;
+        let cmd = format!(
+            "{} internal-gc --base-path {}",
+            shell_quote(&repx_bin.to_string_lossy()),
+            shell_quote(&self.base_path().to_string_lossy())
+        );
+        self.run_command("sh", &["-c", &cmd])
+    }
 }

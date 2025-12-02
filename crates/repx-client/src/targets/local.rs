@@ -262,4 +262,81 @@ impl Target for LocalTarget {
 
         Ok(dest_path)
     }
+
+    fn register_gc_root(&self, project_id: &str, lab_hash: &str) -> Result<()> {
+        let gcroots = self
+            .base_path()
+            .join("gcroots")
+            .join("auto")
+            .join(project_id);
+        fs_err::create_dir_all(&gcroots).map_err(AppError::from)?;
+
+        let timestamp = chrono::Local::now().format("%Y-%m-%d_%H-%M-%S").to_string();
+        let link_name = format!("{}_{}", timestamp, lab_hash);
+        let link_path = gcroots.join(&link_name);
+
+        let artifacts_base = self.artifacts_base_path();
+        let lab_dir = artifacts_base.join("lab");
+        let manifest_path = if lab_dir.exists() {
+            fs_err::read_dir(&lab_dir)
+                .map_err(AppError::from)?
+                .filter_map(std::result::Result::ok)
+                .find(|e| {
+                    e.file_name().to_string_lossy().contains(lab_hash)
+                        && e.file_name()
+                            .to_string_lossy()
+                            .ends_with("-lab-metadata.json")
+                })
+                .map(|e| e.path())
+        } else {
+            None
+        };
+
+        let target_path = manifest_path.unwrap_or_else(|| artifacts_base.join(lab_hash));
+
+        #[cfg(unix)]
+        {
+            let _ = std::os::unix::fs::symlink(&target_path, &link_path);
+        }
+
+        let mut entries = fs_err::read_dir(&gcroots)
+            .map_err(AppError::from)?
+            .filter_map(|e| e.ok())
+            .collect::<Vec<_>>();
+
+        entries.sort_by_key(|e| e.file_name());
+
+        if entries.len() > 5 {
+            let to_remove = entries.len() - 5;
+            for entry in entries.iter().take(to_remove) {
+                let _ = fs_err::remove_file(entry.path());
+            }
+        }
+
+        Ok(())
+    }
+
+    fn garbage_collect(&self) -> Result<String> {
+        let repx_bin = self.deploy_repx_binary()?;
+        let args = vec![
+            "internal-gc".to_string(),
+            "--base-path".to_string(),
+            self.base_path().to_string_lossy().to_string(),
+        ];
+
+        let output = std::process::Command::new(repx_bin)
+            .args(args)
+            .output()
+            .map_err(AppError::from)?;
+
+        if !output.status.success() {
+            return Err(ClientError::Core(AppError::ExecutionFailed {
+                message: "GC failed".into(),
+                log_path: None,
+                log_summary: String::from_utf8_lossy(&output.stderr).to_string(),
+            }));
+        }
+
+        Ok(String::from_utf8_lossy(&output.stdout).to_string())
+    }
 }

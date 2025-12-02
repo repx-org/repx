@@ -31,13 +31,22 @@ pub fn load_from_path(initial_path: &Path) -> Result<Lab, AppError> {
         initial_path.display()
     );
 
-    let lab_path = if initial_path.is_dir() {
-        initial_path.to_path_buf()
+    let (lab_path, specific_manifest) = if initial_path.is_file() {
+        if let Some(parent) = initial_path.parent() {
+            if parent.file_name().and_then(|s| s.to_str()) == Some("lab") {
+                if let Some(root) = parent.parent() {
+                    (root.to_path_buf(), Some(initial_path.to_path_buf()))
+                } else {
+                    (parent.to_path_buf(), None)
+                }
+            } else {
+                (parent.to_path_buf(), None)
+            }
+        } else {
+            (initial_path.parent().unwrap().to_path_buf(), None)
+        }
     } else {
-        initial_path
-            .parent()
-            .ok_or_else(|| AppError::LabNotFound(initial_path.to_path_buf()))?
-            .to_path_buf()
+        (initial_path.to_path_buf(), None)
     };
 
     log_debug!(
@@ -49,8 +58,12 @@ pub fn load_from_path(initial_path: &Path) -> Result<Lab, AppError> {
         return Err(AppError::LabNotFound(lab_path.to_path_buf()));
     }
 
-    let manifest_path = find_manifest_path(&lab_path)
-        .ok_or_else(|| AppError::MetadataNotFound(lab_path.to_path_buf()))?;
+    let manifest_path = if let Some(p) = specific_manifest {
+        p
+    } else {
+        find_manifest_path(&lab_path)
+            .ok_or_else(|| AppError::MetadataNotFound(lab_path.to_path_buf()))?
+    };
 
     log_debug!("Found lab manifest at: '{}'", manifest_path.display());
 
@@ -102,6 +115,17 @@ pub fn load_from_path(initial_path: &Path) -> Result<Lab, AppError> {
     let host_tools_dir_name = host_tools_entry.file_name().to_string_lossy().to_string();
     let host_tools_path = host_tools_entry.path().join("bin");
 
+    let mut referenced_files = Vec::new();
+    if let Ok(p) = manifest_path.strip_prefix(&lab_path) {
+        referenced_files.push(p.to_path_buf());
+    }
+    if let Ok(p) = root_metadata_path.strip_prefix(&lab_path) {
+        referenced_files.push(p.to_path_buf());
+    }
+    if let Ok(p) = host_tools_entry.path().strip_prefix(&lab_path) {
+        referenced_files.push(p.to_path_buf());
+    }
+
     let mut lab = Lab {
         schema_version: root_meta.schema_version,
         git_hash: root_meta.git_hash,
@@ -110,9 +134,11 @@ pub fn load_from_path(initial_path: &Path) -> Result<Lab, AppError> {
         jobs: HashMap::new(),
         host_tools_path,
         host_tools_dir_name,
+        referenced_files,
     };
 
     for run_rel_path in root_meta.runs {
+        lab.referenced_files.push(PathBuf::from(&run_rel_path));
         let run_metadata_path = lab_path.join(&run_rel_path);
         log_debug!(
             "Loading run metadata from '{}'",
@@ -134,6 +160,10 @@ pub fn load_from_path(initial_path: &Path) -> Result<Lab, AppError> {
 
         let job_ids_for_run: Vec<_> = run_meta.jobs.keys().cloned().collect();
 
+        if let Some(img) = &run_meta.image {
+            lab.referenced_files.push(img.clone());
+        }
+
         let run = Run {
             image: run_meta.image,
             jobs: job_ids_for_run,
@@ -144,6 +174,7 @@ pub fn load_from_path(initial_path: &Path) -> Result<Lab, AppError> {
 
         for (job_id, mut job) in run_meta.jobs.drain() {
             job.path_in_lab = PathBuf::from("jobs").join(&job_id.0);
+            lab.referenced_files.push(job.path_in_lab.clone());
             lab.jobs.insert(job_id, job);
         }
     }

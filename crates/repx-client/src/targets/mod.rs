@@ -85,6 +85,9 @@ pub trait Target: Send + Sync {
     fn sync_directory(&self, local_path: &Path, remote_path: &Path) -> Result<()>;
     fn read_remote_file_tail(&self, path: &Path, line_count: u32) -> Result<Vec<String>>;
 
+    fn register_gc_root(&self, project_id: &str, lab_hash: &str) -> Result<()>;
+    fn garbage_collect(&self) -> Result<String>;
+
     fn spawn_repx_job(
         &self,
         repx_binary_path: &Path,

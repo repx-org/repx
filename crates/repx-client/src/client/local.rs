@@ -9,7 +9,6 @@ use repx_core::{
 };
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
-use std::process::Child;
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
@@ -50,41 +49,54 @@ pub fn submit_local_batch_run(
     let mut jobs_left: HashSet<JobId> = jobs_in_batch.keys().cloned().collect();
     let total_to_submit = jobs_in_batch.len();
     let mut submitted_count = 0;
-    let mut active_handles: Vec<(JobId, Child)> = vec![];
+    let mut active_handles: Vec<(
+        JobId,
+        std::thread::JoinHandle<std::io::Result<std::process::Output>>,
+    )> = vec![];
     let concurrency = options.num_jobs.unwrap_or_else(num_cpus::get);
 
     loop {
         let mut finished_indices = Vec::new();
-        for (i, (_id, child)) in active_handles.iter_mut().enumerate() {
-            match child.try_wait() {
-                Ok(Some(_)) => finished_indices.push(i),
-                Ok(None) => {}
-                Err(e) => return Err(ClientError::Core(AppError::from(e))),
+        for (i, (_id, handle)) in active_handles.iter().enumerate() {
+            if handle.is_finished() {
+                finished_indices.push(i);
             }
         }
 
         for i in finished_indices.into_iter().rev() {
-            let (job_id, child) = active_handles.remove(i);
-            let output = child.wait_with_output().map_err(AppError::from)?;
+            let (job_id, handle) = active_handles.remove(i);
+            let join_res = handle.join();
+            match join_res {
+                Ok(output_res) => {
+                    let output = output_res.map_err(AppError::from)?;
 
-            if !output.status.success() {
-                let stderr = String::from_utf8_lossy(&output.stderr);
-                return Err(ClientError::Core(AppError::ExecutionFailed {
-                    message: format!("Local execution of job '{}' failed.", job_id),
-                    log_path: Some(
-                        target
-                            .base_path()
-                            .join("outputs")
-                            .join(job_id.0)
-                            .join("repx"),
-                    ),
-                    log_summary: format!(
-                        "Process exited with status {}.\n--- STDERR ---\n{}",
-                        output.status, stderr
-                    ),
-                }));
+                    if !output.status.success() {
+                        let stderr = String::from_utf8_lossy(&output.stderr);
+                        return Err(ClientError::Core(AppError::ExecutionFailed {
+                            message: format!("Local execution of job '{}' failed.", job_id),
+                            log_path: Some(
+                                target
+                                    .base_path()
+                                    .join("outputs")
+                                    .join(job_id.0)
+                                    .join("repx"),
+                            ),
+                            log_summary: format!(
+                                "Process exited with status {}.\n--- STDERR ---\n{}",
+                                output.status, stderr
+                            ),
+                        }));
+                    }
+                    completed_jobs.insert(job_id.clone());
+                }
+                Err(e) => {
+                    return Err(ClientError::Core(AppError::ExecutionFailed {
+                        message: format!("Local execution thread for job '{}' panicked.", job_id),
+                        log_path: None,
+                        log_summary: format!("{:?}", e),
+                    }));
+                }
             }
-            completed_jobs.insert(job_id.clone());
         }
 
         if jobs_left.is_empty() && active_handles.is_empty() {
@@ -226,15 +238,17 @@ pub fn submit_local_batch_run(
 
                 let child = target.spawn_repx_job(repx_binary_path, &args)?;
                 submitted_count += 1;
+                let pid = child.id();
 
                 send(ClientEvent::JobStarted {
                     job_id: job_id.clone(),
-                    pid: child.id(),
+                    pid,
                     total: total_to_submit,
                     current: submitted_count,
                 });
 
-                active_handles.push((job_id, child));
+                let handle = thread::spawn(move || child.wait_with_output());
+                active_handles.push((job_id, handle));
             }
         }
 

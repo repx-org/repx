@@ -30,6 +30,23 @@ pub fn run() -> Result<(), AppError> {
         Commands::InternalScatterGather(args) => {
             commands::scatter_gather::handle_scatter_gather(args)
         }
+        Commands::InternalGc(args) => commands::gc::handle_internal_gc(args),
+        Commands::Gc(args) => {
+            let config = config::load_config()?;
+            let client = Client::new(config.clone(), cli.lab.clone()).map_err(|e| {
+                AppError::ExecutionFailed {
+                    message: "Failed to initialize client".to_string(),
+                    log_path: None,
+                    log_summary: e.to_string(),
+                }
+            })?;
+            let context = AppContext {
+                lab_path: &cli.lab,
+                client: &client,
+                submission_target: "local",
+            };
+            commands::gc::handle_gc(args, &context, &config)
+        }
         Commands::Run(args) => {
             let config = config::load_config()?;
             let resources = config::load_resources(cli.resources.as_ref())?;

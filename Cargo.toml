@@ -15,10 +15,10 @@ repx-executor = { path = "crates/repx-executor" }
 repx-runner = { path = "crates/repx-runner" }
 repx-tui = { path = "crates/repx-tui" }
 
-fs-err = "3.1"
+fs-err = "3.2"
 async-trait = "0.1.89"
 chrono = "0.4.42"
-clap = { version = "4.5.51", features = ["derive"] }
+clap = { version = "4.5.53", features = ["derive"] }
 colored = "3.0"
 comfy-table = "7.2"
 crossterm = "0.29.0"

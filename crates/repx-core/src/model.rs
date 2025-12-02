@@ -136,6 +136,8 @@ pub struct Lab {
     pub host_tools_path: PathBuf,
     #[serde(skip)]
     pub host_tools_dir_name: String,
+    #[serde(skip)]
+    pub referenced_files: Vec<PathBuf>,
 }
 
 impl Lab {

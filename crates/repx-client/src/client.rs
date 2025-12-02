@@ -11,7 +11,9 @@ use repx_core::{
     lab, log_info,
     model::{Job, JobId, Lab, RunId},
 };
+use sha2::{Digest, Sha256};
 use std::path::Path;
+use std::process::Command;
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
     path::PathBuf,
@@ -141,6 +143,10 @@ impl Client {
         &self.lab_path
     }
 
+    pub fn get_target(&self, name: &str) -> Option<Arc<dyn Target>> {
+        self.targets.get(name).cloned()
+    }
+
     pub(crate) fn save_slurm_map(&self) -> Result<()> {
         let xdg_dirs = xdg::BaseDirectories::with_prefix("repx");
         let map_path = xdg_dirs
@@ -195,6 +201,30 @@ impl Client {
             .get(target_name)
             .ok_or_else(|| ClientError::TargetNotFound(target_name.to_string()))?;
 
+        let lab_path_abs =
+            fs_err::canonicalize(&*self.lab_path).unwrap_or(self.lab_path.to_path_buf());
+        let abs_hash = format!(
+            "{:x}",
+            Sha256::digest(lab_path_abs.to_string_lossy().as_bytes())
+        );
+        let remote_hash = if let Ok(output) = Command::new("git")
+            .arg("remote")
+            .arg("get-url")
+            .arg("origin")
+            .current_dir(&*self.lab_path)
+            .output()
+        {
+            if output.status.success() {
+                let s = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                format!("{:x}", Sha256::digest(s.as_bytes()))
+            } else {
+                "no_remote".to_string()
+            }
+        } else {
+            "no_git".to_string()
+        };
+        let project_id = format!("{}_{}", remote_hash, abs_hash);
+
         let mut full_dependency_set = HashSet::new();
         for spec in &run_specs {
             let run_id = RunId(spec.clone());
@@ -220,6 +250,11 @@ impl Client {
 
         send(ClientEvent::SyncingArtifacts { total: 1 });
         target.sync_lab_root(&self.lab_path)?;
+
+        if let Err(e) = target.register_gc_root(&project_id, &self.lab.content_hash) {
+            log_info!("Warning: Failed to register GC root: {}", e);
+        }
+
         send(ClientEvent::SyncingFinished);
 
         let raw_statuses = self.get_statuses_for_active_target(target_name, Some(scheduler))?;

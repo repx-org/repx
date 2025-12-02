@@ -29,3 +29,6 @@ num_cpus.workspace = true
 assert_cmd = "2.1.1"
 predicates = "3.1.3"
 tempfile = "3.23"
+repx-client = { workspace = true }
+repx-core = { workspace = true }
+sha2 = { workspace = true }

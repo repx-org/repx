@@ -43,6 +43,7 @@ pub struct Cli {
 #[derive(Subcommand)]
 pub enum Commands {
     Run(RunArgs),
+    Gc(GcArgs),
 
     #[command(hide = true)]
     InternalOrchestrate(InternalOrchestrateArgs),
@@ -52,6 +53,24 @@ pub enum Commands {
 
     #[command(hide = true)]
     InternalScatterGather(InternalScatterGatherArgs),
+
+    #[command(hide = true)]
+    InternalGc(InternalGcArgs),
+}
+
+#[derive(Args)]
+pub struct GcArgs {
+    #[arg(
+        long,
+        help = "The target to garbage collect (must be defined in config.toml)"
+    )]
+    pub target: Option<String>,
+}
+
+#[derive(Args)]
+pub struct InternalGcArgs {
+    #[arg(long)]
+    pub base_path: PathBuf,
 }
 
 #[derive(Args)]
