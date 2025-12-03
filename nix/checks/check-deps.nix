@@ -1,6 +1,6 @@
 { pkgs }:
 let
-  analyzerScript = ../lib/internal/analyze_deps.py;
+  analyzerScript = ../../lib/internal/analyze_deps.py;
 
   pyEnv = pkgs.python3.withPackages (ps: [ ps.bashlex ]);
 
