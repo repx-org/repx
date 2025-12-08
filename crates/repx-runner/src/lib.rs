@@ -1,6 +1,5 @@
 use crate::cli::{Cli, Commands};
 use crate::commands::AppContext;
-use clap::Parser;
 use repx_client::Client;
 use repx_core::{
     config,
@@ -12,8 +11,7 @@ use repx_core::{
 pub mod cli;
 pub mod commands;
 
-pub fn run() -> Result<(), AppError> {
-    let cli = Cli::parse();
+pub fn run(cli: Cli) -> Result<(), AppError> {
     if cli.verbose > 0 {
         logging::set_log_level(LogLevel::from(cli.verbose + 1));
     }

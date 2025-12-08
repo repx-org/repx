@@ -301,7 +301,6 @@ fn test_gc_handles_broken_symlinks_gracefully() {
 
 #[test]
 fn test_gc_handles_lab_load_failure() {
-
     let harness = TestHarness::new();
     let base_path = harness.cache_dir.path();
     let gcroots_pinned = base_path.join("gcroots/pinned");

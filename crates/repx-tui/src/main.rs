@@ -37,7 +37,10 @@ struct TuiArgs {
 
 fn main() -> Result<(), AppError> {
     repx_core::logging::set_log_level_from_env();
-    if let Err(e) = repx_core::logging::init_tui_logger() {
+
+    let logging_config = config::load_config().map(|c| c.logging).unwrap_or_default();
+
+    if let Err(e) = repx_core::logging::init_tui_logger(&logging_config) {
         eprintln!("[ERROR] Failed to initialize TUI logger: {}", e);
         std::process::exit(1);
     }

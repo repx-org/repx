@@ -27,6 +27,13 @@ submission_target = "local"
 # Can be "slurm" or "local".
 default_scheduler = "local"
 
+# --- Logging Configuration ---
+[logging]
+# Maximum number of log files to keep. Set to 0 for infinite.
+max_files = 50
+# Maximum age of log files in days. Set to 0 for infinite.
+max_age_days = 7
+
 # --- Execution Targets ---
 # Defines the machines (local or remote) where jobs can be submitted.
 [targets]
@@ -129,12 +136,40 @@ pub struct Target {
 
 const TUI_DEFAULT_TICK_RATE_MS: u64 = 1000;
 
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(deny_unknown_fields)]
+pub struct LoggingConfig {
+    #[serde(default = "default_max_files")]
+    pub max_files: usize,
+    #[serde(default = "default_max_age_days")]
+    pub max_age_days: u64,
+}
+
+fn default_max_files() -> usize {
+    50
+}
+
+fn default_max_age_days() -> u64 {
+    7
+}
+
+impl Default for LoggingConfig {
+    fn default() -> Self {
+        Self {
+            max_files: default_max_files(),
+            max_age_days: default_max_age_days(),
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize, Debug, Default, Clone)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
     pub theme: Option<String>,
     pub submission_target: Option<String>,
     pub default_scheduler: Option<String>,
+    #[serde(default)]
+    pub logging: LoggingConfig,
     #[serde(default)]
     pub targets: BTreeMap<String, Target>,
 }
