@@ -5,5 +5,6 @@
   statix = (import ./checks/statix.nix { inherit pkgs; }).lint;
   formatting = (import ./checks/formatting.nix { inherit pkgs; }).fmt;
   integration = pkgs.callPackage ./checks/check-integration.nix { inherit repx-lib; };
+  params = pkgs.callPackage ./checks/check-params.nix { };
 }
 // (import ./checks/check-deps.nix { inherit pkgs; })

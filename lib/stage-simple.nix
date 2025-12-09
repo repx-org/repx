@@ -11,7 +11,9 @@ let
 
   bashInputs = pkgs.lib.mapAttrs (name: _: "\${inputs[\"${name}\"]}") inputsDef;
   bashOutputs = outputsDef;
-  bashParams = pkgs.lib.mapAttrs (_: value: pkgs.lib.escapeShellArg value) paramsDef;
+  bashParams = pkgs.lib.mapAttrs (
+    _: value: if value == null then "" else pkgs.lib.escapeShellArg value
+  ) paramsDef;
   userScript = stageDef.run {
     inputs = bashInputs;
     outputs = bashOutputs;
