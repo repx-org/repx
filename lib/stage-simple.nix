@@ -162,6 +162,11 @@ pkgs.stdenv.mkDerivation rec {
 
   checkPhase = ''
     runHook preCheck
+    echo "--- Running checks for [${pname}] ---"
+
+    echo "Running shellcheck..."
+    shellcheck -W 0 ${fullScript}
+
     echo "--- [DEBUG] Running Dependency Checks ---"
 
     osh -n --ast-format text ${fullScript} > script.ast
