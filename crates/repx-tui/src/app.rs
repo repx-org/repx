@@ -86,7 +86,15 @@ pub enum SubmissionResult {
 
 pub enum ExternalAction {
     ExploreLocal(PathBuf),
-    ExploreRemote { address: String, path: PathBuf },
+    ExploreRemote {
+        address: String,
+        path: PathBuf,
+    },
+    EditLocal(Vec<PathBuf>),
+    EditRemote {
+        address: String,
+        paths: Vec<PathBuf>,
+    },
 }
 pub struct App {
     pub client: Arc<Client>,
@@ -565,6 +573,119 @@ impl App {
         self.jobs_state.rebuild_display_list(&self.lab);
         self.on_selection_change();
     }
+    pub fn open_job_definition_selected(&mut self) {
+        let selected_idx = if let Some(i) = self.jobs_state.table_state.selected() {
+            i
+        } else {
+            return;
+        };
+
+        let row = if let Some(r) = self.jobs_state.display_rows.get(selected_idx) {
+            r
+        } else {
+            return;
+        };
+
+        let job_id = match &row.item {
+            TuiRowItem::Job { job } => &job.full_id,
+            TuiRowItem::Run { .. } => return,
+        };
+
+        let job_def = if let Some(j) = self.lab.jobs.get(job_id) {
+            j
+        } else {
+            return;
+        };
+
+        let exe = job_def
+            .executables
+            .get("main")
+            .or_else(|| job_def.executables.get("scatter"));
+
+        let exe_path_rel = if let Some(e) = exe {
+            &e.path
+        } else {
+            return;
+        };
+
+        let target_name = self.targets_state.get_active_target_name();
+        let config = self.client.config();
+        let target_config = if let Some(t) = config.targets.get(&target_name) {
+            t
+        } else {
+            return;
+        };
+
+        let artifacts_base = target_config.base_path.join("artifacts");
+        let full_path = artifacts_base.join(exe_path_rel);
+
+        if let Some(addr) = &target_config.address {
+            self.pending_action = Some(ExternalAction::EditRemote {
+                address: addr.clone(),
+                paths: vec![full_path],
+            });
+        } else {
+            self.pending_action = Some(ExternalAction::EditLocal(vec![full_path]));
+        }
+    }
+
+    pub fn open_job_logs_selected(&mut self) {
+        let selected_idx = if let Some(i) = self.jobs_state.table_state.selected() {
+            i
+        } else {
+            return;
+        };
+
+        let row = if let Some(r) = self.jobs_state.display_rows.get(selected_idx) {
+            r
+        } else {
+            return;
+        };
+
+        let job_id = match &row.item {
+            TuiRowItem::Job { job } => &job.full_id,
+            TuiRowItem::Run { .. } => return,
+        };
+
+        let target_name = self.targets_state.get_active_target_name();
+        let config = self.client.config();
+        let target_config = if let Some(t) = config.targets.get(&target_name) {
+            t
+        } else {
+            return;
+        };
+
+        let job_repx_dir = target_config
+            .base_path
+            .join("outputs")
+            .join(job_id.0.as_str())
+            .join("repx");
+
+        let stderr_log = job_repx_dir.join("stderr.log");
+        let stdout_log = job_repx_dir.join("stdout.log");
+        let paths = vec![stderr_log, stdout_log];
+
+        if let Some(addr) = &target_config.address {
+            self.pending_action = Some(ExternalAction::EditRemote {
+                address: addr.clone(),
+                paths,
+            });
+        } else {
+            self.pending_action = Some(ExternalAction::EditLocal(paths));
+        }
+    }
+
+    pub fn open_global_logs(&mut self) {
+        let xdg_dirs = xdg::BaseDirectories::with_prefix("repx");
+        if let Some(cache_home) = xdg_dirs.get_cache_home() {
+            let repx_log = cache_home.join("repx.log");
+            let tui_log = cache_home.join("repx-tui.log");
+            self.pending_action = Some(ExternalAction::EditLocal(vec![repx_log, tui_log]));
+        } else {
+            repx_core::log_warn!("Could not determine XDG base directories for repx logs.");
+        }
+    }
+
     fn get_target_ids_for_action(&self) -> Vec<String> {
         let get_id = |path_id: &str| -> Option<String> {
             path_id
@@ -788,7 +909,6 @@ impl App {
     pub fn debug_selected(&mut self) {}
 
     pub fn show_path_selected(&mut self) {}
-    pub fn follow_logs_selected(&mut self) {}
     pub fn yank_selected_path(&mut self) {
         if let Some(path) = self.get_selected_job_path() {
             let target_name = self.targets_state.get_active_target_name();

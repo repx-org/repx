@@ -132,7 +132,7 @@ fn handle_space_menu_key_event(key: KeyEvent, app: &mut App) {
             app.input_mode = InputMode::Normal;
         }
         KeyCode::Char('l') => {
-            app.follow_logs_selected();
+            app.open_global_logs();
             app.input_mode = InputMode::Normal;
         }
         KeyCode::Char('y') => {
@@ -158,6 +158,14 @@ fn handle_g_menu_key_event(key: KeyEvent, app: &mut App) {
         }
         KeyCode::Char('e') => {
             app.go_to_end();
+            app.input_mode = InputMode::Normal;
+        }
+        KeyCode::Char('d') => {
+            app.open_job_definition_selected();
+            app.input_mode = InputMode::Normal;
+        }
+        KeyCode::Char('l') => {
+            app.open_job_logs_selected();
             app.input_mode = InputMode::Normal;
         }
         KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char(' ') => {

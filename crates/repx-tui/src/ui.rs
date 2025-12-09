@@ -996,7 +996,7 @@ fn draw_space_menu_popup(f: &mut Frame, area: Rect, app: &App) {
         ("c", "Cancel Selected"),
         ("y", "Yank Path"),
         ("e", "Explore (Yazi)"),
-        ("l", "Follow Logs"),
+        ("l", "Global Logs"),
         ("ESC", "Close Menu"),
     ];
     let mut rows = vec![];
@@ -1062,6 +1062,8 @@ fn draw_g_menu_popup(f: &mut Frame, area: Rect, app: &App) {
     let shortcuts = [
         ("g", "Go to Top"),
         ("e", "Go to End"),
+        ("d", "Definition"),
+        ("l", "Logs"),
         ("ESC", "Close Menu"),
     ];
 
