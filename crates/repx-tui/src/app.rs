@@ -242,7 +242,7 @@ impl App {
     }
 
     pub fn check_for_updates(&mut self) {
-        if let Ok(update_result) = self.status_rx.try_recv() {
+        while let Ok(update_result) = self.status_rx.try_recv() {
             match update_result {
                 Ok((target_name, job_statuses)) => {
                     let active_target = self.targets_state.get_active_target_name();
@@ -274,7 +274,7 @@ impl App {
         }
     }
     pub fn check_for_log_updates(&mut self) {
-        if let Ok((job_id, log_result)) = self.log_result_rx.try_recv() {
+        while let Ok((job_id, log_result)) = self.log_result_rx.try_recv() {
             if let Some(job) = self
                 .jobs_state
                 .jobs
@@ -291,7 +291,7 @@ impl App {
     }
 
     pub fn check_for_submission_updates(&mut self) {
-        if let Ok(result) = self.submission_rx.try_recv() {
+        while let Ok(result) = self.submission_rx.try_recv() {
             match result {
                 SubmissionResult::Success { submitted_job_ids } => {
                     log_info!(

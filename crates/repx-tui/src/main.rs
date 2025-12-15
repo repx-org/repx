@@ -116,12 +116,14 @@ fn main() -> Result<(), AppError> {
                 break;
             }
 
-            if let Ok(cmd) = log_cmd_rx.try_recv() {
+            while let Ok(cmd) = log_cmd_rx.try_recv() {
                 match cmd {
                     LogPollerCommand::Watch(job_id) => {
                         if current_job_to_watch.as_ref() != Some(&job_id) {
                             current_job_to_watch = Some(job_id);
-                            last_fetch = Instant::now() - polling_interval;
+                            last_fetch = Instant::now()
+                                .checked_sub(polling_interval)
+                                .unwrap_or(Instant::now());
                         }
                     }
                     LogPollerCommand::Stop => {
@@ -242,11 +244,12 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<Stdout>>, app: &mut App) -> 
             handle_key_event(key, app);
         }
 
+        app.check_for_updates();
+        app.check_for_log_updates();
+        app.check_for_submission_updates();
+
         if last_tick.elapsed() >= app.tick_rate {
             app.on_tick();
-            app.check_for_updates();
-            app.check_for_log_updates();
-            app.check_for_submission_updates();
             last_tick = Instant::now();
         }
 
