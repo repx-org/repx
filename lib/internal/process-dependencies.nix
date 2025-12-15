@@ -4,6 +4,7 @@
   consumerInputs,
   producerPname,
   interRunDepTypes ? { },
+  dependencyJobs ? { },
   ...
 }:
 let
@@ -105,6 +106,12 @@ let
 
   requiredRunNames = builtins.attrNames interRunDepTypes;
 
+  upstreamJobDerivations =
+    if isFirstStage then
+      pkgs.lib.flatten (map (name: dependencyJobs.${name} or [ ]) requiredRunNames)
+    else
+      [ ];
+
   implicitMappings =
     if isFirstStage then
       pkgs.lib.concatMap (
@@ -176,7 +183,7 @@ let
   );
 in
 {
-  inherit (explicitDeps) dependencyDerivations;
+  dependencyDerivations = explicitDeps.dependencyDerivations ++ upstreamJobDerivations;
   finalFlatInputs = explicitDeps.finalFlatInputs // implicitFlatInputs;
   inputMappings = explicitDeps.inputMappings ++ uniqueImplicitMappings;
 }

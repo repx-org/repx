@@ -85,7 +85,12 @@ let
         pkgs.lib.nameValuePair depActualName depType
       ) runNode.deps;
       dependencyJobs = pkgs.lib.mapAttrs' (
-        depName: _: pkgs.lib.nameValuePair depName acc."${depName}".jobs
+        depName: _:
+        let
+          depRunDef = acc."${depName}".evaluatedRun;
+          depActualName = depRunDef.name;
+        in
+        pkgs.lib.nameValuePair depActualName acc."${depName}".jobs
       ) runNode.deps;
       utils = repx-lib.mkUtils { inherit pkgs; };
       repxLibScope = repx-lib // {
