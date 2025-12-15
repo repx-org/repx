@@ -99,20 +99,28 @@ rec {
               path = src + "/${originalName}";
             };
 
-            wrapper = pkgs.runCommandLocal "submission-wrapper" { } ''
-              dest="$out/${pkgs.lib.escapeShellArg originalName}"
-              mkdir -p "$dest"
-              cp -rT ${cleanSrc} "$dest"
-            '';
+            wrapper =
+              pkgs.runCommandLocal "submission-wrapper"
+                {
+                  inherit originalName;
+                }
+                ''
+                  dest="$out/$originalName"
+                  mkdir -p "$dest"
+                  cp -rT ${cleanSrc} "$dest"
+                '';
           in
-          wrapper;
+          {
+            path = "${wrapper}/${originalName}";
+            drv = wrapper;
+          };
 
-        granularWrappers = pkgs.lib.mapAttrsToList mkGranularWrapper onlyDirs;
+        granularObjects = pkgs.lib.mapAttrsToList mkGranularWrapper onlyDirs;
       in
       {
         _repx_param = true;
-        values = granularWrappers;
-        context = [ ];
+        values = map (x: x.path) granularObjects;
+        context = map (x: x.drv) granularObjects;
       };
 
   files =
