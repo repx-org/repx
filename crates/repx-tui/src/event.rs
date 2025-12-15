@@ -82,6 +82,7 @@ fn handle_jobs_panel_key_event(key: KeyEvent, app: &mut App) {
         }
         KeyCode::Char('/') | KeyCode::Char('f') => {
             app.input_mode = InputMode::Editing;
+            app.jobs_state.filter_cursor_position = app.jobs_state.filter_text.len();
         }
         KeyCode::Char('l') => app.next_status_filter(),
         KeyCode::Char('h') => app.previous_status_filter(),
@@ -177,12 +178,52 @@ fn handle_g_menu_key_event(key: KeyEvent, app: &mut App) {
 fn handle_editing_mode_key_event(key: KeyEvent, app: &mut App) {
     match key.code {
         KeyCode::Char(c) => {
-            app.jobs_state.filter_text.push(c);
+            let pos = app.jobs_state.filter_cursor_position;
+            app.jobs_state.filter_text.insert(pos, c);
+            app.jobs_state.filter_cursor_position = pos + c.len_utf8();
             app.rebuild_display_list();
         }
         KeyCode::Backspace => {
-            app.jobs_state.filter_text.pop();
-            app.rebuild_display_list();
+            let pos = app.jobs_state.filter_cursor_position;
+            if pos > 0 {
+                let prev_char_pos = app.jobs_state.filter_text[..pos]
+                    .char_indices()
+                    .last()
+                    .map(|(i, _)| i)
+                    .unwrap_or(0);
+                app.jobs_state.filter_text.remove(prev_char_pos);
+                app.jobs_state.filter_cursor_position = prev_char_pos;
+                app.rebuild_display_list();
+            }
+        }
+        KeyCode::Left => {
+            let pos = app.jobs_state.filter_cursor_position;
+            if pos > 0 {
+                let prev_char_pos = app.jobs_state.filter_text[..pos]
+                    .char_indices()
+                    .last()
+                    .map(|(i, _)| i)
+                    .unwrap_or(0);
+                app.jobs_state.filter_cursor_position = prev_char_pos;
+            }
+        }
+        KeyCode::Right => {
+            let pos = app.jobs_state.filter_cursor_position;
+            let len = app.jobs_state.filter_text.len();
+            if pos < len {
+                let next_char_pos = app.jobs_state.filter_text[pos..]
+                    .char_indices()
+                    .nth(1)
+                    .map(|(i, _)| pos + i)
+                    .unwrap_or(len);
+                app.jobs_state.filter_cursor_position = next_char_pos;
+            }
+        }
+        KeyCode::Home => {
+            app.jobs_state.filter_cursor_position = 0;
+        }
+        KeyCode::End => {
+            app.jobs_state.filter_cursor_position = app.jobs_state.filter_text.len();
         }
         KeyCode::Enter | KeyCode::Esc => {
             app.input_mode = InputMode::Normal;

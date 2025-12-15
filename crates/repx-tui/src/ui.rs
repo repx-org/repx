@@ -570,18 +570,34 @@ fn draw_right_column(f: &mut Frame, area: Rect, app: &mut App) {
     ];
     match app.input_mode {
         InputMode::Editing => {
-            let mut text_to_truncate = format!("{}_", app.jobs_state.filter_text);
-            if text_to_truncate.len() < "filter".len() {
-                text_to_truncate = format!("{:<width$}", text_to_truncate, width = "filter".len());
-            }
+            let text = &app.jobs_state.filter_text;
+            let pos = app.jobs_state.filter_cursor_position;
 
-            let truncated_filter_text = if text_to_truncate.len() > max_filter_width as usize {
-                let start_index = text_to_truncate.len() - max_filter_width as usize;
-                text_to_truncate[start_index..].to_string()
+            let text_before_cursor = &text[..pos];
+
+            let mut text_with_cursor = format!("{}{}{}", text_before_cursor, "_", &text[pos..]);
+
+            if text_with_cursor.chars().count() < "filter".len() {
+                text_with_cursor
+                    .push_str(&" ".repeat("filter".len() - text_with_cursor.chars().count()));
+            }
+            let cursor_char_idx = text_before_cursor.chars().count();
+
+            let total_chars = text_with_cursor.chars().count();
+            let available_width = max_filter_width as usize;
+
+            let final_text = if total_chars > available_width {
+                let start_char_idx = (cursor_char_idx + 1).saturating_sub(available_width);
+                text_with_cursor
+                    .chars()
+                    .skip(start_char_idx)
+                    .take(available_width)
+                    .collect::<String>()
             } else {
-                text_to_truncate
+                text_with_cursor
             };
-            left_title_spans.push(Span::styled(truncated_filter_text, Style::default()));
+
+            left_title_spans.push(Span::styled(final_text, Style::default()));
         }
         InputMode::Normal | InputMode::SpaceMenu | InputMode::GMenu => {
             if !app.jobs_state.filter_text.is_empty() {
