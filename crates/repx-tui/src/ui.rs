@@ -16,6 +16,18 @@ use repx_core::theme::ElementStyle;
 use std::collections::{BTreeMap, HashSet};
 use std::str::FromStr;
 
+fn shorten_nix_store_path(s: &str) -> String {
+    if let Some(rest) = s.strip_prefix("/nix/store/") {
+        if rest.len() > 32 {
+            let (hash, suffix) = rest.split_at(32);
+            if suffix.starts_with('-') && hash.chars().all(|c| c.is_ascii_alphanumeric()) {
+                return format!("{}..{}", &hash[..7], suffix);
+            }
+        }
+    }
+    s.to_string()
+}
+
 fn get_color(app: &App, name: &str) -> Color {
     app.theme
         .palette
@@ -456,7 +468,7 @@ fn draw_context_panel(f: &mut Frame, area: Rect, app: &App) {
         if let Some(obj) = job.params.as_object() {
             for (k, v) in obj {
                 let val_str = if let Some(s) = v.as_str() {
-                    s.to_string()
+                    shorten_nix_store_path(s)
                 } else {
                     v.to_string()
                 };
@@ -785,7 +797,10 @@ fn format_params_single_line(v: &serde_json::Value) -> String {
         obj.iter()
             .map(|(k, v)| {
                 let val_str = if let Some(s) = v.as_str() {
-                    if s.contains('/') {
+                    let shortened = shorten_nix_store_path(s);
+                    if shortened != s {
+                        shortened
+                    } else if s.contains('/') {
                         std::path::Path::new(s)
                             .file_name()
                             .and_then(|os| os.to_str())
