@@ -5,6 +5,21 @@ use repx_core::engine::{self, JobStatus};
 use repx_core::model::{JobId, Lab};
 use std::collections::{HashSet, VecDeque};
 
+#[derive(Debug, Clone)]
+enum FilterType {
+    Global,
+    Id,
+    Name,
+    Run,
+    Params,
+    Status,
+}
+
+struct ParsedFilter {
+    filter_type: FilterType,
+    term: String,
+}
+
 pub struct JobsState {
     pub jobs: Vec<TuiJob>,
     pub display_rows: Vec<TuiDisplayRow>,
@@ -133,12 +148,12 @@ impl JobsState {
             .map(|row| row.id.clone());
 
         self.display_rows.clear();
-        let filter = self.filter_text.to_lowercase();
+        let filters = self.parse_filter_text(&self.filter_text);
 
         if self.is_tree_view {
-            self.build_tree_view(lab, &filter);
+            self.build_tree_view(lab, &filters);
         } else {
-            self.build_flat_list(&filter);
+            self.build_flat_list(&filters);
         }
 
         if !self.is_tree_view && self.is_reversed {
@@ -148,21 +163,12 @@ impl JobsState {
         self.restore_selection(previously_selected_id);
     }
 
-    fn build_flat_list(&mut self, filter: &str) {
+    fn build_flat_list(&mut self, filters: &[ParsedFilter]) {
         let filtered_indices: Vec<usize> = self
             .jobs
             .iter()
             .enumerate()
-            .filter(|(_i, job)| {
-                let status_match = match self.status_filter {
-                    StatusFilter::All => true,
-                    _ => job.status == self.status_filter.as_str(),
-                };
-                let text_match = job.id.to_lowercase().contains(filter)
-                    || job.name.to_lowercase().contains(filter)
-                    || job.run.to_lowercase().contains(filter);
-                status_match && text_match
-            })
+            .filter(|(_i, job)| self.job_matches(job, filters))
             .map(|(i, _)| i)
             .collect();
 
@@ -180,8 +186,8 @@ impl JobsState {
         }
     }
 
-    fn build_tree_view(&mut self, lab: &Lab, filter: &str) {
-        let visible_job_ids = self.calculate_visible_job_ids(lab, filter);
+    fn build_tree_view(&mut self, lab: &Lab, filters: &[ParsedFilter]) {
+        let visible_job_ids = self.calculate_visible_job_ids(lab, filters);
         let mut run_ids: Vec<_> = lab.runs.keys().cloned().collect();
         run_ids.sort();
 
@@ -189,7 +195,7 @@ impl JobsState {
             .iter()
             .filter(|run_id| {
                 let run = lab.runs.get(run_id).unwrap();
-                let name_match = !filter.is_empty() && run_id.0.to_lowercase().contains(filter);
+                let name_match = self.run_matches(&run_id.0, filters);
                 let has_jobs = run.jobs.iter().any(|id| visible_job_ids.contains(id));
                 name_match || has_jobs
             })
@@ -218,24 +224,15 @@ impl JobsState {
         }
     }
 
-    fn calculate_visible_job_ids(&self, lab: &Lab, filter: &str) -> HashSet<JobId> {
-        if filter.is_empty() && self.status_filter == StatusFilter::All {
+    fn calculate_visible_job_ids(&self, lab: &Lab, filters: &[ParsedFilter]) -> HashSet<JobId> {
+        if filters.is_empty() && self.status_filter == StatusFilter::All {
             return lab.jobs.keys().cloned().collect();
         }
 
         let directly_matching: HashSet<JobId> = self
             .jobs
             .iter()
-            .filter(|job| {
-                let status_match = match self.status_filter {
-                    StatusFilter::All => true,
-                    _ => job.status == self.status_filter.as_str(),
-                };
-                let text_match = filter.is_empty()
-                    || job.id.to_lowercase().contains(filter)
-                    || job.name.to_lowercase().contains(filter);
-                status_match && text_match
-            })
+            .filter(|job| self.job_matches(job, filters))
             .map(|job| job.full_id.clone())
             .collect();
 
@@ -417,5 +414,143 @@ impl JobsState {
         let current = self.table_state.selected().unwrap_or(0);
         let next = current.saturating_sub(self.viewport_height / 2);
         self.table_state.select(Some(next));
+    }
+
+    fn parse_filter_text(&self, text: &str) -> Vec<ParsedFilter> {
+        if text.trim().is_empty() {
+            return Vec::new();
+        }
+
+        let mut filters = Vec::new();
+        let lower_text = text.to_lowercase();
+
+        if !lower_text.contains('%') {
+            filters.push(ParsedFilter {
+                filter_type: FilterType::Global,
+                term: lower_text,
+            });
+            return filters;
+        }
+
+        let parts: Vec<&str> = lower_text.split('%').collect();
+        if let Some(first) = parts.first() {
+            if !first.trim().is_empty() {
+                filters.push(ParsedFilter {
+                    filter_type: FilterType::Global,
+                    term: first.trim().to_string(),
+                });
+            }
+        }
+
+        for part in parts.iter().skip(1) {
+            let part = part.trim();
+            if part.is_empty() {
+                continue;
+            }
+            let (col_prefix, term) = match part.split_once(char::is_whitespace) {
+                Some((c, t)) => (c, t.trim()),
+                None => (part, ""),
+            };
+
+            let filter_type = if self.matches_column(col_prefix, &["id", "jobid"]) {
+                Some(FilterType::Id)
+            } else if self.matches_column(col_prefix, &["name", "item"]) {
+                Some(FilterType::Name)
+            } else if self.matches_column(col_prefix, &["run"]) {
+                Some(FilterType::Run)
+            } else if self.matches_column(col_prefix, &["params", "parameters", "param"]) {
+                Some(FilterType::Params)
+            } else if self.matches_column(col_prefix, &["status"]) {
+                Some(FilterType::Status)
+            } else {
+                None
+            };
+
+            if let Some(ft) = filter_type {
+                filters.push(ParsedFilter {
+                    filter_type: ft,
+                    term: term.to_string(),
+                });
+            }
+        }
+        filters
+    }
+
+    fn matches_column(&self, prefix: &str, candidates: &[&str]) -> bool {
+        candidates.iter().any(|c| c.starts_with(prefix))
+    }
+
+    fn job_matches(&self, job: &TuiJob, filters: &[ParsedFilter]) -> bool {
+        let status_match = match self.status_filter {
+            StatusFilter::All => true,
+            _ => job.status == self.status_filter.as_str(),
+        };
+        if !status_match {
+            return false;
+        }
+        if filters.is_empty() {
+            return true;
+        }
+        for filter in filters {
+            let matches = match filter.filter_type {
+                FilterType::Global => {
+                    job.id.to_lowercase().contains(&filter.term)
+                        || job.name.to_lowercase().contains(&filter.term)
+                        || job.run.to_lowercase().contains(&filter.term)
+                }
+                FilterType::Id => job.id.to_lowercase().contains(&filter.term),
+                FilterType::Name => job.name.to_lowercase().contains(&filter.term),
+                FilterType::Run => job.run.to_lowercase().contains(&filter.term),
+                FilterType::Params => self.params_match(&job.params, &filter.term),
+                FilterType::Status => job.status.to_lowercase().contains(&filter.term),
+            };
+            if !matches {
+                return false;
+            }
+        }
+        true
+    }
+
+    fn run_matches(&self, run_id: &str, filters: &[ParsedFilter]) -> bool {
+        if filters.is_empty() {
+            return false;
+        }
+        for filter in filters {
+            let matches = match filter.filter_type {
+                FilterType::Global => run_id.to_lowercase().contains(&filter.term),
+                FilterType::Run => run_id.to_lowercase().contains(&filter.term),
+                _ => false,
+            };
+            if !matches {
+                return false;
+            }
+        }
+        true
+    }
+
+    fn params_match(&self, params: &serde_json::Value, term: &str) -> bool {
+        if let Some(obj) = params.as_object() {
+            for (k, v) in obj {
+                if k.to_lowercase().contains(term) {
+                    return true;
+                }
+                let val_str = if let Some(s) = v.as_str() {
+                    s.to_string()
+                } else {
+                    v.to_string()
+                };
+                if val_str.to_lowercase().contains(term) {
+                    return true;
+                }
+                // Check "key=val" format
+                let combined = format!("{}={}", k, val_str);
+                if combined.to_lowercase().contains(term) {
+                    return true;
+                }
+            }
+            false
+        } else {
+            params.to_string().to_lowercase().contains(term)
+        }
     }
 }
