@@ -2,21 +2,21 @@
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.11";
     flake-utils.url = "github:numtide/flake-utils";
-    repx-reference.url = "github:repx-org/repx?dir=examples/reference";
+    repx-nix.url = "github:repx-org/repx-nix";
   };
 
   outputs =
     {
       nixpkgs,
       flake-utils,
-      repx-reference,
+      repx-nix,
       ...
     }:
     (flake-utils.lib.eachDefaultSystem (
       system:
       let
         pkgs = import nixpkgs { inherit system; };
-        reference-lab = repx-reference.packages.${system}.lab;
+        reference-lab = repx-nix.packages.${system}.reference-lab;
         repx-py = (import ./default.nix) {
           inherit pkgs reference-lab;
         };
