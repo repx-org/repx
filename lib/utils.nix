@@ -1,4 +1,15 @@
 { pkgs }:
+let
+  sanitize =
+    p:
+    if builtins.isPath p then
+      builtins.path {
+        path = p;
+        name = baseNameOf p;
+      }
+    else
+      p;
+in
 rec {
   range = start: end: pkgs.lib.range start end;
 
@@ -15,7 +26,8 @@ rec {
       match ? null,
     }:
     let
-      srcStr = toString src;
+      safeSrc = sanitize src;
+      srcStr = toString safeSrc;
       isStorePath = pkgs.lib.hasPrefix builtins.storeDir srcStr;
 
       checkMatch = name: if match == null then true else (builtins.match match name) != null;
@@ -44,7 +56,7 @@ rec {
               pkgs.runCommand "scan-manifest.json"
                 {
                   nativeBuildInputs = [ pkgs.jq ];
-                  targetSrc = src;
+                  targetSrc = safeSrc;
                 }
                 ''
                   cd "$targetSrc"
@@ -62,10 +74,10 @@ rec {
           map (n: "${srcStr}/${n}") names;
 
       contextList =
-        if pkgs.lib.isDerivation src then
-          [ src ]
+        if pkgs.lib.isDerivation safeSrc then
+          [ safeSrc ]
         else if isStorePath then
-          [ src ]
+          [ safeSrc ]
         else
           [ ];
     in

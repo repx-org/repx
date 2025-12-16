@@ -41,7 +41,14 @@ let
       }
     else
       {
-        values = val;
+        values =
+          if builtins.isPath val then
+            builtins.path {
+              path = val;
+              name = baseNameOf val;
+            }
+          else
+            val;
         context = [ ];
       }
   ) allParamsRaw;
