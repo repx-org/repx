@@ -6,6 +6,7 @@
   };
   outputs =
     {
+      self,
       nixpkgs,
       ...
     }:
@@ -23,8 +24,14 @@
     in
     {
       lib = repx-lib;
-
-      formatter = forAllSystems (pkgs: pkgs.callPackage ./nix/formatter.nix { });
+      packages = forAllSystems (pkgs: {
+        reference-lab =
+          (pkgs.callPackage ./nix/reference-lab/lab.nix {
+            inherit pkgs repx-lib;
+            gitHash = self.rev or self.dirtyRev or "unknown";
+          }).lab;
+      });
+      formatter = forAllSystems (pkgs: import ./nix/formatters.nix { inherit pkgs; });
       checks = forAllSystems (pkgs: import ./nix/checks.nix { inherit pkgs repx-lib; });
     };
 }

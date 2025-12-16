@@ -1,6 +1,6 @@
 { pkgs }:
 let
-  formatter = pkgs.callPackage ../formatter.nix { };
+  formatter = pkgs.callPackage ../formatters.nix { };
 in
 {
   fmt =
@@ -14,8 +14,7 @@ in
         chmod -R +w ./src
         cd ./src
 
-        echo "Running treefmt check..."
-        treefmt --ci -v
+        custom-formatter
 
         touch $out
       '';

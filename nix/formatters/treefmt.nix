@@ -25,19 +25,16 @@ pkgs.treefmt.withConfig {
         command = "deadnix";
         options = [ "--edit" ];
         includes = [ "*.nix" ];
-        priority = 1;
       };
 
       statix = {
         command = "${statix-wrapper}/bin/statix-fix";
         includes = [ "*.nix" ];
-        priority = 2;
       };
 
       nixfmt = {
         command = "nixfmt";
         includes = [ "*.nix" ];
-        priority = 3;
       };
 
       shfmt = {
@@ -45,7 +42,12 @@ pkgs.treefmt.withConfig {
         options = [
           "-i"
           "2"
+          "-ln"
+          "bash"
           "-s"
+          "-ci"
+          "-bn"
+          "-sr"
           "-w"
         ];
         includes = [
@@ -59,6 +61,10 @@ pkgs.treefmt.withConfig {
         options = [
           "check"
           "--fix"
+          "--select"
+          "E,W,F,I,B,C4,UP,SIM,RUF"
+          "--ignore"
+          "E501,W191,E111,E114,E117"
         ];
         includes = [ "*.py" ];
         priority = 1;

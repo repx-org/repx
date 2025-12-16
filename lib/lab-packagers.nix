@@ -188,7 +188,12 @@ let
 
     in
     {
-      inherit labCore labManifest allReadmeParts;
+      inherit
+        labCore
+        labManifest
+        allReadmeParts
+        allJobDerivations
+        ;
     };
   runs2Lab =
     runs:
@@ -209,6 +214,10 @@ let
         nativeBuildInputs = with artifacts; [
           labCore
         ];
+
+        passthru = {
+          inherit (artifacts) allJobDerivations;
+        };
 
         buildCommand = ''
           mkdir -p $out $out/lab $out/readme
