@@ -384,12 +384,42 @@ fn draw_targets(f: &mut Frame, area: Rect, app: &mut App, border_style: Style) {
 fn draw_left_column(f: &mut Frame, area: Rect, app: &App) {
     let left_chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Length(12), Constraint::Min(0)])
+        .constraints([
+            Constraint::Length(12),
+            Constraint::Min(0),
+            Constraint::Length(8),
+        ])
         .split(area);
 
     draw_context_panel(f, left_chunks[0], app);
     draw_logs_panel(f, left_chunks[1], app);
+    draw_system_logs_panel(f, left_chunks[2], app);
 }
+
+fn draw_system_logs_panel(f: &mut Frame, area: Rect, app: &App) {
+    let style = get_style(app, &app.theme.elements.panels.logs);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(style)
+        .title(" System Logs ");
+    let inner_area = block.inner(area);
+    f.render_widget(block, area);
+
+    let height = inner_area.height as usize;
+    let lines: Vec<Line> = app
+        .system_logs
+        .iter()
+        .rev()
+        .take(height)
+        .rev()
+        .map(|s| Line::from(Span::raw(s)))
+        .collect();
+
+    let paragraph = Paragraph::new(lines);
+    f.render_widget(paragraph, inner_area);
+}
+
 fn draw_context_panel(f: &mut Frame, area: Rect, app: &App) {
     let context_border_style = get_style(app, &app.theme.elements.panels.context);
     let selected_job = app

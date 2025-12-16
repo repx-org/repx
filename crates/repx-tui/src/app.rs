@@ -117,6 +117,8 @@ pub struct App {
     resources: Option<Resources>,
     pub focused_panel: PanelFocus,
     pub pending_action: Option<ExternalAction>,
+    pub system_logs: Vec<String>,
+    system_log_rx: Receiver<String>,
 }
 
 impl App {
@@ -129,12 +131,16 @@ impl App {
         log_result_rx: Receiver<LogUpdate>,
         submission_tx: Sender<SubmissionResult>,
         submission_rx: Receiver<SubmissionResult>,
+        system_log_rx: Receiver<String>,
         resources: Option<Resources>,
         initial_active_target: String,
         active_target_ref: Arc<Mutex<String>>,
         active_scheduler_ref: Arc<Mutex<String>>,
     ) -> Result<Self, ClientError> {
         log_info!("Initializing new App instance.");
+        let lab = client.lab()?.clone();
+        let is_native_lab = lab.is_native();
+
         let targets = client
             .config()
             .targets
@@ -149,6 +155,7 @@ impl App {
                         .execution_types
                         .iter()
                         .filter_map(|s| s.parse().ok())
+                        .filter(|e| !is_native_lab || *e == TuiExecutor::Native)
                         .collect();
                     available_executors.insert(TuiScheduler::Local, executors);
                 }
@@ -158,9 +165,17 @@ impl App {
                         .execution_types
                         .iter()
                         .filter_map(|s| s.parse().ok())
+                        .filter(|e| !is_native_lab || *e == TuiExecutor::Native)
                         .collect();
                     available_executors.insert(TuiScheduler::Slurm, executors);
                 }
+
+                available_schedulers.retain(|s| {
+                    available_executors
+                        .get(s)
+                        .map(|v| !v.is_empty())
+                        .unwrap_or(false)
+                });
 
                 let default_scheduler: TuiScheduler = target_config
                     .default_scheduler
@@ -168,9 +183,18 @@ impl App {
                     .and_then(|s| s.parse().ok())
                     .unwrap_or(TuiScheduler::Local);
 
+                let actual_scheduler = if available_schedulers.contains(&default_scheduler) {
+                    default_scheduler
+                } else {
+                    available_schedulers
+                        .first()
+                        .copied()
+                        .unwrap_or(TuiScheduler::Local)
+                };
+
                 let selected_scheduler_idx = available_schedulers
                     .iter()
-                    .position(|&s| s == default_scheduler)
+                    .position(|&s| s == actual_scheduler)
                     .unwrap_or(0);
 
                 let default_executor: TuiExecutor = target_config
@@ -180,9 +204,15 @@ impl App {
                     .unwrap_or(TuiExecutor::Native);
 
                 let selected_executor_idx = available_executors
-                    .get(&default_scheduler)
-                    .and_then(|execs| execs.iter().position(|&e| e == default_executor))
+                    .get(&actual_scheduler)
+                    .and_then(|execs| {
+                        execs
+                            .iter()
+                            .position(|&e| e == default_executor)
+                            .or(Some(0))
+                    })
                     .unwrap_or(0);
+
                 TuiTarget {
                     name: name.clone(),
                     state: if name == &initial_active_target {
@@ -198,7 +228,6 @@ impl App {
             })
             .collect();
 
-        let lab = client.lab()?.clone();
         let tick_rate = client.config().tui_tick_rate();
         let mut app = Self {
             client: Arc::new(client),
@@ -217,6 +246,8 @@ impl App {
             log_result_rx,
             submission_tx,
             submission_rx,
+            system_log_rx,
+            system_logs: Vec::new(),
             is_loading: true,
             resources,
             focused_panel: PanelFocus::Jobs,
@@ -286,6 +317,15 @@ impl App {
                     Ok(lines) => job.logs = lines,
                     Err(e) => job.logs = vec![format!("[Error fetching log: {}]", e)],
                 }
+            }
+        }
+    }
+
+    pub fn check_for_system_log_updates(&mut self) {
+        while let Ok(line) = self.system_log_rx.try_recv() {
+            self.system_logs.push(line);
+            if self.system_logs.len() > 200 {
+                self.system_logs.remove(0);
             }
         }
     }

@@ -106,6 +106,50 @@ fn main() -> Result<(), AppError> {
     let should_quit_clone_for_logs = should_quit.clone();
     let active_target_clone_for_logs = active_target.clone();
 
+    let xdg_dirs = xdg::BaseDirectories::with_prefix("repx");
+    let cache_home = xdg_dirs.get_cache_home().ok_or_else(|| {
+        AppError::Io(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            "Could not find cache home directory",
+        ))
+    })?;
+    let system_log_path = cache_home.join("repx-tui.log");
+    let (system_log_tx, system_log_rx) = mpsc::channel();
+    let should_quit_clone_for_syslog = should_quit.clone();
+
+    thread::spawn(move || {
+        use std::io::{BufRead, BufReader, Seek, SeekFrom};
+        let mut file = match fs::File::open(&system_log_path) {
+            Ok(f) => f,
+            Err(_) => return,
+        };
+
+        let _ = file.seek(SeekFrom::End(0));
+
+        let mut reader = BufReader::new(file);
+        let mut line = String::new();
+
+        loop {
+            if should_quit_clone_for_syslog.load(Ordering::Relaxed) {
+                break;
+            }
+            match reader.read_line(&mut line) {
+                Ok(0) => {
+                    thread::sleep(Duration::from_millis(500));
+                }
+                Ok(_) => {
+                    if !line.trim().is_empty() {
+                        let _ = system_log_tx.send(line.trim_end().to_string());
+                    }
+                    line.clear();
+                }
+                Err(_) => {
+                    thread::sleep(Duration::from_millis(500));
+                }
+            }
+        }
+    });
+
     thread::spawn(move || {
         let mut current_job_to_watch: Option<JobId> = None;
         let mut last_fetch = Instant::now();
@@ -157,6 +201,7 @@ fn main() -> Result<(), AppError> {
         log_result_rx,
         submission_tx,
         submission_rx,
+        system_log_rx,
         resources,
         initial_active_target,
         active_target,
@@ -247,6 +292,7 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<Stdout>>, app: &mut App) -> 
         app.check_for_updates();
         app.check_for_log_updates();
         app.check_for_submission_updates();
+        app.check_for_system_log_updates();
 
         if last_tick.elapsed() >= app.tick_rate {
             app.on_tick();
