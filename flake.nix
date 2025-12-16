@@ -2,7 +2,7 @@
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.11";
     flake-utils.url = "github:numtide/flake-utils";
-    repx-reference.url = "github:repx-org/repx?dir=examples/reference";
+    repx-nix.url = "github:repx-org/repx-nix";
   };
 
   outputs =
@@ -10,7 +10,7 @@
       self,
       nixpkgs,
       flake-utils,
-      repx-reference,
+      repx-nix,
       ...
     }:
     {
@@ -37,24 +37,24 @@
           e2e-local = import ./tests/e2e-local.nix {
             inherit pkgs;
             repxRunner = repx-runner;
-            referenceLab = repx-reference.packages.${system}.lab;
+            referenceLab = repx-nix.packages.${system}.reference-lab;
           };
 
           e2e-remote-local = import ./tests/e2e-remote-local.nix {
             inherit pkgs;
             repxRunner = repx-runner;
-            referenceLab = repx-reference.packages.${system}.lab;
+            referenceLab = repx-nix.packages.${system}.reference-lab;
           };
 
           e2e-remote-slurm = import ./tests/e2e-remote-slurm.nix {
             inherit pkgs;
             repxRunner = repx-runner;
-            referenceLab = repx-reference.packages.${system}.lab;
+            referenceLab = repx-nix.packages.${system}.reference-lab;
           };
         };
 
         devShells.default = pkgs.mkShell {
-          EXAMPLE_REPX_LAB = repx-reference.packages.${system}.lab;
+          EXAMPLE_REPX_LAB = repx-nix.packages.${system}.reference-lab;
           buildInputs = with pkgs; [
             openssl
             pkg-config
