@@ -1,6 +1,6 @@
 {
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.11";
+    nixpkgs.follows = "repx-nix/nixpkgs";
     flake-utils.url = "github:numtide/flake-utils";
     repx-nix.url = "github:repx-org/repx-nix";
   };
