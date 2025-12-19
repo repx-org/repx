@@ -20,21 +20,41 @@ let
                 producerDrv = item;
                 bashOutputs = producerDrv.passthru.outputMetadata or { };
                 validMappings = pkgs.lib.filterAttrs (name: _: pkgs.lib.hasAttr name consumerInputs) bashOutputs;
-                newMappings = pkgs.lib.mapAttrsToList (name: _: {
-                  type = "intra-pipeline";
-                  job_id = builtins.baseNameOf (toString producerDrv);
-                  source_output = name;
-                  target_input = name;
-                }) validMappings;
-                newInputs = pkgs.lib.mapAttrs' (
-                  name: _: pkgs.lib.nameValuePair name "\${inputs[\"${name}\"]}"
-                ) validMappings;
               in
-              {
-                dependencyDerivations = [ item ];
-                finalFlatInputs = newInputs;
-                inputMappings = newMappings;
-              }
+              if validMappings == { } then
+                let
+                  producerOutputs = builtins.attrNames bashOutputs;
+                  consumerInputNames = builtins.attrNames consumerInputs;
+                in
+                throw ''
+                  Pipeline connection error: Implicit dependency resolution failed.
+                  Stage "${producerPname}" depends on "${producerDrv.pname}", but they share no matching input/output names.
+
+                  When passing a stage derivation directly (implicit mapping), at least one output name from the producer
+                  must match an input name in the consumer.
+
+                  Producer "${producerDrv.pname}" outputs: ${builtins.toJSON producerOutputs}
+                  Consumer "${producerPname}" inputs:  ${builtins.toJSON consumerInputNames}
+
+                  If the names differ, use the explicit mapping syntax: [ producer "source_output" "target_input" ]
+                ''
+              else
+                let
+                  newMappings = pkgs.lib.mapAttrsToList (name: _: {
+                    type = "intra-pipeline";
+                    job_id = builtins.baseNameOf (toString producerDrv);
+                    source_output = name;
+                    target_input = name;
+                  }) validMappings;
+                  newInputs = pkgs.lib.mapAttrs' (
+                    name: _: pkgs.lib.nameValuePair name "\${inputs[\"${name}\"]}"
+                  ) validMappings;
+                in
+                {
+                  dependencyDerivations = [ item ];
+                  finalFlatInputs = newInputs;
+                  inputMappings = newMappings;
+                }
             else if pkgs.lib.isList item then
               let
                 dep = pkgs.lib.head item;
@@ -181,9 +201,26 @@ let
       value = "\${inputs[\"${mapping.target_input}\"]}";
     }) uniqueImplicitMappings
   );
+
+  allSatisfiedInputs = explicitDeps.finalFlatInputs // implicitFlatInputs;
+  satisfiedInputNames = builtins.attrNames allSatisfiedInputs;
+  requiredInputNames = builtins.attrNames consumerInputs;
+  missingInputNames = pkgs.lib.subtractLists satisfiedInputNames requiredInputNames;
 in
-{
-  dependencyDerivations = explicitDeps.dependencyDerivations ++ upstreamJobDerivations;
-  finalFlatInputs = explicitDeps.finalFlatInputs // implicitFlatInputs;
-  inputMappings = explicitDeps.inputMappings ++ uniqueImplicitMappings;
-}
+if missingInputNames != [ ] then
+  throw ''
+    Pipeline connection error: Unresolved inputs in stage "${producerPname}".
+    The following inputs are declared but were not provided by any dependency:
+    ${builtins.toJSON missingInputNames}
+
+    Provided inputs: ${builtins.toJSON satisfiedInputNames}
+    Declared inputs: ${builtins.toJSON requiredInputNames}
+
+    Please ensure all inputs are mapped from an upstream stage or implicit dependency.
+  ''
+else
+  {
+    dependencyDerivations = explicitDeps.dependencyDerivations ++ upstreamJobDerivations;
+    finalFlatInputs = allSatisfiedInputs;
+    inputMappings = explicitDeps.inputMappings ++ uniqueImplicitMappings;
+  }

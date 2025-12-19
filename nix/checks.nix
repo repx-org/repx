@@ -9,5 +9,6 @@
   integration = pkgs.callPackage ./checks/check-integration.nix { };
   invalidation = pkgs.callPackage ./checks/check-invalidation.nix { inherit repx-lib; };
   params = pkgs.callPackage ./checks/check-params.nix { };
+  pipeline_logic = pkgs.callPackage ./checks/check-pipeline-logic.nix { inherit repx-lib; };
 }
 // (import ./checks/check-deps.nix { inherit pkgs; })

@@ -95,7 +95,7 @@ let
       pkgs.lib.cartesianProduct allParams;
 
   repxForDiscovery = repx-lib.mkPipelineHelpers {
-    inherit pkgs repx-lib;
+    inherit pkgs repx-lib interRunDepTypes;
   };
 
   getDrvsFromPipeline =
