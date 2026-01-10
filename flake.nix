@@ -24,6 +24,21 @@
       {
         packages.default = repx-py;
 
+        apps = {
+          debug-runner = flake-utils.lib.mkApp {
+            drv = repx-py;
+            name = "debug-runner";
+          };
+          trace-params = flake-utils.lib.mkApp {
+            drv = repx-py;
+            name = "trace-params";
+          };
+          repx-viz = flake-utils.lib.mkApp {
+            drv = repx-py;
+            name = "repx-viz";
+          };
+        };
+
         devShells.default = pkgs.mkShell {
           REFERENCE_LAB_PATH = reference-lab;
           buildInputs = with pkgs; [
