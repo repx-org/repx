@@ -32,6 +32,12 @@
       in
       {
         packages.default = repx-runner;
+        packages.repx-runner = repx-runner;
+        packages.repx-tui = repx-runner.overrideAttrs (old: {
+          meta = (old.meta or { }) // {
+            mainProgram = "repx-tui";
+          };
+        });
 
         checks = {
           e2e-local = import ./tests/e2e-local.nix {
