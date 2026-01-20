@@ -156,6 +156,29 @@ repx-runner run validation-suite \
   -vv
 ```
 
+## Debugging & Logs for LLMs
+
+While the TUI provides an interactive way to inspect logs, automated scripts can access the output files directly. The directory structure corresponds to the `base_path` defined in your target configuration.
+
+**Directory Structure:**
+
+```text
+<base_path>/                     # Root output directory
+└── outputs/
+    └── <JOB_ID>/                # Directory for a specific job
+        ├── out/                 # User outputs (cwd of the job script)
+        │   └── result.json
+        └── repx/                # Internal logs and metadata
+            ├── stdout.log       # Standard Output of the job execution
+            ├── stderr.log       # Standard Error of the job execution
+            └── slurm-1234.out   # SLURM output log (if applicable)
+```
+
+**Common Debugging Actions:**
+*   **Check Script Output:** Read `<base_path>/outputs/<JOB_ID>/repx/stdout.log` or `stderr.log`.
+*   **Check Scheduler Output:** If running on Slurm, check `<base_path>/outputs/<JOB_ID>/repx/slurm-*.out`.
+*   **Check Job Results:** Look for files in `<base_path>/outputs/<JOB_ID>/out/`.
+
 ## `repx-tui` Reference
 
 The `repx-tui` provides an interactive dashboard to monitor jobs, logs, and artifacts.
