@@ -18,8 +18,9 @@ in
     template_dir = utils.dirs ../pkgs/headers;
     config_file = utils.scan {
       src = ../pkgs/configs;
-      match = ".*\.json";
+      match = ".*\\.json";
       type = "file";
     };
+    multiplier = utils.range 2 3;
   };
 }

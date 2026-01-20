@@ -83,8 +83,17 @@ else
           subStageDef // subStageArgs // { inherit paramInputs; }
         );
 
+      commonStageDef = pkgs.lib.removeAttrs stageDef [
+        "inputs"
+        "outputs"
+        "pname"
+        "scatter"
+        "worker"
+        "gather"
+      ];
+
       scatterDrv = mkSubStage scatterDef (
-        stageDef
+        commonStageDef
         // {
           pname = "${groupPname}-scatter";
         }

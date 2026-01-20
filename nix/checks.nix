@@ -10,5 +10,8 @@
   invalidation = pkgs.callPackage ./checks/check-invalidation.nix { inherit repx-lib; };
   params = pkgs.callPackage ./checks/check-params.nix { };
   pipeline_logic = pkgs.callPackage ./checks/check-pipeline-logic.nix { inherit repx-lib; };
+  dynamic_params_validation = pkgs.callPackage ./checks/check-dynamic-params-validation.nix {
+    inherit repx-lib;
+  };
 }
 // (import ./checks/check-deps.nix { inherit pkgs; })

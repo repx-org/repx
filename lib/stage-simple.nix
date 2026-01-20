@@ -1,13 +1,31 @@
 { pkgs }:
 stageDef:
 let
-  inherit (stageDef) pname;
-  version = stageDef.version or "1.1";
-  inputsDef = stageDef.inputs or { };
-  outputsDef = stageDef.outputs or { };
   paramsDef = stageDef.paramInputs or { };
   dependencyDerivations = stageDef.dependencyDerivations or [ ];
   runDependencies = stageDef.runDependencies or [ ];
+
+  resolveWithParams =
+    name: value:
+    if builtins.isFunction value then
+      let
+        argSet = builtins.functionArgs value;
+      in
+      if argSet == { params = false; } || argSet == { params = true; } then
+        value { params = paramsDef; }
+      else
+        throw ''
+          Stage definition error in '${stageDef.pname or "unknown"}':
+          The '${name}' attribute is a function, but it must take exactly { params } as argument.
+          Got function with arguments: ${builtins.toJSON (builtins.attrNames argSet)}
+        ''
+    else
+      value;
+
+  pname = resolveWithParams "pname" (stageDef.pname or (throw "Stage must have a pname"));
+  version = stageDef.version or "1.1";
+  inputsDef = resolveWithParams "inputs" (stageDef.inputs or { });
+  outputsDef = resolveWithParams "outputs" (stageDef.outputs or { });
 
   bashInputs = pkgs.lib.mapAttrs (name: _: "\${inputs[\"${name}\"]}") inputsDef;
   bashOutputs = outputsDef;

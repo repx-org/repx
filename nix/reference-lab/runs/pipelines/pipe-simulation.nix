@@ -24,4 +24,12 @@ repx.mkPipe rec {
   total_sum = repx.callStage ./stages/stage-E-transformer.nix [
     partial_sums
   ];
+
+  dynamic_stage = repx.callStage ./stages/stage-F-dynamic.nix [
+    [
+      total_sum
+      "data.total_sum"
+      "source_data"
+    ]
+  ];
 }

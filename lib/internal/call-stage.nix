@@ -40,14 +40,41 @@ let
       contextStr = "(Type: ${if isScatterGather then "scatter-gather" else "simple"})";
     };
 
-  consumerInputs =
-    if stageDef ? "scatter" then stageDef.scatter.inputs or { } else stageDef.inputs or { };
+  declaredParams = stageDef.params or { };
+  globalParams = args.paramInputs or { };
+  resolvedParams = pkgs.lib.mapAttrs (
+    name: default: if builtins.hasAttr name globalParams then globalParams.${name} else default
+  ) declaredParams;
+
+  resolveWithParams =
+    attrName: value:
+    if builtins.isFunction value then
+      let
+        argSet = builtins.functionArgs value;
+      in
+      if argSet == { params = false; } || argSet == { params = true; } then
+        value { params = resolvedParams; }
+      else
+        throw ''
+          Stage definition error in '${toString stageFile}':
+          The '${attrName}' attribute is a function, but it must take exactly { params } as argument.
+          Got function with arguments: ${builtins.toJSON (builtins.attrNames argSet)}
+        ''
+    else
+      value;
+
+  resolvedPname = resolveWithParams "pname" (stageDef.pname or (throw "Stage must have a pname"));
+  resolvedInputs = resolveWithParams "inputs" (
+    if stageDef ? "scatter" then stageDef.scatter.inputs or { } else stageDef.inputs or { }
+  );
+  resolvedOutputs = resolveWithParams "outputs" (stageDef.outputs or { });
 
   processed = processDependenciesFn (
     args
     // {
-      inherit dependencies consumerInputs;
-      producerPname = stageDef.pname;
+      inherit dependencies;
+      consumerInputs = resolvedInputs;
+      producerPname = resolvedPname;
     }
   );
 
@@ -56,14 +83,10 @@ let
       throw "Stage file '${toString stageFile}' did not return a declarative attribute set."
     else
       let
-        declaredParams = stageDef.params or { };
-        globalParams = args.paramInputs or { };
-
-        resolvedParams = pkgs.lib.mapAttrs (
-          name: default: if builtins.hasAttr name globalParams then globalParams.${name} else default
-        ) declaredParams;
-
         stageDefWithDeps = stageDef // {
+          pname = resolvedPname;
+          inputs = resolvedInputs;
+          outputs = resolvedOutputs;
           paramInputs = resolvedParams;
           dependencyDerivations = pkgs.lib.unique processed.dependencyDerivations;
           stageInputs = processed.finalFlatInputs;
