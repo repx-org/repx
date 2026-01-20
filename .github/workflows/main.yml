@@ -7,22 +7,33 @@ on:
     branches: [ "main" ]
 
 jobs:
-  check-and-format:
+  checks:
+    name: Check ${{ matrix.check }}
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        check:
+          - e2e-local
+          - e2e-remote-local
+          - e2e-remote-slurm
+          - fast-checks
     steps:
       - uses: actions/checkout@v4
       - uses: DeterminateSystems/nix-installer-action@v11
       - uses: DeterminateSystems/magic-nix-cache-action@v7
-      - name: Run Flake Check (includes formatting)
-        run: nix flake check
 
-  lint-and-analyze:
-    runs-on: ubuntu-latest
-    needs: [check-and-format]
-    steps:
-      - uses: actions/checkout@v4
-      - uses: DeterminateSystems/nix-installer-action@v11
-      - uses: DeterminateSystems/magic-nix-cache-action@v7
+      - name: Run Fast Checks and Build
+        if: matrix.check == 'fast-checks'
+        run: |
+          nix build -L \
+            .#checks.x86_64-linux.deadnix \
+            .#checks.x86_64-linux.statix \
+            .#checks.x86_64-linux.formatting \
+            .#checks.x86_64-linux.shebang \
+            .#checks.x86_64-linux.shellcheck \
+            .#packages.x86_64-linux.default
 
-      - name: Check for nix formatting
-        run: nix fmt -- --fail-on-change .
+      - name: Run E2E Check
+        if: matrix.check != 'fast-checks'
+        run: nix build -L .#checks.x86_64-linux.${{ matrix.check }}
