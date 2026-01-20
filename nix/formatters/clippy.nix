@@ -12,10 +12,10 @@ pkgs.writeShellScriptBin "clippy-fix-project" ''
     pushd "$crate_dir" > /dev/null
 
     echo "  - Running cargo clippy --fix..."
-    cargo clippy --fix --allow-dirty --allow-staged -- -D warnings || true
+    ${pkgs.cargo}/bin/cargo clippy --fix --allow-dirty --allow-staged -- -D warnings || true
 
     echo "  - Running cargo fmt..."
-    cargo fmt
+    ${pkgs.cargo}/bin/cargo fmt
 
     popd > /dev/null
   done

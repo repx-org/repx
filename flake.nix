@@ -14,8 +14,30 @@
       ...
     }:
     {
-      overlays.default = _final: prev: {
-        repx-runner = self.packages.${prev.system}.default;
+      overlays.default = final: _prev: {
+        repx-workspace = final.callPackage ./default.nix { };
+        repx-runner =
+          final.runCommand "repx-runner"
+            {
+              meta.mainProgram = "repx-runner";
+            }
+            ''
+              mkdir -p $out/bin
+              ln -s ${final.repx-workspace}/bin/repx-runner $out/bin/repx-runner
+            '';
+        repx-tui =
+          final.runCommand "repx-tui"
+            {
+              buildInputs = [ final.makeWrapper ];
+              propagatedBuildInputs = [ final.repx-runner ];
+              meta.mainProgram = "repx-tui";
+            }
+            ''
+              mkdir -p $out/bin
+              ln -s ${final.repx-workspace}/bin/repx-tui $out/bin/repx-tui
+              wrapProgram $out/bin/repx-tui \
+                --prefix PATH : ${final.repx-runner}/bin
+            '';
       };
     }
     // flake-utils.lib.eachDefaultSystem (
@@ -25,26 +47,17 @@
           self.overlays.default
         ];
         pkgs = import nixpkgs { inherit system overlays; };
-
-        repx-runner = (import ./default.nix) {
-          inherit pkgs;
-        };
-
       in
       {
         packages = {
-          inherit repx-runner;
-          default = repx-runner;
-          repx-tui = repx-runner.overrideAttrs (old: {
-            meta = (old.meta or { }) // {
-              mainProgram = "repx-tui";
-            };
-          });
+          default = pkgs.repx-runner;
+          inherit (pkgs) repx-runner;
+          inherit (pkgs) repx-tui;
         };
 
         checks = import ./nix/checks.nix {
           inherit pkgs;
-          repxRunner = repx-runner;
+          repxRunner = pkgs.repx-runner;
           referenceLab = repx-nix.packages.${system}.reference-lab;
         };
 
