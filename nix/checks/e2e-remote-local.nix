@@ -11,9 +11,11 @@ pkgs.testers.runNixOSTest {
     client =
       { pkgs, ... }:
       {
-        virtualisation.diskSize = 8172;
-        virtualisation.memorySize = 8172;
-        virtualisation.cores = 2;
+        virtualisation = {
+          diskSize = 8172;
+          memorySize = 8172;
+          cores = 2;
+        };
         environment.systemPackages = [
           repxRunner
           pkgs.openssh
@@ -30,11 +32,13 @@ pkgs.testers.runNixOSTest {
     server =
       { pkgs, ... }:
       {
-        virtualisation.diskSize = 8172;
-        virtualisation.memorySize = 8172;
-        virtualisation.cores = 4;
-        virtualisation.docker.enable = true;
-        virtualisation.podman.enable = true;
+        virtualisation = {
+          diskSize = 8172;
+          memorySize = 8172;
+          cores = 4;
+          docker.enable = true;
+          podman.enable = true;
+        };
 
         networking.dhcpcd.denyInterfaces = [
           "veth*"

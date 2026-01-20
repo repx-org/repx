@@ -11,9 +11,11 @@ pkgs.testers.runNixOSTest {
     client =
       { pkgs, ... }:
       {
-        virtualisation.diskSize = 8192;
-        virtualisation.memorySize = 2048;
-        virtualisation.cores = 4;
+        virtualisation = {
+          diskSize = 8192;
+          memorySize = 2048;
+          cores = 4;
+        };
         environment.systemPackages = [
           repxRunner
           pkgs.openssh
@@ -24,16 +26,16 @@ pkgs.testers.runNixOSTest {
     cluster =
       { pkgs, ... }:
       {
-        virtualisation.diskSize = 8192;
-        virtualisation.memorySize = 4096;
-        virtualisation.cores = 4;
+        virtualisation = {
+          diskSize = 8192;
+          memorySize = 4096;
+          cores = 4;
+          docker.enable = true;
+          podman.enable = true;
+        };
 
         networking.hostName = "cluster";
         networking.firewall.enable = false;
-
-        virtualisation.docker.enable = true;
-        virtualisation.podman.enable = true;
-        services.openssh.enable = true;
 
         environment.systemPackages = [
           repxRunner
@@ -56,8 +58,6 @@ pkgs.testers.runNixOSTest {
           createHome = true;
         };
 
-        services.munge.enable = true;
-
         environment.etc."munge/munge.key" = {
           text = "mungeverryweakkeybuteasytointegratoinatest";
           mode = "0400";
@@ -69,18 +69,22 @@ pkgs.testers.runNixOSTest {
           "d /etc/munge 0700 munge munge -"
         ];
 
-        services.slurm = {
-          server.enable = true;
-          client.enable = true;
-          controlMachine = "cluster";
-          procTrackType = "proctrack/pgid";
-          nodeName = [ "cluster CPUs=4 RealMemory=3000 State=UNKNOWN" ];
-          partitionName = [ "main Nodes=cluster Default=YES MaxTime=INFINITE State=UP" ];
+        services = {
+          openssh.enable = true;
+          munge.enable = true;
+          slurm = {
+            server.enable = true;
+            client.enable = true;
+            controlMachine = "cluster";
+            procTrackType = "proctrack/pgid";
+            nodeName = [ "cluster CPUs=4 RealMemory=3000 State=UNKNOWN" ];
+            partitionName = [ "main Nodes=cluster Default=YES MaxTime=INFINITE State=UP" ];
 
-          extraConfig = ''
-            SlurmdTimeout=60
-            SlurmctldTimeout=60
-          '';
+            extraConfig = ''
+              SlurmdTimeout=60
+              SlurmctldTimeout=60
+            '';
+          };
         };
       };
   };

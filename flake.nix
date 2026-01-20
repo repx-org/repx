@@ -14,7 +14,7 @@
       ...
     }:
     {
-      overlays.default = final: prev: {
+      overlays.default = _final: prev: {
         repx-runner = self.packages.${prev.system}.default;
       };
     }
@@ -29,35 +29,26 @@
         repx-runner = (import ./default.nix) {
           inherit pkgs;
         };
+
       in
       {
-        packages.default = repx-runner;
-        packages.repx-runner = repx-runner;
-        packages.repx-tui = repx-runner.overrideAttrs (old: {
-          meta = (old.meta or { }) // {
-            mainProgram = "repx-tui";
-          };
-        });
-
-        checks = {
-          e2e-local = import ./tests/e2e-local.nix {
-            inherit pkgs;
-            repxRunner = repx-runner;
-            referenceLab = repx-nix.packages.${system}.reference-lab;
-          };
-
-          e2e-remote-local = import ./tests/e2e-remote-local.nix {
-            inherit pkgs;
-            repxRunner = repx-runner;
-            referenceLab = repx-nix.packages.${system}.reference-lab;
-          };
-
-          e2e-remote-slurm = import ./tests/e2e-remote-slurm.nix {
-            inherit pkgs;
-            repxRunner = repx-runner;
-            referenceLab = repx-nix.packages.${system}.reference-lab;
-          };
+        packages = {
+          inherit repx-runner;
+          default = repx-runner;
+          repx-tui = repx-runner.overrideAttrs (old: {
+            meta = (old.meta or { }) // {
+              mainProgram = "repx-tui";
+            };
+          });
         };
+
+        checks = import ./nix/checks.nix {
+          inherit pkgs;
+          repxRunner = repx-runner;
+          referenceLab = repx-nix.packages.${system}.reference-lab;
+        };
+
+        formatter = import ./nix/formatters.nix { inherit pkgs; };
 
         devShells.default = pkgs.mkShell {
           EXAMPLE_REPX_LAB = repx-nix.packages.${system}.reference-lab;

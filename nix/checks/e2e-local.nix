@@ -10,10 +10,12 @@ pkgs.testers.runNixOSTest {
   nodes.machine =
     { pkgs, ... }:
     {
-      virtualisation.diskSize = 4096;
-      virtualisation.memorySize = 2048;
-      virtualisation.docker.enable = true;
-      virtualisation.podman.enable = true;
+      virtualisation = {
+        diskSize = 4096;
+        memorySize = 2048;
+        docker.enable = true;
+        podman.enable = true;
+      };
 
       environment.systemPackages = [
         repxRunner
