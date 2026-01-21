@@ -38,9 +38,16 @@ let
       }
     else
       val;
-  bashParams = pkgs.lib.mapAttrs (
-    _: value: if value == null then "" else pkgs.lib.escapeShellArg (sanitize value)
-  ) paramsDef;
+  escapeParamValue =
+    value:
+    if value == null then
+      ""
+    else if builtins.isList value then
+      builtins.concatStringsSep " " (map (v: pkgs.lib.escapeShellArg (sanitize v)) value)
+    else
+      pkgs.lib.escapeShellArg (sanitize value);
+
+  bashParams = pkgs.lib.mapAttrs (_: escapeParamValue) paramsDef;
   userScript = stageDef.run {
     inputs = bashInputs;
     outputs = bashOutputs;
