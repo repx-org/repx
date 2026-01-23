@@ -56,7 +56,12 @@ pub enum Commands {
 
     #[command(hide = true)]
     InternalGc(InternalGcArgs),
+
+    List(ListArgs),
 }
+
+#[derive(Args)]
+pub struct ListArgs {}
 
 #[derive(Args)]
 pub struct GcArgs {

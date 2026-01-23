@@ -114,6 +114,13 @@ repx-runner run <JOB_ID_1> <JOB_ID_2>
 repx-runner run simulation-run --jobs 4
 ```
 
+#### `list`
+List all available runs in the lab.
+
+```bash
+repx-runner list --lab ./result
+```
+
 #### `gc`
 Garbage collect unused artifacts and outputs from the target.
 

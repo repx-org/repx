@@ -105,3 +105,16 @@ fn test_partial_run_by_job_id() {
         "Stage E ran but should not have"
     );
 }
+
+#[test]
+fn test_list_runs() {
+    let harness = TestHarness::new();
+
+    harness
+        .cmd()
+        .arg("list")
+        .assert()
+        .success()
+        .stdout(predicates::str::contains("Available runs in"))
+        .stdout(predicates::str::contains("simulation-run"));
+}

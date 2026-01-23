@@ -4,6 +4,7 @@ use std::path::PathBuf;
 pub mod execute;
 pub mod gc;
 pub mod internal;
+pub mod list;
 pub mod run;
 pub mod scatter_gather;
 
