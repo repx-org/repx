@@ -142,18 +142,6 @@ pub fn submit_local_batch_run(
                 jobs_left.remove(&job_id);
                 let job = jobs_in_batch.get(&job_id).unwrap();
 
-                let stage_type = &job.stage_type;
-                let execution_type = options.execution_type.as_deref().unwrap_or_else(|| {
-                    let scheduler_config = target.config().local.as_ref().unwrap();
-                    target
-                        .config()
-                        .default_execution_type
-                        .as_deref()
-                        .filter(|&et| scheduler_config.execution_types.contains(&et.to_string()))
-                        .or_else(|| scheduler_config.execution_types.first().map(|s| s.as_str()))
-                        .unwrap_or("native")
-                });
-
                 let image_path_opt = client
                     .lab
                     .runs
@@ -163,6 +151,26 @@ pub fn submit_local_batch_run(
                 let image_tag = image_path_opt
                     .and_then(|p| p.file_stem())
                     .and_then(|s| s.to_str());
+
+                let stage_type = &job.stage_type;
+                let execution_type = if options.execution_type.is_none() && image_tag.is_none() {
+                    "native"
+                } else {
+                    options.execution_type.as_deref().unwrap_or_else(|| {
+                        let scheduler_config = target.config().local.as_ref().unwrap();
+                        target
+                            .config()
+                            .default_execution_type
+                            .as_deref()
+                            .filter(|&et| {
+                                scheduler_config.execution_types.contains(&et.to_string())
+                            })
+                            .or_else(|| {
+                                scheduler_config.execution_types.first().map(|s| s.as_str())
+                            })
+                            .unwrap_or("native")
+                    })
+                };
                 let mut args = Vec::new();
 
                 if stage_type == "scatter-gather" {

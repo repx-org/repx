@@ -87,16 +87,6 @@ pub fn submit_slurm_batch_run(
 
     for (job_id, job) in &jobs_to_submit {
         let job_root_on_target = target.base_path().join("outputs").join(&job_id.0);
-        let execution_type = options.execution_type.as_deref().unwrap_or_else(|| {
-            let scheduler_config = target.config().slurm.as_ref().unwrap();
-            target
-                .config()
-                .default_execution_type
-                .as_deref()
-                .filter(|&et| scheduler_config.execution_types.contains(&et.to_string()))
-                .or_else(|| scheduler_config.execution_types.first().map(|s| s.as_str()))
-                .unwrap_or("native")
-        });
         let image_path_opt = client
             .lab
             .runs
@@ -106,6 +96,21 @@ pub fn submit_slurm_batch_run(
         let image_tag = image_path_opt
             .and_then(|p| p.file_stem())
             .and_then(|s| s.to_str());
+
+        let execution_type = if options.execution_type.is_none() && image_tag.is_none() {
+            "native"
+        } else {
+            options.execution_type.as_deref().unwrap_or_else(|| {
+                let scheduler_config = target.config().slurm.as_ref().unwrap();
+                target
+                    .config()
+                    .default_execution_type
+                    .as_deref()
+                    .filter(|&et| scheduler_config.execution_types.contains(&et.to_string()))
+                    .or_else(|| scheduler_config.execution_types.first().map(|s| s.as_str()))
+                    .unwrap_or("native")
+            })
+        };
         let mut repx_args = format!(
             "--job-id {} --runtime {} {} --base-path {} --host-tools-dir {}",
             job_id,

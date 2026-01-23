@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 use assert_cmd::Command as AssertCommand;
 use serde_json::Value;
 use std::env;
