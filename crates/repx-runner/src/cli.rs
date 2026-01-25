@@ -61,7 +61,22 @@ pub enum Commands {
 }
 
 #[derive(Args)]
-pub struct ListArgs {}
+pub struct ListArgs {
+    #[command(subcommand)]
+    pub entity: Option<ListEntity>,
+}
+
+#[derive(Subcommand)]
+pub enum ListEntity {
+    Runs,
+    Jobs {
+        run_id: String,
+    },
+    #[command(alias = "deps")]
+    Dependencies {
+        job_id: String,
+    },
+}
 
 #[derive(Args)]
 pub struct GcArgs {

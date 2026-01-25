@@ -107,7 +107,7 @@ fn test_partial_run_by_job_id() {
 }
 
 #[test]
-fn test_list_runs() {
+fn test_list_commands() {
     let harness = TestHarness::new();
 
     harness
@@ -117,4 +117,56 @@ fn test_list_runs() {
         .success()
         .stdout(predicates::str::contains("Available runs in"))
         .stdout(predicates::str::contains("simulation-run"));
+
+    harness
+        .cmd()
+        .arg("list")
+        .arg("runs")
+        .assert()
+        .success()
+        .stdout(predicates::str::contains("Available runs in"))
+        .stdout(predicates::str::contains("simulation-run"));
+
+    harness
+        .cmd()
+        .arg("list")
+        .arg("jobs")
+        .arg("simulation-run")
+        .assert()
+        .success()
+        .stdout(predicates::str::contains("Jobs in run 'simulation-run'"))
+        .stdout(predicates::str::contains("stage-A-producer"))
+        .stdout(predicates::str::contains("stage-B-producer"));
+
+    let job_id = harness.get_job_id_by_name("stage-C-consumer");
+
+    harness
+        .cmd()
+        .arg("list")
+        .arg("deps")
+        .arg(&job_id)
+        .assert()
+        .success()
+        .stdout(predicates::str::contains(format!(
+            "Dependency tree for job '{}'",
+            job_id
+        )))
+        .stdout(predicates::str::contains(&job_id));
+
+    let full_job_id = harness.get_job_id_by_name("stage-A-producer");
+    let partial_job_id = &full_job_id[0..10];
+
+    harness
+        .cmd()
+        .arg("list")
+        .arg("jobs")
+        .arg(partial_job_id)
+        .assert()
+        .success()
+        .stdout(predicates::str::contains(format!(
+            "Job '{}' found in the following runs:",
+            partial_job_id
+        )))
+        .stdout(predicates::str::contains("simulation-run"))
+        .stdout(predicates::str::contains("Jobs in run 'simulation-run'"));
 }

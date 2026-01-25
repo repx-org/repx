@@ -115,10 +115,14 @@ repx-runner run simulation-run --jobs 4
 ```
 
 #### `list`
-List all available runs in the lab.
+List available runs and jobs in the lab.
 
 ```bash
-repx-runner list --lab ./result
+repx-runner list
+
+repx-runner list jobs simulation-run
+
+repx-runner list deps <JOB_ID>
 ```
 
 #### `gc`

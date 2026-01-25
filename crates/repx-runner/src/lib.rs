@@ -29,7 +29,7 @@ pub fn run(cli: Cli) -> Result<(), AppError> {
             commands::scatter_gather::handle_scatter_gather(args)
         }
         Commands::InternalGc(args) => commands::gc::handle_internal_gc(args),
-        Commands::List(_) => commands::list::handle_list(&cli.lab),
+        Commands::List(args) => commands::list::handle_list(args, &cli.lab),
         Commands::Gc(args) => {
             let config = config::load_config()?;
             let client = Client::new(config.clone(), cli.lab.clone()).map_err(|e| {
