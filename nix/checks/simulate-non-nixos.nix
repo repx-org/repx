@@ -1,30 +1,35 @@
 { pkgs, repxRunner }:
 
-pkgs.runCommand "check-foreign-distro-compat"
-  {
-    nativeBuildInputs = [ pkgs.bubblewrap ];
-  }
-  ''
-    echo "Simulating non-NixOS environment (no /nix/store except the binary itself)..."
+pkgs.testers.runNixOSTest {
+  name = "check-foreign-distro-compat";
 
-    BINARY="${repxRunner}/bin/repx-runner"
-    REAL_BINARY=$(readlink -f "$BINARY")
+  nodes.machine =
+    { pkgs, ... }:
+    {
+      environment.systemPackages = [ pkgs.bubblewrap ];
+    };
 
-    echo "Resolved binary path: $REAL_BINARY"
+  testScript = ''
+    start_all()
 
-    if bwrap --unshare-user --unshare-ipc --unshare-pid --unshare-uts \
-             --ro-bind "$REAL_BINARY" /repx-runner \
-             --dev /dev \
-             --tmpfs /tmp \
-             /repx-runner --version > output.txt 2>&1; then
+    print("Simulating non-NixOS environment (no /nix/store except the binary itself)...")
 
-      echo "PASS: Binary ran successfully in isolation"
-      cat output.txt
-    else
-      echo "FAIL: Binary failed to run in isolation. It likely has hidden dependencies."
-      cat output.txt
-      exit 1
-    fi
+    binary_path = "${repxRunner}/bin/repx-runner"
 
-    mkdir $out
-  ''
+    real_binary = machine.succeed(f"readlink -f {binary_path}").strip()
+    print(f"Resolved binary path: {real_binary}")
+
+    cmd = (
+        "bwrap "
+        "--unshare-user --unshare-ipc --unshare-pid --unshare-uts --unshare-net "
+        f"--ro-bind {real_binary} /repx-runner "
+        "--dev /dev "
+        "--tmpfs /tmp "
+        "/repx-runner --version"
+    )
+
+    output = machine.succeed(cmd)
+    print("PASS: Binary ran successfully in isolation")
+    print(output)
+  '';
+}
