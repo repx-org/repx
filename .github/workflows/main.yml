@@ -19,6 +19,12 @@ jobs:
           - e2e-remote-slurm
           - static-analysis
           - foreign-distro-compat
+          - e2e-impure
+          - e2e-mount-paths
+          - e2e-impure-podman
+          - e2e-mount-paths-podman
+          - e2e-impure-docker
+          - e2e-mount-paths-docker
           - fast-checks
     steps:
       - uses: actions/checkout@v4
