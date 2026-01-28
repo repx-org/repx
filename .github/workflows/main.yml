@@ -39,8 +39,7 @@ jobs:
             .#checks.x86_64-linux.statix \
             .#checks.x86_64-linux.formatting \
             .#checks.x86_64-linux.shebang \
-            .#checks.x86_64-linux.shellcheck \
-            .#packages.x86_64-linux.default
+            .#checks.x86_64-linux.shellcheck
 
       - name: Run E2E Check
         if: matrix.check != 'fast-checks'
