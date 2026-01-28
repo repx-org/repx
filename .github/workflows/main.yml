@@ -7,8 +7,26 @@ on:
     branches: [ "main" ]
 
 jobs:
+  fast-checks:
+    name: Fast Checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@v11
+      - uses: DeterminateSystems/magic-nix-cache-action@v7
+
+      - name: Run Fast Checks
+        run: |
+          nix build -L \
+            .#checks.x86_64-linux.deadnix \
+            .#checks.x86_64-linux.statix \
+            .#checks.x86_64-linux.formatting \
+            .#checks.x86_64-linux.shebang \
+            .#checks.x86_64-linux.shellcheck
+
   checks:
     name: Check ${{ matrix.check }}
+    needs: fast-checks
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -25,22 +43,10 @@ jobs:
           - e2e-mount-paths-podman
           - e2e-impure-docker
           - e2e-mount-paths-docker
-          - fast-checks
     steps:
       - uses: actions/checkout@v4
       - uses: DeterminateSystems/nix-installer-action@v11
       - uses: DeterminateSystems/magic-nix-cache-action@v7
 
-      - name: Run Fast Checks and Build
-        if: matrix.check == 'fast-checks'
-        run: |
-          nix build -L \
-            .#checks.x86_64-linux.deadnix \
-            .#checks.x86_64-linux.statix \
-            .#checks.x86_64-linux.formatting \
-            .#checks.x86_64-linux.shebang \
-            .#checks.x86_64-linux.shellcheck
-
       - name: Run E2E Check
-        if: matrix.check != 'fast-checks'
         run: nix build -L .#checks.x86_64-linux.${{ matrix.check }}
