@@ -17,6 +17,8 @@ jobs:
           - e2e-local
           - e2e-remote-local
           - e2e-remote-slurm
+          - static-analysis
+          - foreign-distro-compat
           - fast-checks
     steps:
       - uses: actions/checkout@v4

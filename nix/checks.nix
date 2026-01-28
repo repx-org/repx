@@ -22,4 +22,12 @@
   e2e-remote-slurm = import ./checks/e2e-remote-slurm.nix {
     inherit pkgs repxRunner referenceLab;
   };
+
+  static-analysis = import ./checks/static-analysis.nix {
+    inherit pkgs repxRunner;
+  };
+
+  foreign-distro-compat = import ./checks/simulate-non-nixos.nix {
+    inherit pkgs repxRunner;
+  };
 }
