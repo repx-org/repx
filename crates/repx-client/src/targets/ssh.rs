@@ -406,12 +406,46 @@ impl Target for SshTarget {
         let remote_versioned_dir = self.base_path().join("bin").join(&hash);
         let remote_dest_path = remote_versioned_dir.join("repx-runner");
 
+        let verify_execution = || -> Result<()> {
+            let verify_cmd = format!(
+                "{} --version",
+                shell_quote(&remote_dest_path.to_string_lossy())
+            );
+            match self.run_command("sh", &["-c", &verify_cmd]) {
+                Ok(_) => Ok(()),
+                Err(e) => {
+                    let msg = format!(
+                        "The deployed repx-runner binary at '{}' failed to execute.\n\
+                         It returned an error when running '--version'.\n\
+                         \n\
+                         Original Error: {}\n\
+                         \n\
+                         POSSIBLE CAUSE: The binary might be incompatible with the target system (e.g. wrong architecture or dynamic linking issues).\n\
+                         \n\
+                         SOLUTION: Ensure you are building a static binary (default in flake) compatible with the target architecture.\n\
+                         You can check the binary type with 'file repx-runner'.",
+                        remote_dest_path.display(),
+                        e
+                    );
+                    Err(ClientError::TargetCommandFailed {
+                        target: self.name.clone(),
+                        source: AppError::ExecutionFailed {
+                            message: "Binary verification failed".to_string(),
+                            log_path: None,
+                            log_summary: msg,
+                        },
+                    })
+                }
+            }
+        };
+
         let check_cmd = format!(
             "test -f {} && echo 'exists'",
             shell_quote(&remote_dest_path.to_string_lossy())
         );
         if let Ok(output) = self.run_command("sh", &["-c", &check_cmd]) {
             if output.trim() == "exists" {
+                verify_execution()?;
                 return Ok(remote_dest_path);
             }
         }
@@ -448,6 +482,8 @@ impl Target for SshTarget {
             shell_quote(&remote_dest_path.to_string_lossy())
         );
         self.run_command("sh", &["-c", &chmod_cmd])?;
+
+        verify_execution()?;
 
         Ok(remote_dest_path)
     }

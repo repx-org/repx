@@ -15,7 +15,7 @@
     }:
     {
       overlays.default = final: _prev: {
-        repx-workspace = final.callPackage ./default.nix { };
+        repx-workspace = final.pkgsStatic.callPackage ./default.nix { };
         repx-runner =
           final.runCommand "repx-runner"
             {
