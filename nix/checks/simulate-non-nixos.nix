@@ -12,7 +12,7 @@ pkgs.runCommand "check-foreign-distro-compat"
 
     echo "Resolved binary path: $REAL_BINARY"
 
-    if bwrap --unshare-all \
+    if bwrap --unshare-user --unshare-ipc --unshare-pid --unshare-uts \
              --ro-bind "$REAL_BINARY" /repx-runner \
              --dev /dev \
              --tmpfs /tmp \
