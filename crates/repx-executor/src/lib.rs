@@ -63,6 +63,8 @@ pub struct ExecutionRequest {
     pub user_out_dir: PathBuf,
     pub repx_out_dir: PathBuf,
     pub host_tools_bin_dir: Option<PathBuf>,
+    pub mount_host_paths: bool,
+    pub mount_paths: Vec<String>,
 }
 
 pub struct Executor {
@@ -258,15 +260,18 @@ impl Executor {
             Runtime::Native => self.build_native_command(script_path, args),
             Runtime::Podman { image_tag } => {
                 self.ensure_image_loaded("podman", image_tag).await?;
-                self.build_container_command("podman", image_tag, script_path, args)?
+                self.build_container_command("podman", image_tag, script_path, args)
+                    .await?
             }
             Runtime::Docker { image_tag } => {
                 self.ensure_image_loaded("docker", image_tag).await?;
-                self.build_container_command("docker", image_tag, script_path, args)?
+                self.build_container_command("docker", image_tag, script_path, args)
+                    .await?
             }
             Runtime::Bwrap { image_tag } => {
                 let rootfs_path = self.ensure_bwrap_rootfs_extracted(image_tag).await?;
-                self.build_bwrap_command(&rootfs_path, script_path, args)?
+                self.build_bwrap_command(&rootfs_path, script_path, args)
+                    .await?
             }
         };
         Ok(cmd)
@@ -400,7 +405,6 @@ impl Executor {
 
         let layers = &manifest[0].layers;
 
-        // Clean up partials if any
         if extract_dir.exists() {
             tokio::fs::remove_dir_all(&extract_dir).await?;
         }
@@ -456,7 +460,7 @@ impl Executor {
         Ok(extract_dir)
     }
 
-    fn build_bwrap_command(
+    async fn build_bwrap_command(
         &self,
         rootfs_path: &Path,
         script_path: &Path,
@@ -465,58 +469,134 @@ impl Executor {
         let bwrap_path = self.get_host_tool_path("bwrap")?;
         let mut cmd = TokioCommand::new(bwrap_path);
 
+        if self.request.mount_host_paths {
+            cmd.arg("--bind").arg("/").arg("/");
+
+            for dir in [
+                "/home", "/tmp", "/var", "/opt", "/srv", "/mnt", "/media", "/run",
+            ] {
+                let p = Path::new(dir);
+                if p.exists() {
+                    cmd.arg("--bind").arg(dir).arg(dir);
+                }
+            }
+
+            if Path::new("/nix").exists() {
+                let overlay_upper = self.request.repx_out_dir.join("nix_overlay_upper");
+                let overlay_work = self.request.repx_out_dir.join("nix_overlay_work");
+
+                tokio::fs::create_dir_all(&overlay_upper).await?;
+                tokio::fs::create_dir_all(&overlay_work).await?;
+
+                cmd.arg("--overlay-src")
+                    .arg("/nix/store")
+                    .arg("--overlay")
+                    .arg(&overlay_upper)
+                    .arg(&overlay_work)
+                    .arg("/nix/store");
+
+                let image_store = rootfs_path.join("nix/store");
+                if image_store.exists() {
+                    let mut entries = tokio::fs::read_dir(&image_store).await?;
+                    while let Some(entry) = entries.next_entry().await? {
+                        let file_name = entry.file_name();
+                        let host_path = Path::new("/nix/store").join(&file_name);
+
+                        if !host_path.exists() {
+                            let image_path = entry.path();
+                            let target_path = PathBuf::from("/nix/store").join(file_name);
+                            cmd.arg("--ro-bind").arg(image_path).arg(target_path);
+                        }
+                    }
+                }
+            } else {
+                cmd.arg("--bind").arg(rootfs_path.join("nix")).arg("/nix");
+            }
+
+            cmd.arg("--unshare-user")
+                .arg("--unshare-pid")
+                .arg("--unshare-ipc")
+                .arg("--unshare-uts")
+                .arg("--dev-bind")
+                .arg("/dev")
+                .arg("/dev")
+                .arg("--proc")
+                .arg("/proc");
+        } else {
+            cmd.arg("--unshare-all")
+                .arg("--hostname")
+                .arg("repx-container")
+                .arg("--overlay-src")
+                .arg(rootfs_path)
+                .arg("--tmp-overlay")
+                .arg("/")
+                .arg("--dev")
+                .arg("/dev")
+                .arg("--proc")
+                .arg("/proc")
+                .arg("--tmpfs")
+                .arg("/tmp");
+
+            cmd.arg("--dir")
+                .arg(&self.request.base_path)
+                .arg("--ro-bind")
+                .arg(&self.request.base_path)
+                .arg(&self.request.base_path);
+
+            cmd.arg("--dir")
+                .arg(&self.request.user_out_dir)
+                .arg("--bind")
+                .arg(&self.request.user_out_dir)
+                .arg(&self.request.user_out_dir);
+
+            cmd.arg("--dir")
+                .arg(&self.request.repx_out_dir)
+                .arg("--bind")
+                .arg(&self.request.repx_out_dir)
+                .arg(&self.request.repx_out_dir);
+
+            cmd.arg("--dir")
+                .arg(&self.request.job_package_path)
+                .arg("--ro-bind")
+                .arg(&self.request.job_package_path)
+                .arg(&self.request.job_package_path);
+        }
+
+        cmd.arg("--clearenv");
+
         let mut inner_path =
             String::from("/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin");
         if let Some(host_tools) = &self.request.host_tools_bin_dir {
             inner_path = format!("{}:{}", host_tools.display(), inner_path);
         }
 
-        cmd.arg("--unshare-all")
-            .arg("--clearenv")
-            .arg("--setenv")
-            .arg("PATH")
-            .arg(inner_path)
-            .arg("--setenv")
-            .arg("HOME")
-            .arg("/")
-            .arg("--setenv")
-            .arg("TERM")
-            .arg("xterm")
-            .arg("--hostname")
-            .arg("repx-container")
-            .arg("--overlay-src")
-            .arg(rootfs_path)
-            .arg("--tmp-overlay")
-            .arg("/")
-            .arg("--dev")
-            .arg("/dev")
-            .arg("--proc")
-            .arg("/proc")
-            .arg("--tmpfs")
-            .arg("/tmp")
-            .arg("--dir")
-            .arg(&self.request.base_path)
-            .arg("--ro-bind")
-            .arg(&self.request.base_path)
-            .arg(&self.request.base_path)
-            .arg("--dir")
-            .arg(&self.request.user_out_dir)
-            .arg("--bind")
-            .arg(&self.request.user_out_dir)
-            .arg(&self.request.user_out_dir)
-            .arg("--dir")
-            .arg(&self.request.repx_out_dir)
-            .arg("--bind")
-            .arg(&self.request.repx_out_dir)
-            .arg(&self.request.repx_out_dir)
-            .arg("--dir")
-            .arg(&self.request.job_package_path)
-            .arg("--ro-bind")
-            .arg(&self.request.job_package_path)
-            .arg(&self.request.job_package_path)
-            .arg("--chdir")
-            .arg(&self.request.user_out_dir)
-            .arg(script_path);
+        if self.request.mount_host_paths {
+            let host_path = std::env::var("PATH").unwrap_or_default();
+            if !host_path.is_empty() {
+                inner_path = format!("{}:{}", inner_path, host_path);
+            }
+            cmd.arg("--setenv")
+                .arg("HOME")
+                .arg(std::env::var("HOME").unwrap_or_else(|_| "/".into()));
+        } else {
+            cmd.arg("--setenv").arg("HOME").arg("/");
+
+            if !self.request.mount_paths.is_empty() {
+                log_info!(
+                    "[IMPURE] Specific host paths mounted: {:?}",
+                    self.request.mount_paths
+                );
+                for path in &self.request.mount_paths {
+                    cmd.arg("--bind").arg(path).arg(path);
+                }
+            }
+        }
+
+        cmd.arg("--setenv").arg("PATH").arg(inner_path);
+        cmd.arg("--setenv").arg("TERM").arg("xterm");
+
+        cmd.arg("--chdir").arg(&self.request.user_out_dir);
+        cmd.arg(script_path);
         cmd.args(args);
 
         self.restrict_command_environment(&mut cmd, &[]);
@@ -607,7 +687,7 @@ impl Executor {
         Ok(())
     }
 
-    fn build_container_command(
+    async fn build_container_command(
         &self,
         runtime: &str,
         image_tag: &str,
@@ -649,9 +729,29 @@ impl Executor {
                 self.request.base_path.display()
             ))
             .arg("--workdir")
-            .arg(self.request.user_out_dir.display().to_string())
-            .arg(image_tag)
-            .arg(script_path);
+            .arg(self.request.user_out_dir.display().to_string());
+
+        if self.request.mount_host_paths {
+            log_info!("[IMPURE] mount_host_paths is enabled. Container is not isolated.");
+            for dir in ["/home", "/tmp", "/var", "/opt", "/run", "/media", "/mnt"] {
+                if Path::new(dir).exists() {
+                    cmd.arg("-v").arg(format!("{}:{}", dir, dir));
+                }
+            }
+            if Path::new("/nix").exists() {
+                cmd.arg("-v").arg("/nix:/nix");
+            }
+        } else if !self.request.mount_paths.is_empty() {
+            log_info!(
+                "[IMPURE] Specific host paths mounted: {:?}",
+                self.request.mount_paths
+            );
+            for path in &self.request.mount_paths {
+                cmd.arg("-v").arg(format!("{}:{}", path, path));
+            }
+        }
+
+        cmd.arg(image_tag).arg(script_path);
 
         cmd.args(args);
         self.restrict_command_environment(&mut cmd, &[runtime]);

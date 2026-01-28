@@ -46,6 +46,10 @@ max_age_days = 7
   # This is used to cache container images on the node's local SSD/NVMe.
   # node_local_path = "/mnt/local/$USER/repx"
 
+  # Optional: Mount host paths into the container.
+  # mount_host_paths = false
+  # mount_paths = ["/home/user/data", "/opt/tools"]
+
   # Optional: set the default scheduler and execution type for this target.
   default_scheduler = "local"
   default_execution_type = "bwrap"
@@ -70,6 +74,9 @@ max_age_days = 7
   # base_path = "/mnt/galactica/demirlie/Desktop/repx-store"
   # # Fast local storage on compute nodes (e.g., NVMe). Critical for 'bwrap' performance on NFS.
   # node_local_path = "/mnt/local/$USER/repx"
+  # # Optional: Mount host paths (impure mode).
+  # # mount_host_paths = false
+  # # mount_paths = ["/home/user/data"]
   # default_scheduler = "slurm"
   # default_execution_type = "podman"
   #
@@ -128,6 +135,10 @@ pub struct Target {
     pub node_local_path: Option<PathBuf>,
     pub default_scheduler: Option<String>,
     pub default_execution_type: Option<String>,
+    #[serde(default)]
+    pub mount_host_paths: bool,
+    #[serde(default)]
+    pub mount_paths: Vec<String>,
     #[serde(default)]
     pub local: Option<SchedulerConfig>,
     #[serde(default)]

@@ -126,6 +126,10 @@ pub struct InternalExecuteArgs {
     pub node_local_path: Option<PathBuf>,
     #[arg(long)]
     pub host_tools_dir: String,
+    #[arg(long, default_value_t = false)]
+    pub mount_host_paths: bool,
+    #[arg(long)]
+    pub mount_paths: Vec<String>,
     #[arg(long)]
     pub executable_path: PathBuf,
 }
@@ -164,4 +168,9 @@ pub struct InternalScatterGatherArgs {
 
     #[arg(long, default_value = "all")]
     pub phase: String,
+
+    #[arg(long, default_value_t = false)]
+    pub mount_host_paths: bool,
+    #[arg(long)]
+    pub mount_paths: Vec<String>,
 }

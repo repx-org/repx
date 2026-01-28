@@ -151,6 +151,7 @@ fn test_gc_root_rotation_keeps_last_5() {
         node_local_path: None,
         default_scheduler: None,
         default_execution_type: None,
+        mount_host_paths: false,
         local: None,
         slurm: None,
     };

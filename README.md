@@ -45,7 +45,14 @@ address = "user@hpc-login-node"
 base_path = "/scratch/user/repx-store"
 default_scheduler = "slurm"
 # Optional: Fast local storage for container caching
-node_local_path = "/tmp/user/repx" 
+node_local_path = "/tmp/user/repx"
+# Optional: Mount host paths (like /home, /nix/store) into the container.
+# This enables "impure" execution, useful for debugging or accessing host-specific resources.
+# NOTE: This mounts a standard set of paths (/home, /tmp, /nix, etc.).
+mount_host_paths = false
+# Optional: Mount specific host paths.
+# Mutually exclusive with `mount_host_paths = true`.
+# mount_paths = ["/home/user/data", "/opt/tools"]
 
 [targets.cluster.slurm]
 execution_types = ["podman", "native"]
@@ -82,9 +89,9 @@ mem = "64G"
 `repx-runner` supports multiple execution runtimes, which can be configured per target or scheduler.
 
 *   **`native`**: Runs directly on the host. Simplest, but requires all dependencies to be present.
-*   **`bwrap`**: Uses Bubblewrap for lightweight sandboxing. High performance, ideal for local usage and HPC where unprivileged user namespaces are allowed.
-*   **`podman`**: Uses Podman for OCI container execution. Recommended for Slurm clusters.
-*   **`docker`**: Uses Docker. Typically for local development or rigid enterprise environments.
+*   **`bwrap`**: Uses Bubblewrap for lightweight sandboxing. High performance, ideal for local usage and HPC where unprivileged user namespaces are allowed. Supports "impure" mode via `mount_host_paths` or `mount_paths` to access host resources.
+*   **`podman`**: Uses Podman for OCI container execution. Recommended for Slurm clusters. Supports "impure" mode via `mount_host_paths` or `mount_paths` (adds `-v`).
+*   **`docker`**: Uses Docker. Typically for local development or rigid enterprise environments. Supports "impure" mode via `mount_host_paths` or `mount_paths` (adds `-v`).
 
 ## `repx-runner` CLI Usage
 

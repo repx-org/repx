@@ -30,4 +30,28 @@
   foreign-distro-compat = import ./checks/simulate-non-nixos.nix {
     inherit pkgs repxRunner;
   };
+
+  e2e-impure = import ./checks/e2e-impure.nix {
+    inherit pkgs repxRunner;
+  };
+
+  e2e-mount-paths = import ./checks/e2e-mount-paths.nix {
+    inherit pkgs repxRunner;
+  };
+
+  e2e-impure-podman = import ./checks/e2e-impure-podman.nix {
+    inherit pkgs repxRunner;
+  };
+
+  e2e-mount-paths-podman = import ./checks/e2e-mount-paths-podman.nix {
+    inherit pkgs repxRunner;
+  };
+
+  e2e-impure-docker = import ./checks/e2e-impure-docker.nix {
+    inherit pkgs repxRunner;
+  };
+
+  e2e-mount-paths-docker = import ./checks/e2e-mount-paths-docker.nix {
+    inherit pkgs repxRunner;
+  };
 }

@@ -201,6 +201,21 @@ pub fn submit_local_batch_run(
                 args.push("--host-tools-dir".to_string());
                 args.push(client.lab.host_tools_dir_name.clone());
 
+                if target.config().mount_host_paths {
+                    if !target.config().mount_paths.is_empty() {
+                        return Err(ClientError::Core(AppError::ConfigurationError(
+                            "Cannot specify both 'mount_host_paths = true' and 'mount_paths'."
+                                .into(),
+                        )));
+                    }
+                    args.push("--mount-host-paths".to_string());
+                } else {
+                    for path in &target.config().mount_paths {
+                        args.push("--mount-paths".to_string());
+                        args.push(path.clone());
+                    }
+                }
+
                 if stage_type == "scatter-gather" {
                     let scatter_exe = job.executables.get("scatter").unwrap();
                     let worker_exe = job.executables.get("worker").unwrap();

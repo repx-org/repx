@@ -30,6 +30,8 @@ struct ScatterGatherOrchestrator {
     static_inputs: Value,
     host_tools_bin_dir: Option<PathBuf>,
     node_local_path: Option<PathBuf>,
+    mount_host_paths: bool,
+    mount_paths: Vec<String>,
 }
 impl ScatterGatherOrchestrator {
     fn new(args: &InternalScatterGatherArgs) -> Result<Self, AppError> {
@@ -83,6 +85,8 @@ impl ScatterGatherOrchestrator {
             static_inputs: Value::Object(Default::default()),
             host_tools_bin_dir,
             node_local_path: args.node_local_path.clone(),
+            mount_host_paths: args.mount_host_paths,
+            mount_paths: args.mount_paths.clone(),
         })
     }
     fn init_dirs(&mut self) -> Result<(), AppError> {
@@ -115,6 +119,8 @@ impl ScatterGatherOrchestrator {
             user_out_dir: user_out,
             repx_out_dir: repx_out,
             host_tools_bin_dir: self.host_tools_bin_dir.clone(),
+            mount_host_paths: self.mount_host_paths,
+            mount_paths: self.mount_paths.clone(),
         })
     }
     async fn run_scatter(&self, exe_path: &Path) -> Result<(), AppError> {
@@ -396,6 +402,15 @@ async fn submit_slurm_gather_job(
         "--worker-outputs-json".to_string(),
         format!("'{}'", args.worker_outputs_json),
     ];
+
+    if args.mount_host_paths {
+        gather_cmd_parts.push("--mount-host-paths".to_string());
+    }
+
+    for path in &args.mount_paths {
+        gather_cmd_parts.push("--mount-paths".to_string());
+        gather_cmd_parts.push(path.clone());
+    }
 
     if let Some(tag) = &args.image_tag {
         gather_cmd_parts.push("--image-tag".to_string());

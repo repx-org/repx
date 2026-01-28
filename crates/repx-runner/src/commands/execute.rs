@@ -77,6 +77,8 @@ async fn async_handle_execute(args: InternalExecuteArgs) -> Result<(), AppError>
         user_out_dir,
         repx_out_dir: repx_dir.clone(),
         host_tools_bin_dir,
+        mount_host_paths: args.mount_host_paths,
+        mount_paths: args.mount_paths,
     };
 
     let executor = Executor::new(request);

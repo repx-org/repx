@@ -56,7 +56,6 @@ fn test_bwrap_isolation_properties() {
     let harness = TestHarness::with_execution_type("bwrap");
     harness.stage_lab();
 
-    // 1. Setup paths
     let base_path = harness.cache_dir.path();
     let victim_dir = base_path.join("outputs").join("victim").join("out");
     fs::create_dir_all(&victim_dir).unwrap();
@@ -159,5 +158,207 @@ exit 0
     assert!(
         output.status.success(),
         "Attacker script failed (check stdout for FAIL messages)"
+    );
+}
+
+#[test]
+fn test_bwrap_impure_mode_access_host() {
+    let harness = TestHarness::with_execution_type("bwrap");
+    harness.stage_lab();
+
+    let base_path = harness.cache_dir.path();
+    let host_marker_file = base_path.join("i_am_on_host.txt");
+    fs::write(&host_marker_file, "host data").unwrap();
+
+    let job_id = "job-impure";
+    harness.stage_job_dirs(job_id);
+    let job_out_path = harness.get_job_output_path(job_id);
+    fs::write(job_out_path.join("repx/inputs.json"), "{}").unwrap();
+
+    let job_package_dir = base_path.join("artifacts/jobs").join(job_id);
+    let bin_dir = job_package_dir.join("bin");
+    fs::create_dir_all(&bin_dir).unwrap();
+    let script_path = bin_dir.join("check_host.sh");
+
+    let temp_outside = tempfile::tempdir().unwrap();
+    let outside_file = temp_outside.path().join("outside.txt");
+    fs::write(&outside_file, "outside").unwrap();
+
+    let shell = if std::path::Path::new("/bin/sh").exists() {
+        "/bin/sh".to_string()
+    } else if std::path::Path::new("/usr/bin/env").exists() {
+        "/usr/bin/env sh".to_string()
+    } else {
+        std::env::var("SHELL").unwrap_or("/bin/sh".to_string())
+    };
+
+    let script_content = format!(
+        r#"#!{}
+if [ -f "{}" ]; then
+    echo "FOUND" > found.txt
+else
+    echo "NOT_FOUND" > found.txt
+fi
+"#,
+        shell,
+        outside_file.to_string_lossy()
+    );
+
+    fs::write(&script_path, script_content).unwrap();
+    use std::os::unix::fs::PermissionsExt;
+    let mut perms = fs::metadata(&script_path).unwrap().permissions();
+    perms.set_mode(0o755);
+    fs::set_permissions(&script_path, perms).unwrap();
+
+    let image_tag = harness.get_any_image_tag().expect("No image found");
+
+    let mut cmd = harness.cmd();
+    cmd.arg("internal-execute")
+        .arg("--job-id")
+        .arg(job_id)
+        .arg("--executable-path")
+        .arg(&script_path)
+        .arg("--base-path")
+        .arg(base_path)
+        .arg("--host-tools-dir")
+        .arg(harness.get_host_tools_dir_name())
+        .arg("--runtime")
+        .arg("bwrap")
+        .arg("--image-tag")
+        .arg(&image_tag);
+
+    cmd.assert().success();
+    let content = fs::read_to_string(job_out_path.join("out/found.txt")).unwrap();
+    assert_eq!(
+        content.trim(),
+        "NOT_FOUND",
+        "Pure mode should NOT see host temp files"
+    );
+
+    fs::remove_file(job_out_path.join("out/found.txt")).unwrap();
+    fs::remove_file(job_out_path.join("repx/SUCCESS")).unwrap();
+
+    let mut cmd2 = harness.cmd();
+    cmd2.arg("internal-execute")
+        .arg("--job-id")
+        .arg(job_id)
+        .arg("--executable-path")
+        .arg(&script_path)
+        .arg("--base-path")
+        .arg(base_path)
+        .arg("--host-tools-dir")
+        .arg(harness.get_host_tools_dir_name())
+        .arg("--runtime")
+        .arg("bwrap")
+        .arg("--image-tag")
+        .arg(&image_tag)
+        .arg("--mount-host-paths");
+
+    cmd2.assert().success();
+    let content2 = fs::read_to_string(job_out_path.join("out/found.txt")).unwrap();
+    assert_eq!(
+        content2.trim(),
+        "FOUND",
+        "Impure mode SHOULD see host temp files"
+    );
+}
+
+#[test]
+fn test_bwrap_mount_paths_specific() {
+    let harness = TestHarness::with_execution_type("bwrap");
+    harness.stage_lab();
+
+    let base_path = harness.cache_dir.path();
+    let job_id = "job-mount-paths";
+    harness.stage_job_dirs(job_id);
+    let job_out_path = harness.get_job_output_path(job_id);
+    fs::write(job_out_path.join("repx/inputs.json"), "{}").unwrap();
+
+    let job_package_dir = base_path.join("artifacts/jobs").join(job_id);
+    let bin_dir = job_package_dir.join("bin");
+    fs::create_dir_all(&bin_dir).unwrap();
+    let script_path = bin_dir.join("check_specific.sh");
+
+    let temp_outside = tempfile::tempdir().unwrap();
+    let secret_file = temp_outside.path().join("secret.txt");
+    fs::write(&secret_file, "secret-data").unwrap();
+
+    let shell = if std::path::Path::new("/bin/sh").exists() {
+        "/bin/sh".to_string()
+    } else if std::path::Path::new("/usr/bin/env").exists() {
+        "/usr/bin/env sh".to_string()
+    } else {
+        std::env::var("SHELL").unwrap_or("/bin/sh".to_string())
+    };
+
+    let script_content = format!(
+        r#"#!{}
+if [ -f "{}" ]; then
+    echo "FOUND" > found.txt
+else
+    echo "NOT_FOUND" > found.txt
+fi
+"#,
+        shell,
+        secret_file.to_string_lossy()
+    );
+
+    fs::write(&script_path, script_content).unwrap();
+    use std::os::unix::fs::PermissionsExt;
+    let mut perms = fs::metadata(&script_path).unwrap().permissions();
+    perms.set_mode(0o755);
+    fs::set_permissions(&script_path, perms).unwrap();
+
+    let image_tag = harness.get_any_image_tag().expect("No image found");
+
+    let mut cmd = harness.cmd();
+    cmd.arg("internal-execute")
+        .arg("--job-id")
+        .arg(job_id)
+        .arg("--executable-path")
+        .arg(&script_path)
+        .arg("--base-path")
+        .arg(base_path)
+        .arg("--host-tools-dir")
+        .arg(harness.get_host_tools_dir_name())
+        .arg("--runtime")
+        .arg("bwrap")
+        .arg("--image-tag")
+        .arg(&image_tag);
+
+    cmd.assert().success();
+    let content = fs::read_to_string(job_out_path.join("out/found.txt")).unwrap();
+    assert_eq!(
+        content.trim(),
+        "NOT_FOUND",
+        "Without mount-paths, should NOT see external file"
+    );
+
+    fs::remove_file(job_out_path.join("out/found.txt")).unwrap();
+    fs::remove_file(job_out_path.join("repx/SUCCESS")).unwrap();
+
+    let mut cmd2 = harness.cmd();
+    cmd2.arg("internal-execute")
+        .arg("--job-id")
+        .arg(job_id)
+        .arg("--executable-path")
+        .arg(&script_path)
+        .arg("--base-path")
+        .arg(base_path)
+        .arg("--host-tools-dir")
+        .arg(harness.get_host_tools_dir_name())
+        .arg("--runtime")
+        .arg("bwrap")
+        .arg("--image-tag")
+        .arg(&image_tag)
+        .arg("--mount-paths")
+        .arg(secret_file.to_string_lossy().to_string());
+
+    cmd2.assert().success();
+    let content2 = fs::read_to_string(job_out_path.join("out/found.txt")).unwrap();
+    assert_eq!(
+        content2.trim(),
+        "FOUND",
+        "With --mount-paths, SHOULD see external file"
     );
 }

@@ -124,6 +124,18 @@ pub fn submit_slurm_batch_run(
         if let Some(local_path) = &target.config().node_local_path {
             repx_args.push_str(&format!(" --node-local-path {}", local_path.display()));
         }
+        if target.config().mount_host_paths {
+            if !target.config().mount_paths.is_empty() {
+                return Err(ClientError::Core(AppError::ConfigurationError(
+                    "Cannot specify both 'mount_host_paths = true' and 'mount_paths'.".into(),
+                )));
+            }
+            repx_args.push_str(" --mount-host-paths");
+        } else {
+            for path in &target.config().mount_paths {
+                repx_args.push_str(&format!(" --mount-paths {}", path));
+            }
+        }
         let (repx_command_to_wrap, directives) = if job.stage_type == "scatter-gather" {
             let scatter_exe = job.executables.get("scatter").ok_or_else(|| {
                 AppError::ConfigurationError(
@@ -150,12 +162,23 @@ pub fn submit_slurm_batch_run(
                 serde_json::to_string(&worker_exe.outputs).map_err(AppError::from)?;
 
             let scatter_gather_args = format!(
-                "--job-package-path {} --scatter-exe-path {} --worker-exe-path {} --gather-exe-path {} --worker-outputs-json '{}'",
+                "--job-package-path {} --scatter-exe-path {} --worker-exe-path {} --gather-exe-path {} --worker-outputs-json '{}' {}",
                 target.artifacts_base_path().join(format!("jobs/{}", job_id)).display(),
                 scatter_exe_path.display(),
                 worker_exe_path.display(),
                 gather_exe_path.display(),
-                worker_outputs_json
+                worker_outputs_json,
+                if target.config().mount_host_paths {
+                    "--mount-host-paths".to_string()
+                } else {
+                    target
+                        .config()
+                        .mount_paths
+                        .iter()
+                        .map(|p| format!("--mount-paths {}", p))
+                        .collect::<Vec<_>>()
+                        .join(" ")
+                }
             );
             let main_directives =
                 resources::resolve_for_job(job_id, target_name, &options.resources);
