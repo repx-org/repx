@@ -88,11 +88,10 @@
 
         checks =
           (import ./nix/checks.nix {
-            inherit pkgs;
+            inherit pkgs repx-lib;
             repxRunner = pkgs.repx-runner;
             referenceLab = reference-lab;
           })
-          // (import ./nix/nix/checks.nix { inherit pkgs repx-lib; })
           // {
             repx-py-tests = repx-py-test;
           };
