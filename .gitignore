@@ -2,7 +2,6 @@
 *.o
 *.bin
 *.wav
-*.json
 **/__pycache__
 **/venv_*
 **/venv

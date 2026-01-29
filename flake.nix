@@ -55,7 +55,7 @@
         pkgs = import nixpkgs { inherit system overlays; };
 
         reference-lab =
-          (pkgs.callPackage ./nix/nix/reference-lab/lab.nix {
+          (pkgs.callPackage ./nix/reference-lab/lab.nix {
             inherit pkgs repx-lib;
             gitHash = self.rev or self.dirtyRev or "unknown";
           }).lab;
@@ -96,7 +96,7 @@
             repx-py-tests = repx-py-test;
           };
 
-        formatter = import ./nix/nix/formatters.nix { inherit pkgs; };
+        formatter = import ./nix/formatters.nix { inherit pkgs; };
 
         devShells.default = pkgs.mkShell {
           EXAMPLE_REPX_LAB = reference-lab;
