@@ -2,7 +2,8 @@
   inputs = {
     nixpkgs.follows = "repx-nix/nixpkgs";
     flake-utils.url = "github:numtide/flake-utils";
-    repx-nix.url = "github:repx-org/repx-nix";
+    repx-nix.url = "path:./nix";
+    repx-py.url = "path:./python";
   };
 
   outputs =
