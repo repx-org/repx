@@ -32,6 +32,14 @@ jobs:
       fail-fast: false
       matrix:
         check:
+          - repx-rs-tests
+          - repx-py-tests
+          - integration
+          - invalidation
+          - pipeline_logic
+          - dynamic_params_validation
+          - params
+          - params_list
           - e2e-local
           - e2e-remote-local
           - e2e-remote-slurm

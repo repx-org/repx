@@ -94,6 +94,10 @@
           })
           // {
             repx-py-tests = repx-py-test;
+            repx-rs-tests = (pkgs.callPackage ./default.nix { }).overrideAttrs (old: {
+              pname = "repx-rs-tests";
+              doCheck = true;
+            });
           };
 
         formatter = import ./nix/formatters.nix { inherit pkgs; };
