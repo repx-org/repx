@@ -3,8 +3,8 @@
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.11";
-    repx-nix.url = "github:repx-org/repx-nix";
-    repx-py.url = "github:repx-org/repx-py";
+    repx-nix.url = "path:../../nix";
+    repx-py.url = "path:../../python";
   };
 
   outputs =
