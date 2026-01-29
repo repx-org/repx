@@ -18,7 +18,15 @@ impl TestHarness {
     pub fn new() -> Self {
         Self::with_execution_type("native")
     }
+}
 
+impl Default for TestHarness {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl TestHarness {
     pub fn with_execution_type(exec_type: &str) -> Self {
         let config_dir = tempdir().expect("Failed to create temp config dir");
         let cache_dir = tempdir().expect("Failed to create temp cache dir");
@@ -84,14 +92,22 @@ local_concurrency = 2
             .join("bin");
 
         let rsync_path = bin_dir.join("rsync");
-        let status = Command::new(rsync_path)
+        let output = Command::new(&rsync_path)
             .arg("-a")
+            .arg("--no-o")
+            .arg("--no-g")
             .arg("--delete")
             .arg(format!("{}/", self.lab_path.display()))
             .arg(&dest)
-            .status()
+            .output()
             .expect("rsync command failed");
-        assert!(status.success(), "rsync of lab to cache failed");
+
+        if !output.status.success() {
+            eprintln!("Rsync failed using path: {:?}", rsync_path);
+            eprintln!("Rsync stderr: {}", String::from_utf8_lossy(&output.stderr));
+            eprintln!("Rsync stdout: {}", String::from_utf8_lossy(&output.stdout));
+        }
+        assert!(output.status.success(), "rsync of lab to cache failed");
 
         let chmod_path = bin_dir.join("chmod");
         let status_chmod = Command::new(chmod_path)

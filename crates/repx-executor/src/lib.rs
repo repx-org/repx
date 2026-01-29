@@ -460,6 +460,94 @@ impl Executor {
         Ok(extract_dir)
     }
 
+    async fn prepare_symlink_union(
+        &self,
+        host_store: &Path,
+        image_store: &Path,
+        host_mount_point: &Path,
+        image_mount_point: &Path,
+    ) -> Result<PathBuf> {
+        let union_dir = self.request.repx_out_dir.join("nix_union_store");
+        if union_dir.exists() {
+            tokio::fs::remove_dir_all(&union_dir).await?;
+        }
+        tokio::fs::create_dir_all(&union_dir).await?;
+
+        let mut host_entries = tokio::fs::read_dir(host_store).await?;
+        while let Some(entry) = host_entries.next_entry().await? {
+            let file_name = entry.file_name();
+            let target = host_mount_point.join(&file_name);
+            let link_path = union_dir.join(&file_name);
+            tokio::fs::symlink(target, link_path).await?;
+        }
+
+        let mut image_entries = tokio::fs::read_dir(image_store).await?;
+        while let Some(entry) = image_entries.next_entry().await? {
+            let file_name = entry.file_name();
+            let target = image_mount_point.join(&file_name);
+            let link_path = union_dir.join(&file_name);
+
+            if link_path.exists() || tokio::fs::symlink_metadata(&link_path).await.is_ok() {
+                tokio::fs::remove_file(&link_path).await?;
+            }
+            tokio::fs::symlink(target, link_path).await?;
+        }
+
+        Ok(union_dir)
+    }
+
+    async fn check_overlay_support(&self, base_dir: &Path, lower_dir: &Path) -> bool {
+        let bwrap_path = match self.get_host_tool_path("bwrap") {
+            Ok(p) => p,
+            Err(_) => return false,
+        };
+
+        let temp_dir = match tempfile::Builder::new()
+            .prefix(".repx-overlay-check-")
+            .tempdir_in(base_dir)
+        {
+            Ok(t) => t,
+            Err(e) => {
+                log_debug!("Failed to create temp dir for overlay check: {}", e);
+                return false;
+            }
+        };
+
+        let start_path = temp_dir.path();
+        let upper = start_path.join("upper");
+        let work = start_path.join("work");
+        let merged = start_path.join("merged");
+
+        if tokio::fs::create_dir(&upper).await.is_err()
+            || tokio::fs::create_dir(&work).await.is_err()
+            || tokio::fs::create_dir(&merged).await.is_err()
+        {
+            return false;
+        }
+
+        let mut cmd = TokioCommand::new(&bwrap_path);
+
+        cmd.arg("--unshare-user")
+            .arg("--dev-bind")
+            .arg("/")
+            .arg("/")
+            .arg("--overlay-src")
+            .arg(lower_dir)
+            .arg("--overlay")
+            .arg(&upper)
+            .arg(&work)
+            .arg(&merged)
+            .arg("true");
+
+        self.restrict_command_environment(&mut cmd, &[]);
+        cmd.stdout(Stdio::null()).stderr(Stdio::null());
+
+        match cmd.status().await {
+            Ok(status) => status.success(),
+            Err(_) => false,
+        }
+    }
+
     async fn build_bwrap_command(
         &self,
         rootfs_path: &Path,
@@ -482,32 +570,75 @@ impl Executor {
             }
 
             if Path::new("/nix").exists() {
-                let overlay_upper = self.request.repx_out_dir.join("nix_overlay_upper");
-                let overlay_work = self.request.repx_out_dir.join("nix_overlay_work");
-
-                tokio::fs::create_dir_all(&overlay_upper).await?;
-                tokio::fs::create_dir_all(&overlay_work).await?;
-
-                cmd.arg("--overlay-src")
-                    .arg("/nix/store")
-                    .arg("--overlay")
-                    .arg(&overlay_upper)
-                    .arg(&overlay_work)
-                    .arg("/nix/store");
-
                 let image_store = rootfs_path.join("nix/store");
+                let mut has_image_store_entries = false;
+
                 if image_store.exists() {
+                    let mut entries = tokio::fs::read_dir(&image_store).await?;
+                    if entries.next_entry().await?.is_some() {
+                        has_image_store_entries = true;
+                    }
+                }
+
+                let can_overlay = if has_image_store_entries {
+                    self.check_overlay_support(&self.request.repx_out_dir, Path::new("/nix/store"))
+                        .await
+                } else {
+                    false
+                };
+
+                if has_image_store_entries && can_overlay {
+                    let overlay_upper = self.request.repx_out_dir.join("nix_overlay_upper");
+                    let overlay_work = self.request.repx_out_dir.join("nix_overlay_work");
+
+                    tokio::fs::create_dir_all(&overlay_upper).await?;
+                    tokio::fs::create_dir_all(&overlay_work).await?;
+
+                    cmd.arg("--overlay-src")
+                        .arg("/nix/store")
+                        .arg("--overlay")
+                        .arg(&overlay_upper)
+                        .arg(&overlay_work)
+                        .arg("/nix/store");
+
                     let mut entries = tokio::fs::read_dir(&image_store).await?;
                     while let Some(entry) = entries.next_entry().await? {
                         let file_name = entry.file_name();
-                        let host_path = Path::new("/nix/store").join(&file_name);
-
-                        if !host_path.exists() {
-                            let image_path = entry.path();
-                            let target_path = PathBuf::from("/nix/store").join(file_name);
-                            cmd.arg("--ro-bind").arg(image_path).arg(target_path);
-                        }
+                        let image_path = entry.path();
+                        let target_path = PathBuf::from("/nix/store").join(file_name);
+                        cmd.arg("--ro-bind").arg(image_path).arg(target_path);
                     }
+                } else if has_image_store_entries {
+                    log_info!(
+                        "[WARN] Overlayfs not supported. Falling back to Symlink Union strategy."
+                    );
+
+                    let host_mount_point = self.request.repx_out_dir.join("store_host");
+                    let image_mount_point = self.request.repx_out_dir.join("store_image");
+
+                    tokio::fs::create_dir_all(&host_mount_point).await?;
+                    tokio::fs::create_dir_all(&image_mount_point).await?;
+
+                    let union_dir = self
+                        .prepare_symlink_union(
+                            Path::new("/nix/store"),
+                            &image_store,
+                            &host_mount_point,
+                            &image_mount_point,
+                        )
+                        .await?;
+
+                    cmd.arg("--ro-bind")
+                        .arg("/nix/store")
+                        .arg(&host_mount_point);
+
+                    cmd.arg("--ro-bind")
+                        .arg(&image_store)
+                        .arg(&image_mount_point);
+
+                    cmd.arg("--ro-bind").arg(&union_dir).arg("/nix/store");
+                } else {
+                    cmd.arg("--ro-bind").arg("/nix/store").arg("/nix/store");
                 }
             } else {
                 cmd.arg("--bind").arg(rootfs_path.join("nix")).arg("/nix");
@@ -756,5 +887,374 @@ impl Executor {
         cmd.args(args);
         self.restrict_command_environment(&mut cmd, &[runtime]);
         Ok(cmd)
+    }
+}
+
+pub fn allowed_system_binaries() -> &'static [&'static str] {
+    ALLOWED_SYSTEM_BINARIES
+}
+
+pub fn is_binary_allowed(binary_name: &str) -> bool {
+    ALLOWED_SYSTEM_BINARIES.contains(&binary_name)
+}
+
+pub fn extract_image_hash(image_tag: &str) -> &str {
+    image_tag.split(':').next_back().unwrap_or(image_tag)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use tempfile::tempdir;
+
+    fn create_test_request(base_path: PathBuf) -> ExecutionRequest {
+        ExecutionRequest {
+            job_id: JobId("test-job-123".to_string()),
+            runtime: Runtime::Native,
+            base_path: base_path.clone(),
+            node_local_path: None,
+            job_package_path: base_path.join("jobs/test-job"),
+            inputs_json_path: base_path.join("inputs.json"),
+            user_out_dir: base_path.join("outputs/out"),
+            repx_out_dir: base_path.join("outputs/repx"),
+            host_tools_bin_dir: None,
+            mount_host_paths: false,
+            mount_paths: vec![],
+        }
+    }
+
+    fn create_test_request_with_host_tools(
+        base_path: PathBuf,
+        host_tools: PathBuf,
+    ) -> ExecutionRequest {
+        ExecutionRequest {
+            job_id: JobId("test-job-456".to_string()),
+            runtime: Runtime::Native,
+            base_path: base_path.clone(),
+            node_local_path: None,
+            job_package_path: base_path.join("jobs/test-job"),
+            inputs_json_path: base_path.join("inputs.json"),
+            user_out_dir: base_path.join("outputs/out"),
+            repx_out_dir: base_path.join("outputs/repx"),
+            host_tools_bin_dir: Some(host_tools),
+            mount_host_paths: false,
+            mount_paths: vec![],
+        }
+    }
+
+    #[test]
+    fn test_is_binary_allowed_rejects_invalid() {
+        assert!(!is_binary_allowed("rm"));
+        assert!(!is_binary_allowed("curl"));
+        assert!(!is_binary_allowed("wget"));
+        assert!(!is_binary_allowed("sh"));
+        assert!(!is_binary_allowed("bash"));
+        assert!(!is_binary_allowed("/bin/sh"));
+    }
+
+    #[test]
+    fn test_is_binary_allowed_rejects_path_traversal() {
+        assert!(!is_binary_allowed("../docker"));
+        assert!(!is_binary_allowed("/usr/bin/docker"));
+        assert!(!is_binary_allowed("docker/../rm"));
+    }
+
+    #[test]
+    fn test_extract_image_hash_with_colon() {
+        assert_eq!(extract_image_hash("repx-image:abc123def"), "abc123def");
+    }
+
+    #[test]
+    fn test_extract_image_hash_multiple_colons() {
+        assert_eq!(extract_image_hash("registry:5000/image:v1.0"), "v1.0");
+    }
+
+    #[test]
+    fn test_extract_image_hash_no_colon() {
+        assert_eq!(extract_image_hash("simple-hash"), "simple-hash");
+    }
+
+    #[test]
+    fn test_extract_image_hash_empty_after_colon() {
+        assert_eq!(extract_image_hash("image:"), "");
+    }
+
+    #[test]
+    fn test_executor_with_different_runtimes() {
+        let temp = tempdir().unwrap();
+
+        let mut request = create_test_request(temp.path().to_path_buf());
+        request.runtime = Runtime::Docker {
+            image_tag: "test:latest".to_string(),
+        };
+        let executor = Executor::new(request);
+        assert!(matches!(executor.request.runtime, Runtime::Docker { .. }));
+
+        let mut request2 = create_test_request(temp.path().to_path_buf());
+        request2.runtime = Runtime::Podman {
+            image_tag: "test:v1".to_string(),
+        };
+        let executor2 = Executor::new(request2);
+        assert!(matches!(executor2.request.runtime, Runtime::Podman { .. }));
+    }
+
+    #[test]
+    fn test_find_image_file_in_images_dir() {
+        let temp = tempdir().unwrap();
+        let images_dir = temp.path().join("artifacts/images");
+        fs::create_dir_all(&images_dir).unwrap();
+
+        let image_file = images_dir.join("my-image.tar.gz");
+        fs::write(&image_file, "fake image content").unwrap();
+
+        let request = create_test_request(temp.path().to_path_buf());
+        let executor = Executor::new(request);
+
+        let result = executor.find_image_file("my-image");
+        assert!(result.is_some());
+        assert_eq!(result.unwrap(), image_file);
+    }
+
+    #[test]
+    fn test_find_image_file_in_image_dir() {
+        let temp = tempdir().unwrap();
+        let image_dir = temp.path().join("artifacts/image");
+        fs::create_dir_all(&image_dir).unwrap();
+
+        let image_file = image_dir.join("container.tar");
+        fs::write(&image_file, "fake image").unwrap();
+
+        let request = create_test_request(temp.path().to_path_buf());
+        let executor = Executor::new(request);
+
+        let result = executor.find_image_file("container");
+        assert!(result.is_some());
+        assert_eq!(result.unwrap(), image_file);
+    }
+
+    #[test]
+    fn test_find_image_file_exact_match() {
+        let temp = tempdir().unwrap();
+        let images_dir = temp.path().join("artifacts/images");
+        fs::create_dir_all(&images_dir).unwrap();
+
+        let image_file = images_dir.join("exact-name");
+        fs::write(&image_file, "content").unwrap();
+
+        let request = create_test_request(temp.path().to_path_buf());
+        let executor = Executor::new(request);
+
+        let result = executor.find_image_file("exact-name");
+        assert!(result.is_some());
+    }
+
+    #[test]
+    fn test_find_image_file_not_found() {
+        let temp = tempdir().unwrap();
+        let images_dir = temp.path().join("artifacts/images");
+        fs::create_dir_all(&images_dir).unwrap();
+
+        let request = create_test_request(temp.path().to_path_buf());
+        let executor = Executor::new(request);
+
+        let result = executor.find_image_file("nonexistent");
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_find_image_file_no_artifacts_dir() {
+        let temp = tempdir().unwrap();
+        let request = create_test_request(temp.path().to_path_buf());
+        let executor = Executor::new(request);
+
+        let result = executor.find_image_file("any-image");
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_get_host_tool_path_no_dir_configured() {
+        let temp = tempdir().unwrap();
+        let request = create_test_request(temp.path().to_path_buf());
+        let executor = Executor::new(request);
+
+        let result = executor.get_host_tool_path("some-tool");
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(matches!(err, ExecutorError::Core(_)));
+    }
+
+    #[test]
+    fn test_get_host_tool_path_tool_exists() {
+        let temp = tempdir().unwrap();
+        let host_tools = temp.path().join("host-tools/bin");
+        fs::create_dir_all(&host_tools).unwrap();
+
+        let tool_path = host_tools.join("my-tool");
+        fs::write(&tool_path, "#!/bin/sh\necho hello").unwrap();
+
+        let request =
+            create_test_request_with_host_tools(temp.path().to_path_buf(), host_tools.clone());
+        let executor = Executor::new(request);
+
+        let result = executor.get_host_tool_path("my-tool");
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), tool_path);
+    }
+
+    #[test]
+    fn test_get_host_tool_path_tool_not_found() {
+        let temp = tempdir().unwrap();
+        let host_tools = temp.path().join("host-tools/bin");
+        fs::create_dir_all(&host_tools).unwrap();
+
+        let request = create_test_request_with_host_tools(temp.path().to_path_buf(), host_tools);
+        let executor = Executor::new(request);
+
+        let result = executor.get_host_tool_path("nonexistent-tool");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_calculate_restricted_path_empty_with_no_host_tools() {
+        let temp = tempdir().unwrap();
+        let request = create_test_request(temp.path().to_path_buf());
+        let executor = Executor::new(request);
+
+        let path = executor.calculate_restricted_path(&[]);
+        assert_eq!(path, std::ffi::OsString::from(""));
+    }
+
+    #[test]
+    fn test_calculate_restricted_path_with_host_tools() {
+        let temp = tempdir().unwrap();
+        let host_tools = temp.path().join("host-tools/bin");
+        fs::create_dir_all(&host_tools).unwrap();
+
+        let request =
+            create_test_request_with_host_tools(temp.path().to_path_buf(), host_tools.clone());
+        let executor = Executor::new(request);
+
+        let path = executor.calculate_restricted_path(&[]);
+        assert!(path.to_string_lossy().contains("host-tools"));
+    }
+
+    #[test]
+    fn test_calculate_restricted_path_rejects_disallowed_binary() {
+        let temp = tempdir().unwrap();
+        let request = create_test_request(temp.path().to_path_buf());
+        let executor = Executor::new(request);
+
+        let path = executor.calculate_restricted_path(&["rm", "curl"]);
+        assert_eq!(path, std::ffi::OsString::from(""));
+    }
+
+    #[test]
+    fn test_execution_request_with_mount_paths() {
+        let temp = tempdir().unwrap();
+        let mut request = create_test_request(temp.path().to_path_buf());
+        request.mount_paths = vec!["/data".to_string(), "/scratch".to_string()];
+
+        assert_eq!(request.mount_paths.len(), 2);
+        assert!(request.mount_paths.contains(&"/data".to_string()));
+    }
+
+    #[test]
+    fn test_executor_error_io_display() {
+        let io_err = std::io::Error::new(std::io::ErrorKind::NotFound, "file not found");
+        let err = ExecutorError::Io(io_err);
+        let display = format!("{}", err);
+        assert!(display.contains("I/O error"));
+    }
+
+    #[test]
+    fn test_executor_error_command_failed_display() {
+        let io_err = std::io::Error::new(std::io::ErrorKind::PermissionDenied, "denied");
+        let err = ExecutorError::CommandFailed {
+            command: "docker run".to_string(),
+            source: io_err,
+        };
+        let display = format!("{}", err);
+        assert!(display.contains("docker run"));
+        assert!(display.contains("Failed to execute"));
+    }
+
+    #[test]
+    fn test_executor_error_script_failed_display() {
+        let err = ExecutorError::ScriptFailed {
+            script: "/path/to/script.sh".to_string(),
+            code: 127,
+            stderr: "command not found".to_string(),
+        };
+        let display = format!("{}", err);
+        assert!(display.contains("script.sh"));
+        assert!(display.contains("127"));
+        assert!(display.contains("command not found"));
+    }
+
+    #[test]
+    fn test_executor_error_image_tag_missing() {
+        let err = ExecutorError::ImageTagMissing;
+        let display = format!("{}", err);
+        assert!(display.contains("image tag"));
+    }
+
+    #[test]
+    fn test_executor_error_security_violation() {
+        let err = ExecutorError::SecurityViolation("rm".to_string());
+        let display = format!("{}", err);
+        assert!(display.contains("Security violation"));
+        assert!(display.contains("rm"));
+        assert!(display.contains("allowlist"));
+    }
+
+    #[test]
+    fn test_build_native_command_basic() {
+        let temp = tempdir().unwrap();
+        let request = create_test_request(temp.path().to_path_buf());
+        let executor = Executor::new(request);
+
+        let script_path = PathBuf::from("/path/to/script.sh");
+        let args = vec!["arg1".to_string(), "arg2".to_string()];
+        let cmd = executor.build_native_command(&script_path, &args);
+
+        let std_cmd = cmd.as_std();
+        assert_eq!(std_cmd.get_program(), "/path/to/script.sh");
+
+        let collected_args: Vec<_> = std_cmd.get_args().collect();
+        assert_eq!(collected_args.len(), 2);
+    }
+
+    #[test]
+    fn test_build_native_command_with_host_tools() {
+        let temp = tempdir().unwrap();
+        let host_tools = temp.path().join("host-tools/bin");
+        fs::create_dir_all(&host_tools).unwrap();
+
+        let request =
+            create_test_request_with_host_tools(temp.path().to_path_buf(), host_tools.clone());
+        let executor = Executor::new(request);
+
+        let script_path = PathBuf::from("/script.sh");
+        let cmd = executor.build_native_command(&script_path, &[]);
+
+        let envs: std::collections::HashMap<_, _> = cmd.as_std().get_envs().collect();
+        let path_env = envs.get(std::ffi::OsStr::new("PATH"));
+        assert!(path_env.is_some());
+        let path_val = path_env.unwrap().unwrap().to_string_lossy();
+        assert!(path_val.contains("host-tools"));
+    }
+
+    #[test]
+    fn test_build_native_command_empty_args() {
+        let temp = tempdir().unwrap();
+        let request = create_test_request(temp.path().to_path_buf());
+        let executor = Executor::new(request);
+
+        let script_path = PathBuf::from("/script.sh");
+        let cmd = executor.build_native_command(&script_path, &[]);
+
+        let std_cmd = cmd.as_std();
+        assert_eq!(std_cmd.get_args().count(), 0);
     }
 }

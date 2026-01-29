@@ -128,3 +128,287 @@ fn blend(color1: Color, color2: Color, amount: f64) -> Color {
 pub fn muted(color: Color, bg: Color) -> Color {
     blend(desaturate(color, 0.4), bg, 0.6)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_rgb_to_hsl_pure_red() {
+        let rgb = Rgb { r: 255, g: 0, b: 0 };
+        let hsl = rgb_to_hsl(rgb);
+        assert!((hsl.h - 0.0).abs() < 1.0);
+        assert!((hsl.s - 100.0).abs() < 1.0);
+        assert!((hsl.l - 50.0).abs() < 1.0);
+    }
+
+    #[test]
+    fn test_rgb_to_hsl_pure_green() {
+        let rgb = Rgb { r: 0, g: 255, b: 0 };
+        let hsl = rgb_to_hsl(rgb);
+        assert!((hsl.h - 120.0).abs() < 1.0);
+        assert!((hsl.s - 100.0).abs() < 1.0);
+        assert!((hsl.l - 50.0).abs() < 1.0);
+    }
+
+    #[test]
+    fn test_rgb_to_hsl_pure_blue() {
+        let rgb = Rgb { r: 0, g: 0, b: 255 };
+        let hsl = rgb_to_hsl(rgb);
+        assert!((hsl.h - 240.0).abs() < 1.0);
+        assert!((hsl.s - 100.0).abs() < 1.0);
+        assert!((hsl.l - 50.0).abs() < 1.0);
+    }
+
+    #[test]
+    fn test_rgb_to_hsl_white() {
+        let rgb = Rgb {
+            r: 255,
+            g: 255,
+            b: 255,
+        };
+        let hsl = rgb_to_hsl(rgb);
+        assert!((hsl.s - 0.0).abs() < 0.001);
+        assert!((hsl.l - 100.0).abs() < 1.0);
+    }
+
+    #[test]
+    fn test_rgb_to_hsl_black() {
+        let rgb = Rgb { r: 0, g: 0, b: 0 };
+        let hsl = rgb_to_hsl(rgb);
+        assert!((hsl.s - 0.0).abs() < 0.001);
+        assert!((hsl.l - 0.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_rgb_to_hsl_gray() {
+        let rgb = Rgb {
+            r: 128,
+            g: 128,
+            b: 128,
+        };
+        let hsl = rgb_to_hsl(rgb);
+        assert!((hsl.s - 0.0).abs() < 0.001);
+        assert!((hsl.l - 50.0).abs() < 2.0);
+    }
+
+    #[test]
+    fn test_hsl_to_rgb_pure_red() {
+        let hsl = Hsl {
+            h: 0.0,
+            s: 100.0,
+            l: 50.0,
+        };
+        let rgb = hsl_to_rgb(hsl);
+        assert_eq!(rgb.r, 255);
+        assert_eq!(rgb.g, 0);
+        assert_eq!(rgb.b, 0);
+    }
+
+    #[test]
+    fn test_hsl_to_rgb_pure_green() {
+        let hsl = Hsl {
+            h: 120.0,
+            s: 100.0,
+            l: 50.0,
+        };
+        let rgb = hsl_to_rgb(hsl);
+        assert_eq!(rgb.r, 0);
+        assert_eq!(rgb.g, 255);
+        assert_eq!(rgb.b, 0);
+    }
+
+    #[test]
+    fn test_hsl_to_rgb_pure_blue() {
+        let hsl = Hsl {
+            h: 240.0,
+            s: 100.0,
+            l: 50.0,
+        };
+        let rgb = hsl_to_rgb(hsl);
+        assert_eq!(rgb.r, 0);
+        assert_eq!(rgb.g, 0);
+        assert_eq!(rgb.b, 255);
+    }
+
+    #[test]
+    fn test_hsl_to_rgb_white() {
+        let hsl = Hsl {
+            h: 0.0,
+            s: 0.0,
+            l: 100.0,
+        };
+        let rgb = hsl_to_rgb(hsl);
+        assert_eq!(rgb.r, 255);
+        assert_eq!(rgb.g, 255);
+        assert_eq!(rgb.b, 255);
+    }
+
+    #[test]
+    fn test_hsl_to_rgb_black() {
+        let hsl = Hsl {
+            h: 0.0,
+            s: 0.0,
+            l: 0.0,
+        };
+        let rgb = hsl_to_rgb(hsl);
+        assert_eq!(rgb.r, 0);
+        assert_eq!(rgb.g, 0);
+        assert_eq!(rgb.b, 0);
+    }
+
+    #[test]
+    fn test_hsl_to_rgb_gray() {
+        let hsl = Hsl {
+            h: 0.0,
+            s: 0.0,
+            l: 50.0,
+        };
+        let rgb = hsl_to_rgb(hsl);
+        assert_eq!(rgb.r, rgb.g);
+        assert_eq!(rgb.g, rgb.b);
+        assert!((rgb.r as i32 - 128).abs() <= 1);
+    }
+
+    #[test]
+    fn test_rgb_hsl_roundtrip_arbitrary() {
+        let original = Rgb {
+            r: 100,
+            g: 150,
+            b: 200,
+        };
+        let hsl = rgb_to_hsl(Rgb {
+            r: original.r,
+            g: original.g,
+            b: original.b,
+        });
+        let result = hsl_to_rgb(hsl);
+        assert!((result.r as i32 - original.r as i32).abs() <= 1);
+        assert!((result.g as i32 - original.g as i32).abs() <= 1);
+        assert!((result.b as i32 - original.b as i32).abs() <= 1);
+    }
+
+    #[test]
+    fn test_desaturate_fully() {
+        let color = Color::Rgb(255, 0, 0);
+        let result = desaturate(color, 1.0);
+        if let Color::Rgb(r, g, b) = result {
+            assert_eq!(r, g);
+            assert_eq!(g, b);
+        } else {
+            panic!("Expected Rgb color");
+        }
+    }
+
+    #[test]
+    fn test_desaturate_zero() {
+        let color = Color::Rgb(255, 0, 0);
+        let result = desaturate(color, 0.0);
+        if let Color::Rgb(r, g, b) = result {
+            assert_eq!(r, 255);
+            assert_eq!(g, 0);
+            assert_eq!(b, 0);
+        } else {
+            panic!("Expected Rgb color");
+        }
+    }
+
+    #[test]
+    fn test_desaturate_partial() {
+        let color = Color::Rgb(255, 0, 0);
+        let result = desaturate(color, 0.5);
+        if let Color::Rgb(r, g, b) = result {
+            assert!(r > g && r > b);
+            assert!(g > 0);
+        } else {
+            panic!("Expected Rgb color");
+        }
+    }
+
+    #[test]
+    fn test_desaturate_non_rgb_passthrough() {
+        let color = Color::Blue;
+        let result = desaturate(color, 0.5);
+        assert_eq!(result, Color::Blue);
+    }
+
+    #[test]
+    fn test_blend_full_first() {
+        let color1 = Color::Rgb(255, 0, 0);
+        let color2 = Color::Rgb(0, 255, 0);
+        let result = blend(color1, color2, 1.0);
+        if let Color::Rgb(r, g, b) = result {
+            assert_eq!(r, 255);
+            assert_eq!(g, 0);
+            assert_eq!(b, 0);
+        } else {
+            panic!("Expected Rgb color");
+        }
+    }
+
+    #[test]
+    fn test_blend_full_second() {
+        let color1 = Color::Rgb(255, 0, 0);
+        let color2 = Color::Rgb(0, 255, 0);
+        let result = blend(color1, color2, 0.0);
+        if let Color::Rgb(r, g, b) = result {
+            assert_eq!(r, 0);
+            assert_eq!(g, 255);
+            assert_eq!(b, 0);
+        } else {
+            panic!("Expected Rgb color");
+        }
+    }
+
+    #[test]
+    fn test_blend_half() {
+        let color1 = Color::Rgb(200, 100, 0);
+        let color2 = Color::Rgb(100, 200, 100);
+        let result = blend(color1, color2, 0.5);
+        if let Color::Rgb(r, g, b) = result {
+            assert_eq!(r, 150);
+            assert_eq!(g, 150);
+            assert_eq!(b, 50);
+        } else {
+            panic!("Expected Rgb color");
+        }
+    }
+
+    #[test]
+    fn test_blend_non_rgb_passthrough() {
+        let color1 = Color::Red;
+        let color2 = Color::Rgb(0, 255, 0);
+        let result = blend(color1, color2, 0.5);
+        assert_eq!(result, Color::Red);
+    }
+
+    #[test]
+    fn test_muted_returns_rgb() {
+        let color = Color::Rgb(255, 0, 0);
+        let bg = Color::Rgb(30, 30, 30);
+        let result = muted(color, bg);
+        assert!(matches!(result, Color::Rgb(_, _, _)));
+    }
+
+    #[test]
+    fn test_muted_reduces_saturation() {
+        let color = Color::Rgb(255, 0, 0);
+        let bg = Color::Rgb(128, 128, 128);
+        let result = muted(color, bg);
+        if let Color::Rgb(r, g, _b) = result {
+            assert!(r > g);
+            assert!(g > 0);
+            assert!(r < 255);
+        } else {
+            panic!("Expected Rgb color");
+        }
+    }
+
+    #[test]
+    fn test_muted_non_rgb_passthrough() {
+        let color = Color::Cyan;
+        let bg = Color::Rgb(0, 0, 0);
+        let result = muted(color, bg);
+        assert_eq!(result, Color::Cyan);
+    }
+}

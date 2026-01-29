@@ -33,6 +33,7 @@ pkgs.python3Packages.buildPythonPackage {
 
   nativeCheckInputs = [
     pkgs.python3Packages.pytest
+    pkgs.python3Packages.pytest-mock
   ];
 
   doCheck = reference-lab != null;

@@ -2,9 +2,6 @@
 
 pkgs.writeShellScriptBin "clippy-fix-project" ''
   export PATH="${pkgs.clippy}/bin:${pkgs.rustfmt}/bin:${pkgs.findutils}/bin:$PATH"
-
-
-
   failed=0
   while read -r manifest; do
     crate_dir=$(dirname "$manifest")
