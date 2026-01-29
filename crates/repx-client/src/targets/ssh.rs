@@ -46,6 +46,98 @@ impl SshTarget {
         let tool_path = remote_bin.join(name);
         tool_path.to_string_lossy().to_string()
     }
+
+    fn deploy_rsync_binary(&self) -> Result<String> {
+        let rsync_local_path = self.local_tool("rsync");
+        let hash = super::compute_file_hash(&rsync_local_path)?;
+
+        let remote_versioned_dir = self.base_path().join("bin").join(&hash);
+        let remote_dest_path = remote_versioned_dir.join("rsync");
+        let remote_dest_path_str = remote_dest_path.to_string_lossy().to_string();
+
+        let check_cmd = format!(
+            "test -f {} && echo 'exists'",
+            shell_quote(&remote_dest_path_str)
+        );
+
+        if let Ok(output) = self.run_command("sh", &["-c", &check_cmd]) {
+            if output.trim() == "exists" {
+                return Ok(remote_dest_path_str);
+            }
+        }
+
+        let mkdir_cmd = format!(
+            "mkdir -p {}",
+            shell_quote(&remote_versioned_dir.to_string_lossy())
+        );
+        self.run_command("sh", &["-c", &mkdir_cmd])?;
+
+        let sftp_bin = self.local_tool("sftp");
+        if sftp_bin.exists() {
+            let mut batch_file = tempfile::Builder::new()
+                .prefix("repx-sftp-batch-")
+                .tempfile()
+                .map_err(AppError::from)?;
+
+            writeln!(
+                batch_file,
+                "put {} {}\nchmod 755 {}",
+                rsync_local_path.to_string_lossy(),
+                remote_dest_path_str,
+                remote_dest_path_str
+            )
+            .map_err(AppError::from)?;
+            batch_file.flush().map_err(AppError::from)?;
+
+            let mut sftp_cmd = Command::new(sftp_bin);
+            sftp_cmd.arg("-b").arg(batch_file.path()).arg(&self.address);
+
+            logging::log_and_print_command(&sftp_cmd);
+            match sftp_cmd.output() {
+                Ok(output) if output.status.success() => return Ok(remote_dest_path_str),
+                Ok(output) => {
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    log_info!(
+                        "[WARN] SFTP deployment failed (status {}): {}. Falling back to SCP.",
+                        output.status,
+                        stderr
+                    );
+                }
+                Err(e) => {
+                    log_info!(
+                        "[WARN] SFTP command execution failed: {}. Falling back to SCP.",
+                        e
+                    );
+                }
+            }
+        }
+
+        let mut scp_cmd = Command::new(self.local_tool("scp"));
+        scp_cmd.arg(&rsync_local_path).arg(format!(
+            "{}:{}",
+            self.address,
+            remote_dest_path.display()
+        ));
+        logging::log_and_print_command(&scp_cmd);
+        let scp_output = scp_cmd.output().map_err(AppError::from)?;
+
+        if !scp_output.status.success() {
+            let stderr = String::from_utf8_lossy(&scp_output.stderr);
+            return Err(ClientError::Core(AppError::ExecutionFailed {
+                message: format!("scp failed for rsync binary to {}", self.address),
+                log_path: None,
+                log_summary: format!(
+                    "scp exited with status {}. Stderr:\n{}",
+                    scp_output.status, stderr
+                ),
+            }));
+        }
+
+        let chmod_cmd = format!("chmod 755 {}", shell_quote(&remote_dest_path_str));
+        let _ = self.run_command("sh", &["-c", &chmod_cmd]);
+
+        Ok(remote_dest_path_str)
+    }
 }
 
 impl Target for SshTarget {
@@ -165,9 +257,12 @@ impl Target for SshTarget {
         }
         temp_file.flush().map_err(AppError::from)?;
 
+        let remote_rsync_path = self.deploy_rsync_binary()?;
+
         let mut rsync_cmd = Command::new(self.local_tool("rsync"));
         rsync_cmd
             .arg("-rLtpz")
+            .arg(format!("--rsync-path={}", remote_rsync_path))
             .arg("--files-from")
             .arg(temp_file.path())
             .arg("./")
@@ -371,10 +466,13 @@ impl Target for SshTarget {
         Ok(())
     }
     fn sync_directory(&self, local_path: &Path, remote_path: &Path) -> Result<()> {
+        let remote_rsync_path = self.deploy_rsync_binary()?;
+
         let mut rsync_cmd = Command::new(self.local_tool("rsync"));
         rsync_cmd
             .arg("-rLtpz")
             .arg("--mkpath")
+            .arg(format!("--rsync-path={}", remote_rsync_path))
             .arg(format!("{}/", local_path.display()))
             .arg(format!("{}:{}", self.address, remote_path.display()));
 

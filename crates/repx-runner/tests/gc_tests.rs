@@ -154,6 +154,7 @@ fn test_gc_root_rotation_keeps_last_5() {
         mount_host_paths: false,
         local: None,
         slurm: None,
+        mount_paths: vec![],
     };
     let config = Config {
         targets: BTreeMap::from([("local".to_string(), target_config)]),

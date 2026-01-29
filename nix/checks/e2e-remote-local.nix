@@ -54,7 +54,6 @@ pkgs.testers.runNixOSTest {
         environment.systemPackages = [
           repxRunner
           pkgs.bubblewrap
-          pkgs.rsync
           pkgs.bash
         ];
 
