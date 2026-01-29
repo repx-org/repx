@@ -75,7 +75,16 @@ local_concurrency = 2
     pub fn stage_lab(&self) {
         let dest = self.cache_dir.path().join("artifacts");
         fs::create_dir_all(&dest).unwrap();
-        let status = Command::new("rsync")
+
+        let host_tools_dir = self.get_host_tools_dir_name();
+        let bin_dir = self
+            .lab_path
+            .join("host-tools")
+            .join(host_tools_dir)
+            .join("bin");
+
+        let rsync_path = bin_dir.join("rsync");
+        let status = Command::new(rsync_path)
             .arg("-a")
             .arg("--delete")
             .arg(format!("{}/", self.lab_path.display()))
@@ -84,7 +93,8 @@ local_concurrency = 2
             .expect("rsync command failed");
         assert!(status.success(), "rsync of lab to cache failed");
 
-        let status_chmod = Command::new("chmod")
+        let chmod_path = bin_dir.join("chmod");
+        let status_chmod = Command::new(chmod_path)
             .arg("-R")
             .arg("u+w")
             .arg(&dest)

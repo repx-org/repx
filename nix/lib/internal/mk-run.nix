@@ -108,9 +108,18 @@ let
 
   loadedPipelines = pkgs.lib.map (
     p:
-    pkgs.callPackage p {
-      repx = repxForDiscovery;
-    }
+    let
+      pFn = import p;
+      pArgs = builtins.functionArgs pFn;
+    in
+    pkgs.callPackage pFn (
+      if pArgs ? "repx" || pArgs ? "..." then
+        {
+          repx = repxForDiscovery;
+        }
+      else
+        { }
+    )
   ) pipelines;
 in
 if invalidKeys != [ ] then
@@ -177,9 +186,17 @@ else
             interRunDepTypes
             ;
         };
+
+        pipelineFn = import pipelinePath;
+        pipelineArgs = builtins.functionArgs pipelineFn;
       in
-      pkgs.callPackage pipelinePath {
-        repx = repxForPipeline;
-      }
+      pkgs.callPackage pipelineFn (
+        if pipelineArgs ? "repx" || pipelineArgs ? "..." then
+          {
+            repx = repxForPipeline;
+          }
+        else
+          { }
+      )
     ) allCombinations;
   }

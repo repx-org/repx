@@ -30,7 +30,7 @@
     in
     {
       packages.${system} = {
-        lab = labOutputs.lab;
+        inherit (labOutputs) lab;
         default = labOutputs.lab;
       };
 

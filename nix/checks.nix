@@ -50,5 +50,10 @@ let
   }
   // (import ./checks/lib/check-deps.nix { inherit pkgs; });
 
+  unitChecks = {
+    repx-py-tests = import ./checks/unit/repx-py.nix { inherit pkgs referenceLab; };
+    repx-rs-tests = import ./checks/unit/repx-rs.nix { inherit pkgs referenceLab; };
+  };
+
 in
-lintChecks // runtimeChecks // libChecks
+lintChecks // runtimeChecks // libChecks // unitChecks

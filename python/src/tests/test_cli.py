@@ -3,7 +3,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-
 from repx_py.models import Experiment
 
 
@@ -25,7 +24,7 @@ def test_cli_trace_params(lab_path: Path):
     assert len(params_data) > 0
 
     expected_substring = "stage-C-consumer"
-    found = any(expected_substring in k for k in params_data.keys())
+    found = any(expected_substring in k for k in params_data)
 
     if not found:
         print(

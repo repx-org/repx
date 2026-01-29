@@ -50,10 +50,10 @@
     {
       packages.${system} = {
         default = labPure.lab;
-        lab = labPure.lab;
+        inherit (labPure) lab;
         "lab-impure" = labImpure.lab;
 
-        run-impure-lab = pkgsImpure.run-impure-lab;
+        inherit (pkgsImpure) run-impure-lab;
       };
 
       apps.${system}.default = {

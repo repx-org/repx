@@ -1,5 +1,4 @@
-{ pkgs, repx-lib }:
-{
+_: {
   name = "simulation-run";
   pipelines = [
     ./pipe-sim.nix

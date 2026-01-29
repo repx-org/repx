@@ -1,5 +1,4 @@
-{ pkgs }:
-{
+_: {
   pname = "simple-summer";
 
   inputs = {

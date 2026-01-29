@@ -7,7 +7,7 @@ in
     pkgs.runCommand "check-formatting"
       {
         nativeBuildInputs = [ formatter ];
-        src = ./../..;
+        src = ./../../..;
       }
       ''
         cp -r $src ./src

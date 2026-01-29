@@ -21,7 +21,7 @@ def find_writable_cache_dir() -> Path:
     except KeyError:
         current_dir = Path(os.getcwd())
 
-    for directory in [current_dir] + list(current_dir.parents):
+    for directory in [current_dir, *list(current_dir.parents)]:
         if os.access(directory, os.W_OK):
             cache_path = directory / ".repx-cache"
             logger.debug(f"Auto-detected writable job cache directory: {cache_path}")

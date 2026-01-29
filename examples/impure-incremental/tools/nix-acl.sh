@@ -24,7 +24,7 @@ set -u
 set -o pipefail
 
 usage() {
-  cat <<EOF
+  cat << EOF
 Usage: ${0} <command> <dir1> [dir2...]
 
 A generic tool to manage ACLs for impure Nix builds.
@@ -53,7 +53,7 @@ log() {
 check_dependencies() {
   local missing_deps=0
   for cmd in setfacl getfacl realpath find dirname; do
-    if ! command -v "$cmd" &>/dev/null; then
+    if ! command -v "$cmd" &> /dev/null; then
       log "$C_RED" "Error: Required command '$cmd' is not found in your PATH."
       missing_deps=1
     fi
@@ -75,13 +75,13 @@ _get_all_relevant_paths() {
     local current_path
     current_path=$(realpath "$dir")
 
-    if [[ "$current_path" != "$HOME"* ]]; then
+    if [[ $current_path != "$HOME"* ]]; then
       log "$C_RED" "Security Error: Path '${current_path}' is outside of your home directory (${HOME}). Aborting."
       exit 1
     fi
 
     all_paths+=("$current_path")
-    while [[ "$current_path" != "$HOME" && "$current_path" != "/" ]]; do
+    while [[ $current_path != "$HOME" && $current_path != "/" ]]; do
       current_path=$(dirname "$current_path")
       all_paths+=("$current_path")
     done
@@ -113,7 +113,7 @@ do_set_acls() {
       log "$C_GREEN" "  Granting TRAVERSE on:  ${path}"
       setfacl -m "g:${NIX_BUILD_GROUP}:--x" "$path"
     fi
-  done <<<"$all_paths"
+  done <<< "$all_paths"
 
   log "$C_GREEN" "ACLs successfully set."
 }
@@ -126,7 +126,7 @@ do_clean_acls() {
   while IFS= read -r path; do
     log "$C_RED" "  Cleaning ACLs from: ${path}"
     setfacl -b "$path"
-  done <<<"$relevant_paths"
+  done <<< "$relevant_paths"
 
   log "$C_RED" "Cleanup complete. Permissions have been restored to default."
 }
@@ -139,13 +139,13 @@ do_check_acls() {
   while IFS= read -r path; do
     echo -e "\n${C_YELLOW}--- ${path} ---${C_NC}"
     getfacl "$path" | grep --color=always -E "^(user::|group::|other::|mask::|group:${NIX_BUILD_GROUP}:|$)" || true
-  done <<<"$relevant_paths"
+  done <<< "$relevant_paths"
 }
 
 do_audit_acls() {
   log "$C_YELLOW" "Searching for all files/directories with ACLs in ${HOME}..."
   local find_results
-  find_results=$(find "${HOME}" -acl -print 2>/dev/null || true)
+  find_results=$(find "${HOME}" -acl -print 2> /dev/null || true)
 
   if [ -n "$find_results" ]; then
     echo "$find_results"
@@ -167,25 +167,25 @@ main() {
   shift
 
   case "$command" in
-  set | clean | check)
-    if [ $# -eq 0 ]; then
-      log "$C_RED" "Error: The '${command}' command requires at least one directory path."
+    set | clean | check)
+      if [ $# -eq 0 ]; then
+        log "$C_RED" "Error: The '${command}' command requires at least one directory path."
+        usage
+        exit 1
+      fi
+      "do_${command}_acls" "$@"
+      ;;
+    audit)
+      do_audit_acls
+      ;;
+    help | -h | --help)
+      usage
+      ;;
+    *)
+      log "$C_RED" "Error: Unknown command '${command}'"
       usage
       exit 1
-    fi
-    "do_${command}_acls" "$@"
-    ;;
-  audit)
-    do_audit_acls
-    ;;
-  help | -h | --help)
-    usage
-    ;;
-  *)
-    log "$C_RED" "Error: Unknown command '${command}'"
-    usage
-    exit 1
-    ;;
+      ;;
   esac
 }
 

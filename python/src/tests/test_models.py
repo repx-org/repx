@@ -1,5 +1,4 @@
 import pandas as pd
-
 from repx_py.models import (
     Experiment,
     JobCollection,
@@ -39,6 +38,8 @@ def test_job_collection_fluent_filter(experiment: Experiment):
     producer_jobs = jobs.filter(name__startswith="stage-A")
     assert len(producer_jobs) >= 1
     assert producer_jobs[0].name.startswith("stage-A-producer")
+
+
 def test_get_job_and_dependencies(experiment: Experiment):
     """Tests retrieving a single job and traversing dependencies."""
     consumer_job = experiment.jobs().filter(name__startswith="stage-C-consumer")[0]
@@ -64,6 +65,8 @@ def test_job_view_properties(experiment: Experiment):
     assert total_sum_job.executable_path.endswith("/bin/stage-E-total-sum")
     assert len(total_sum_job.input_mappings) > 0
     assert total_sum_job.outputs["data.total_sum"] == "$out/total_sum.txt"
+
+
 def test_job_collection_to_dataframe(experiment: Experiment):
     """Tests conversion of a JobCollection to a pandas DataFrame."""
     df = experiment.jobs().to_dataframe()

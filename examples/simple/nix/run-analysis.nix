@@ -1,5 +1,4 @@
-{ pkgs, repx-lib }:
-{
+_: {
   name = "analysis-run";
 
   pipelines = [

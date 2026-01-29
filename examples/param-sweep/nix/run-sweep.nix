@@ -1,5 +1,4 @@
-{ pkgs, repx-lib }:
-{
+_: {
   name = "sweep-run";
 
   pipelines = [ ./pipe-sweep.nix ];

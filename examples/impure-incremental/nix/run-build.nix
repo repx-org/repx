@@ -1,7 +1,4 @@
-{
-  pkgs,
-  repx-lib,
-}:
+_:
 
 {
   pipelines = [ ./pipeline-make.nix ];

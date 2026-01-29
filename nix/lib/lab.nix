@@ -97,10 +97,21 @@ let
         inherit utils;
       };
 
-      runArgs = pkgs.callPackage placeholder.runPath {
-        inherit pkgs;
-        repx-lib = repxLibScope;
-      };
+      runFn = import placeholder.runPath;
+      runFnArgs = builtins.functionArgs runFn;
+      runArgs = pkgs.callPackage runFn (
+        {
+          inherit pkgs;
+        }
+        // (
+          if runFnArgs ? "repx-lib" || runFnArgs ? "..." then
+            {
+              repx-lib = repxLibScope;
+            }
+          else
+            { }
+        )
+      );
 
       evaluatedRun = repx-lib.mkRun (
         {

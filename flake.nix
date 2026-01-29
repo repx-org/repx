@@ -19,7 +19,7 @@
     {
       lib = repx-lib;
 
-      overlays.default = final: prev: {
+      overlays.default = final: _prev: {
         repx-py = final.callPackage ./python/default.nix { };
 
         repx-workspace = final.pkgsStatic.callPackage ./default.nix { };
@@ -60,9 +60,6 @@
             gitHash = self.rev or self.dirtyRev or "unknown";
           }).lab;
 
-        repx-py-test = pkgs.repx-py.override {
-          inherit reference-lab;
-        };
       in
       {
         packages = {
@@ -86,19 +83,11 @@
           };
         };
 
-        checks =
-          (import ./nix/checks.nix {
-            inherit pkgs repx-lib;
-            repxRunner = pkgs.repx-runner;
-            referenceLab = reference-lab;
-          })
-          // {
-            repx-py-tests = repx-py-test;
-            repx-rs-tests = (pkgs.callPackage ./default.nix { }).overrideAttrs (old: {
-              pname = "repx-rs-tests";
-              doCheck = true;
-            });
-          };
+        checks = import ./nix/checks.nix {
+          inherit pkgs repx-lib;
+          repxRunner = pkgs.repx-runner;
+          referenceLab = reference-lab;
+        };
 
         formatter = import ./nix/formatters.nix { inherit pkgs; };
 

@@ -367,7 +367,7 @@ impl Executor {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
 
-        self.restrict_command_environment(&mut cmd, &["tar", "gzip"]);
+        self.restrict_command_environment(&mut cmd, &[]);
         let output = cmd.output().await?;
         if !output.status.success() {
             return Err(ExecutorError::Io(std::io::Error::other(format!(
@@ -435,7 +435,7 @@ impl Executor {
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped());
 
-            self.restrict_command_environment(&mut cmd_layer, &["tar", "gzip"]);
+            self.restrict_command_environment(&mut cmd_layer, &[]);
 
             let output = cmd_layer.output().await?;
             if !output.status.success() {
