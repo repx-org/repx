@@ -1,6 +1,6 @@
 { pkgs }:
 let
-  formatter = pkgs.callPackage ../formatters.nix { };
+  formatter = pkgs.callPackage ../../formatters.nix { };
 in
 {
   fmt =

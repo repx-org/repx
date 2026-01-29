@@ -33,7 +33,7 @@ let
           };
       };
     in
-    (import ../reference-lab/lab.nix {
+    (import ../../reference-lab/lab.nix {
       inherit pkgs;
       repx-lib = patchedRepxLib;
       gitHash = "test";
