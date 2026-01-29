@@ -41,7 +41,7 @@ let
         cp ${pkgs.pkgsStatic.gnutar}/bin/tar $out/bin/
         cp ${pkgs.pkgsStatic.gzip}/bin/.gzip-wrapped $out/bin/gzip
         cp ${pkgs.pkgsStatic.bubblewrap}/bin/bwrap $out/bin/
-        cp ${pkgs.pkgsStatic.openssh}/bin/ssh $out/bin/
+        cp ${pkgs.pkgsStatic.openssh}/bin/* $out/bin/
         cp ${rsyncStatic}/bin/rsync $out/bin/
       '';
 
