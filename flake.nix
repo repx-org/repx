@@ -1,9 +1,9 @@
 {
+  description = "RepX Monorepo: Reproducible HPC Experiment Framework";
+
   inputs = {
-    nixpkgs.follows = "repx-nix/nixpkgs";
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.11";
     flake-utils.url = "github:numtide/flake-utils";
-    repx-nix.url = "path:./nix";
-    repx-py.url = "path:./python";
   };
 
   outputs =
@@ -11,12 +11,19 @@
       self,
       nixpkgs,
       flake-utils,
-      repx-nix,
       ...
     }:
+    let
+      repx-lib = import ./nix/lib/main.nix;
+    in
     {
-      overlays.default = final: _prev: {
+      lib = repx-lib;
+
+      overlays.default = final: prev: {
+        repx-py = final.callPackage ./python/default.nix { };
+
         repx-workspace = final.pkgsStatic.callPackage ./default.nix { };
+
         repx-runner =
           final.runCommand "repx-runner"
             {
@@ -44,34 +51,70 @@
     // flake-utils.lib.eachDefaultSystem (
       system:
       let
-        overlays = [
-          self.overlays.default
-        ];
+        overlays = [ self.overlays.default ];
         pkgs = import nixpkgs { inherit system overlays; };
+
+        reference-lab =
+          (pkgs.callPackage ./nix/nix/reference-lab/lab.nix {
+            inherit pkgs repx-lib;
+            gitHash = self.rev or self.dirtyRev or "unknown";
+          }).lab;
+
+        repx-py-test = pkgs.repx-py.override {
+          inherit reference-lab;
+        };
       in
       {
         packages = {
           default = pkgs.repx-runner;
-          inherit (pkgs) repx-runner;
-          inherit (pkgs) repx-tui;
+          inherit (pkgs) repx-runner repx-tui repx-py;
+          inherit reference-lab;
         };
 
-        checks = import ./nix/checks.nix {
-          inherit pkgs;
-          repxRunner = pkgs.repx-runner;
-          referenceLab = repx-nix.packages.${system}.reference-lab;
+        apps = {
+          debug-runner = flake-utils.lib.mkApp {
+            drv = pkgs.repx-py;
+            name = "debug-runner";
+          };
+          trace-params = flake-utils.lib.mkApp {
+            drv = pkgs.repx-py;
+            name = "trace-params";
+          };
+          repx-viz = flake-utils.lib.mkApp {
+            drv = pkgs.repx-py;
+            name = "repx-viz";
+          };
         };
 
-        formatter = import ./nix/formatters.nix { inherit pkgs; };
+        checks =
+          (import ./nix/checks.nix {
+            inherit pkgs;
+            repxRunner = pkgs.repx-runner;
+            referenceLab = reference-lab;
+          })
+          // (import ./nix/nix/checks.nix { inherit pkgs repx-lib; })
+          // {
+            repx-py-tests = repx-py-test;
+          };
+
+        formatter = import ./nix/nix/formatters.nix { inherit pkgs; };
 
         devShells.default = pkgs.mkShell {
-          EXAMPLE_REPX_LAB = repx-nix.packages.${system}.reference-lab;
+          EXAMPLE_REPX_LAB = reference-lab;
+          REFERENCE_LAB_PATH = reference-lab;
           buildInputs = with pkgs; [
             openssl
             pkg-config
             rustc
             cargo
             clippy
+
+            repx-py
+            (python3.withPackages (ps: [
+              ps.pytest
+              ps.pandas
+              ps.matplotlib
+            ]))
           ];
         };
       }

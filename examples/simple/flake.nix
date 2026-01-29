@@ -3,16 +3,14 @@
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.11";
-    repx-nix.url = "path:../../nix";
-    repx-py.url = "path:../../python";
+    repx.url = "path:../../";
   };
 
   outputs =
     {
       self,
       nixpkgs,
-      repx-nix,
-      repx-py,
+      repx,
       ...
     }:
     let
@@ -20,10 +18,10 @@
       pkgs = import nixpkgs {
         inherit system;
         overlays = [
-          repx-py.overlays.default
+          repx.overlays.default
         ];
       };
-      repx-lib = repx-nix.lib;
+      repx-lib = repx.lib;
 
       labOutputs = (import ./nix/lab.nix) {
         inherit pkgs repx-lib;
