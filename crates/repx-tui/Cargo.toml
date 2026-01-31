@@ -3,6 +3,10 @@ name = "repx-tui"
 version = "0.1.0"
 edition = "2021"
 
+[lib]
+name = "repx_tui"
+path = "src/lib.rs"
+
 [[bin]]
 name = "repx-tui"
 path = "src/main.rs"

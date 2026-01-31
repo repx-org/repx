@@ -43,13 +43,13 @@ pub(crate) fn find_local_runner_binary() -> Result<PathBuf> {
         }
     }
 
-    let runner_exe_path = exe_dir.join("repx-runner");
+    let runner_exe_path = exe_dir.join("repx");
 
     if !runner_exe_path.exists() {
         return Err(crate::error::ClientError::Core(AppError::Io(std::io::Error::new(
             std::io::ErrorKind::NotFound,
             format!(
-                "repx-runner executable not found at expected path: {}. Please ensure it is built and in the same directory as the TUI.",
+                "repx executable not found at expected path: {}. Please ensure it is built and in the same directory as the TUI.",
                 runner_exe_path.display()
             ),
         ))));

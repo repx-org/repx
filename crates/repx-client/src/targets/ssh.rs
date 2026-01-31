@@ -502,7 +502,7 @@ impl Target for SshTarget {
         let hash = super::compute_file_hash(&runner_exe_path)?;
 
         let remote_versioned_dir = self.base_path().join("bin").join(&hash);
-        let remote_dest_path = remote_versioned_dir.join("repx-runner");
+        let remote_dest_path = remote_versioned_dir.join("repx");
 
         let verify_execution = || -> Result<()> {
             let verify_cmd = format!(
@@ -513,7 +513,7 @@ impl Target for SshTarget {
                 Ok(_) => Ok(()),
                 Err(e) => {
                     let msg = format!(
-                        "The deployed repx-runner binary at '{}' failed to execute.\n\
+                        "The deployed repx binary at '{}' failed to execute.\n\
                          It returned an error when running '--version'.\n\
                          \n\
                          Original Error: {}\n\
@@ -521,7 +521,7 @@ impl Target for SshTarget {
                          POSSIBLE CAUSE: The binary might be incompatible with the target system (e.g. wrong architecture or dynamic linking issues).\n\
                          \n\
                          SOLUTION: Ensure you are building a static binary (default in flake) compatible with the target architecture.\n\
-                         You can check the binary type with 'file repx-runner'.",
+                         You can check the binary type with 'file repx'.",
                         remote_dest_path.display(),
                         e
                     );

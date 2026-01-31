@@ -1,4 +1,4 @@
-{ pkgs, repxRunner }:
+{ pkgs, repx }:
 
 pkgs.testers.runNixOSTest {
   name = "check-foreign-distro-compat";
@@ -14,7 +14,7 @@ pkgs.testers.runNixOSTest {
 
     print("Simulating non-NixOS environment (no /nix/store except the binary itself)...")
 
-    binary_path = "${repxRunner}/bin/repx-runner"
+    binary_path = "${repx}/bin/repx"
 
     real_binary = machine.succeed(f"readlink -f {binary_path}").strip()
     print(f"Resolved binary path: {real_binary}")
@@ -22,10 +22,10 @@ pkgs.testers.runNixOSTest {
     cmd = (
         "bwrap "
         "--unshare-user --unshare-ipc --unshare-pid --unshare-uts --unshare-net "
-        f"--ro-bind {real_binary} /repx-runner "
+        f"--ro-bind {real_binary} /repx "
         "--dev /dev "
         "--tmpfs /tmp "
-        "/repx-runner --version"
+        "/repx --version"
     )
 
     output = machine.succeed(cmd)

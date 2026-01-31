@@ -1,6 +1,6 @@
 {
   pkgs,
-  repxRunner,
+  repx,
   referenceLab,
 }:
 
@@ -17,7 +17,7 @@ pkgs.testers.runNixOSTest {
           cores = 4;
         };
         environment.systemPackages = [
-          repxRunner
+          repx
           pkgs.openssh
           pkgs.rsync
         ];
@@ -38,7 +38,7 @@ pkgs.testers.runNixOSTest {
         networking.firewall.enable = false;
 
         environment.systemPackages = [
-          repxRunner
+          repx
           pkgs.bubblewrap
           pkgs.bash
           pkgs.coreutils
@@ -177,7 +177,7 @@ pkgs.testers.runNixOSTest {
         client.succeed(f"cat <<EOF > /root/.config/repx/resources.toml\n{resources}\nEOF")
 
         print(f"[{runtime}] Submitting jobs...")
-        client.succeed(f"repx-runner run {run_args} --lab ${referenceLab}")
+        client.succeed(f"repx run {run_args} --lab ${referenceLab}")
 
         print(f"[{runtime}] Waiting for jobs to finish in Slurm queue...")
 

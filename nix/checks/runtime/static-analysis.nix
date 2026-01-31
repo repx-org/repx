@@ -1,6 +1,6 @@
 {
   pkgs,
-  repxRunner,
+  repx,
 }:
 
 pkgs.runCommand "check-static-binary"
@@ -8,15 +8,15 @@ pkgs.runCommand "check-static-binary"
     nativeBuildInputs = [ pkgs.file ];
   }
   ''
-    echo "Checking if repx-runner is statically linked..."
-    BINARY="${repxRunner}/bin/repx-runner"
+    echo "Checking if repx is statically linked..."
+    BINARY="${repx}/bin/repx"
 
     if [ ! -f "$BINARY" ]; then
       echo "Error: Binary not found at $BINARY"
       exit 1
     fi
 
-    # Use -L to follow symlinks (since repxRunner is a wrapper/symlink farm)
+    # Use -L to follow symlinks (since repx is a wrapper/symlink farm)
     file_output=$(file -L "$BINARY")
     echo "$file_output"
 

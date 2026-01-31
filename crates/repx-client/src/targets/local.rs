@@ -249,7 +249,7 @@ impl Target for LocalTarget {
         let hash = super::compute_file_hash(&runner_exe_path)?;
 
         let versioned_bin_dir = self.base_path().join("bin").join(&hash);
-        let dest_path = versioned_bin_dir.join("repx-runner");
+        let dest_path = versioned_bin_dir.join("repx");
 
         if dest_path.exists() {
             return Ok(dest_path);

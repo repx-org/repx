@@ -1,6 +1,6 @@
 {
   pkgs,
-  repxRunner,
+  repx,
   referenceLab,
   repx-lib,
 }:
@@ -16,26 +16,24 @@ let
   };
 
   runtimeChecks = {
-    e2e-local = import ./checks/runtime/e2e-local.nix {
-      inherit pkgs repxRunner referenceLab;
-    };
+    e2e-local = import ./checks/runtime/e2e-local.nix { inherit pkgs repx referenceLab; };
     e2e-remote-local = import ./checks/runtime/e2e-remote-local.nix {
-      inherit pkgs repxRunner referenceLab;
+      inherit pkgs repx referenceLab;
     };
     e2e-remote-slurm = import ./checks/runtime/e2e-remote-slurm.nix {
-      inherit pkgs repxRunner referenceLab;
+      inherit pkgs repx referenceLab;
     };
-    static-analysis = import ./checks/runtime/static-analysis.nix { inherit pkgs repxRunner; };
-    foreign-distro-compat = import ./checks/runtime/simulate-non-nixos.nix { inherit pkgs repxRunner; };
-    e2e-impure = import ./checks/runtime/e2e-impure.nix { inherit pkgs repxRunner; };
-    e2e-mount-paths = import ./checks/runtime/e2e-mount-paths.nix { inherit pkgs repxRunner; };
-    e2e-impure-podman = import ./checks/runtime/e2e-impure-podman.nix { inherit pkgs repxRunner; };
+    static-analysis = import ./checks/runtime/static-analysis.nix { inherit pkgs repx; };
+    foreign-distro-compat = import ./checks/runtime/simulate-non-nixos.nix { inherit pkgs repx; };
+    e2e-impure = import ./checks/runtime/e2e-impure.nix { inherit pkgs repx; };
+    e2e-mount-paths = import ./checks/runtime/e2e-mount-paths.nix { inherit pkgs repx; };
+    e2e-impure-podman = import ./checks/runtime/e2e-impure-podman.nix { inherit pkgs repx; };
     e2e-mount-paths-podman = import ./checks/runtime/e2e-mount-paths-podman.nix {
-      inherit pkgs repxRunner;
+      inherit pkgs repx;
     };
-    e2e-impure-docker = import ./checks/runtime/e2e-impure-docker.nix { inherit pkgs repxRunner; };
+    e2e-impure-docker = import ./checks/runtime/e2e-impure-docker.nix { inherit pkgs repx; };
     e2e-mount-paths-docker = import ./checks/runtime/e2e-mount-paths-docker.nix {
-      inherit pkgs repxRunner;
+      inherit pkgs repx;
     };
   };
 

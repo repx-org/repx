@@ -34,6 +34,12 @@ pub struct JobsState {
     pub viewport_height: usize,
 }
 
+impl Default for JobsState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl JobsState {
     pub fn new() -> Self {
         Self {

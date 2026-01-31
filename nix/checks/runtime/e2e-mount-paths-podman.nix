@@ -1,6 +1,6 @@
 {
   pkgs,
-  repxRunner,
+  repx,
 }:
 
 let
@@ -29,7 +29,7 @@ pkgs.testers.runNixOSTest {
       };
 
       environment.systemPackages = [
-        repxRunner
+        repx
         pkgs.podman
         pkgs.jq
       ];
@@ -67,7 +67,7 @@ pkgs.testers.runNixOSTest {
         machine.succeed(f"echo '{{}}' > {base_path}/outputs/job-podman-paths/repx/inputs.json")
 
         cmd = (
-            "repx-runner internal-execute "
+            "repx internal-execute "
             "--job-id job-podman-paths "
             f"--executable-path {base_path}/job-podman-paths/bin/script.sh "
             f"--base-path {base_path} "

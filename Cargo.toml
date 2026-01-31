@@ -6,6 +6,7 @@ members = [
   "crates/repx-executor",
   "crates/repx-client",
   "crates/repx-tui",
+  "crates/repx-cli",
 ]
 
 [workspace.dependencies]

@@ -1,6 +1,6 @@
 {
   pkgs,
-  repxRunner,
+  repx,
   referenceLab,
 }:
 
@@ -18,7 +18,7 @@ pkgs.testers.runNixOSTest {
       };
 
       environment.systemPackages = [
-        repxRunner
+        repx
         pkgs.jq
       ];
 
@@ -49,7 +49,7 @@ pkgs.testers.runNixOSTest {
 
         machine.wait_for_unit("docker.service")
 
-        machine.succeed("repx-runner run simulation-run --lab ${referenceLab}")
+        machine.succeed("repx run simulation-run --lab ${referenceLab}")
 
         machine.succeed("grep -rE '400|415' /var/lib/repx-store/outputs/*/out/total_sum.txt")
 
@@ -60,7 +60,7 @@ pkgs.testers.runNixOSTest {
         print("--- Starting Podman E2E Test ---")
         configure_repx("podman")
 
-        machine.succeed("repx-runner run simulation-run --lab ${referenceLab}")
+        machine.succeed("repx run simulation-run --lab ${referenceLab}")
 
         machine.succeed("grep -rE '400|415' /var/lib/repx-store/outputs/*/out/total_sum.txt")
   '';

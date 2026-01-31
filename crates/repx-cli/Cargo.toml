@@ -1,0 +1,17 @@
+[package]
+name = "repx-cli"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "repx"
+path = "src/main.rs"
+
+[dependencies]
+repx-runner = { workspace = true }
+repx-tui = { workspace = true }
+repx-core = { workspace = true }
+clap = { workspace = true, features = ["derive"] }
+anyhow = "1.0"
+colored = "3.0.0"
+which = "6.0"

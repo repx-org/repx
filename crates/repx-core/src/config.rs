@@ -71,7 +71,7 @@ max_age_days = 7
   # # The SSH connection string.
   # address = "safari"
   # # The base path for the shared path on the target.
-  # base_path = "/mnt/galactica/demirlie/Desktop/repx-store"
+  # base_path = "/mnt/galactica/demirlie/.local/share/repx-store"
   # # Fast local storage on compute nodes (e.g., NVMe). Critical for 'bwrap' performance on NFS.
   # node_local_path = "/mnt/local/$USER/repx"
   # # Optional: Mount host paths (impure mode).

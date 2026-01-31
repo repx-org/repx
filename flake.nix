@@ -24,27 +24,14 @@
 
         repx-workspace = final.pkgsStatic.callPackage ./default.nix { };
 
-        repx-runner =
-          final.runCommand "repx-runner"
+        repx =
+          final.runCommand "repx"
             {
-              meta.mainProgram = "repx-runner";
+              meta.mainProgram = "repx";
             }
             ''
               mkdir -p $out/bin
-              ln -s ${final.repx-workspace}/bin/repx-runner $out/bin/repx-runner
-            '';
-        repx-tui =
-          final.runCommand "repx-tui"
-            {
-              buildInputs = [ final.makeWrapper ];
-              propagatedBuildInputs = [ final.repx-runner ];
-              meta.mainProgram = "repx-tui";
-            }
-            ''
-              mkdir -p $out/bin
-              ln -s ${final.repx-workspace}/bin/repx-tui $out/bin/repx-tui
-              wrapProgram $out/bin/repx-tui \
-                --prefix PATH : ${final.repx-runner}/bin
+              ln -s ${final.repx-workspace}/bin/repx $out/bin/repx
             '';
       };
     }
@@ -63,36 +50,27 @@
       in
       {
         packages = {
-          default = pkgs.repx-runner;
-          inherit (pkgs) repx-runner repx-tui repx-py;
+          default = pkgs.repx;
+          inherit (pkgs) repx repx-py;
           inherit reference-lab;
         };
 
         apps = {
-          debug-runner = flake-utils.lib.mkApp {
-            drv = pkgs.repx-py;
-            name = "debug-runner";
-          };
-          trace-params = flake-utils.lib.mkApp {
-            drv = pkgs.repx-py;
-            name = "trace-params";
-          };
-          repx-viz = flake-utils.lib.mkApp {
-            drv = pkgs.repx-py;
-            name = "repx-viz";
+          default = flake-utils.lib.mkApp {
+            drv = pkgs.repx;
+            name = "repx";
           };
           check-examples = flake-utils.lib.mkApp {
             drv = pkgs.callPackage ./nix/checks/check-examples.nix {
-              inherit (pkgs) repx-runner;
+              inherit (pkgs) repx;
             };
           };
         };
 
         checks = import ./nix/checks.nix {
           inherit pkgs repx-lib;
-          repxRunner = pkgs.repx-runner;
+          inherit (pkgs) repx;
           referenceLab = reference-lab;
-          inherit self;
         };
 
         formatter = import ./nix/formatters.nix { inherit pkgs; };

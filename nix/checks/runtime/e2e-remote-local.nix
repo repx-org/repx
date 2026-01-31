@@ -1,6 +1,6 @@
 {
   pkgs,
-  repxRunner,
+  repx,
   referenceLab,
 }:
 
@@ -17,7 +17,7 @@ pkgs.testers.runNixOSTest {
           cores = 2;
         };
         environment.systemPackages = [
-          repxRunner
+          repx
           pkgs.openssh
           pkgs.rsync
         ];
@@ -52,7 +52,7 @@ pkgs.testers.runNixOSTest {
         };
 
         environment.systemPackages = [
-          repxRunner
+          repx
           pkgs.bubblewrap
           pkgs.bash
         ];
@@ -105,7 +105,7 @@ pkgs.testers.runNixOSTest {
         client.succeed("mkdir -p /root/.config/repx")
         client.succeed(f"cat <<EOF > /root/.config/repx/config.toml\n{config}\nEOF")
 
-        client.succeed("repx-runner run simulation-run --lab ${referenceLab}")
+        client.succeed("repx run simulation-run --lab ${referenceLab}")
 
         server.succeed("grep -rE '400|415' /home/repxuser/repx-store/outputs/*/out/total_sum.txt")
 

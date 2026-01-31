@@ -1,6 +1,6 @@
 {
   pkgs,
-  repxRunner,
+  repx,
 }:
 
 let
@@ -26,7 +26,7 @@ pkgs.testers.runNixOSTest {
       };
 
       environment.systemPackages = [
-        repxRunner
+        repx
         pkgs.jq
       ];
     };
@@ -62,7 +62,7 @@ pkgs.testers.runNixOSTest {
         machine.succeed(f"echo '{{}}' > {base_path}/outputs/job-docker-paths/repx/inputs.json")
 
         cmd = (
-            "repx-runner internal-execute "
+            "repx internal-execute "
             "--job-id job-docker-paths "
             f"--executable-path {base_path}/job-docker-paths/bin/script.sh "
             f"--base-path {base_path} "

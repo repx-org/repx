@@ -1,6 +1,6 @@
 {
   pkgs,
-  repxRunner,
+  repx,
 }:
 
 pkgs.testers.runNixOSTest {
@@ -15,7 +15,7 @@ pkgs.testers.runNixOSTest {
       };
 
       environment.systemPackages = [
-        repxRunner
+        repx
         pkgs.bubblewrap
         pkgs.jq
       ];
@@ -62,7 +62,7 @@ pkgs.testers.runNixOSTest {
         machine.succeed(f"echo '{{}}' > {base_path}/outputs/job-nixos/repx/inputs.json")
 
         cmd = (
-            "repx-runner internal-execute "
+            "repx internal-execute "
             "--job-id job-nixos "
             f"--executable-path {base_path}/job-nixos/bin/script.sh "
             f"--base-path {base_path} "

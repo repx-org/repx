@@ -1,6 +1,6 @@
 {
   pkgs,
-  repx-runner,
+  repx,
 }:
 
 pkgs.writeShellApplication {
@@ -10,7 +10,7 @@ pkgs.writeShellApplication {
     pkgs.nix
     pkgs.jq
     pkgs.gawk
-    repx-runner
+    repx
   ];
 
   text = ''
@@ -53,13 +53,13 @@ pkgs.writeShellApplication {
       if lab_path=$(nix build .#lab --impure --print-out-paths --no-link); then
         echo "Lab built at: $lab_path"
 
-        echo "Running repx-runner checks..."
+        echo "Running repx checks..."
 
-        run_name=$(repx-runner list runs --lab "$lab_path" | tail -n +2 | head -n 1 | awk '{print $1}')
+        run_name=$(repx list runs --lab "$lab_path" | tail -n +2 | head -n 1 | awk '{print $1}')
 
         if [ -n "$run_name" ]; then
             echo "Checking jobs for run: $run_name"
-            if ! repx-runner list jobs "$run_name" --lab "$lab_path"; then
+            if ! repx list jobs "$run_name" --lab "$lab_path"; then
                 echo "FAIL: Failed to list jobs for run $run_name in $example"
                 failed=1
             else

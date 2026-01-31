@@ -42,7 +42,9 @@ pub struct Cli {
 
 #[derive(Subcommand)]
 pub enum Commands {
+    #[command(about = "Submit and run jobs")]
     Run(RunArgs),
+    #[command(about = "Garbage collect old runs/jobs")]
     Gc(GcArgs),
 
     #[command(hide = true)]
@@ -57,6 +59,7 @@ pub enum Commands {
     #[command(hide = true)]
     InternalGc(InternalGcArgs),
 
+    #[command(about = "List runs, jobs, or dependencies")]
     List(ListArgs),
 }
 
