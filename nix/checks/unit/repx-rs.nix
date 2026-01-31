@@ -49,6 +49,7 @@ pkgs.testers.runNixOSTest {
     machine.succeed("mkdir -p /build/.cargo")
     machine.succeed("cp ${cargoConfig} /build/.cargo/config.toml")
     machine.succeed("cd /build && git init && git config user.email 'test@test.com' && git config user.name 'Test' && git add . && git commit -m 'init'")
+    machine.succeed("cd /build && cargo build --release --bin repx --offline")
     machine.succeed("cd /build && cargo test --release --offline")
   '';
 }

@@ -8,6 +8,7 @@ use which::which;
 #[derive(Parser)]
 #[command(name = "repx")]
 #[command(about = "Unified CLI for RepX framework")]
+#[command(version)]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
