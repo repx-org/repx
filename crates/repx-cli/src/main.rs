@@ -131,15 +131,15 @@ fn main() {
             }
         }
         Commands::Viz(args) => {
-            run_python_tool("repx_py.visualize", |cmd| {
-                cmd.arg(cli.lab);
-                if let Some(out) = args.output {
-                    cmd.arg("-o").arg(out);
-                }
-                if let Some(fmt) = args.format {
-                    cmd.arg("--format").arg(fmt);
-                }
-            });
+            let viz_args = repx_viz::VizArgs {
+                lab: cli.lab,
+                output: args.output,
+                format: args.format,
+            };
+            if let Err(e) = repx_viz::run(viz_args) {
+                eprintln!("{}", format!("[ERROR] {}", e).red());
+                std::process::exit(1);
+            }
         }
         Commands::TraceParams(args) => {
             run_python_tool("repx_py.cli.trace_params", |cmd| {

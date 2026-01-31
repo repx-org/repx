@@ -7,6 +7,7 @@ members = [
   "crates/repx-client",
   "crates/repx-tui",
   "crates/repx-cli",
+  "crates/repx-viz",
 ]
 
 [workspace.dependencies]
@@ -15,6 +16,7 @@ repx-client = { path = "crates/repx-client" }
 repx-executor = { path = "crates/repx-executor" }
 repx-runner = { path = "crates/repx-runner" }
 repx-tui = { path = "crates/repx-tui" }
+repx-viz = { path = "crates/repx-viz" }
 
 fs-err = "3.2"
 async-trait = "0.1.89"

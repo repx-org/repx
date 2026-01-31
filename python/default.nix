@@ -20,16 +20,10 @@ pkgs.python3Packages.buildPythonPackage {
   ];
 
   propagatedBuildInputs = with pkgs.python3Packages; [
-    matplotlib
-    rarfile
-    reportlab
     pandas
-    graphviz
   ];
 
-  makeWrapperArgs = [
-    "--prefix PATH : ${pkgs.lib.makeBinPath [ pkgs.graphviz ]}"
-  ];
+  makeWrapperArgs = [ ];
 
   nativeCheckInputs = [
     pkgs.python3Packages.pytest
@@ -48,7 +42,6 @@ pkgs.python3Packages.buildPythonPackage {
 
   pythonImportsCheck = [
     "repx_py.models"
-    "repx_py.visualize"
   ];
 
   meta = {
