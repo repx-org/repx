@@ -58,3 +58,15 @@ jobs:
 
       - name: Run E2E Check
         run: nix build -L .#checks.x86_64-linux.${{ matrix.check }}
+
+  example-checks:
+    name: Example Checks
+    needs: fast-checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@v11
+      - uses: DeterminateSystems/magic-nix-cache-action@v7
+
+      - name: Run Example Checks
+        run: nix run -L .#check-examples

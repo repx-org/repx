@@ -81,12 +81,18 @@
             drv = pkgs.repx-py;
             name = "repx-viz";
           };
+          check-examples = flake-utils.lib.mkApp {
+            drv = pkgs.callPackage ./nix/checks/check-examples.nix {
+              inherit (pkgs) repx-runner;
+            };
+          };
         };
 
         checks = import ./nix/checks.nix {
           inherit pkgs repx-lib;
           repxRunner = pkgs.repx-runner;
           referenceLab = reference-lab;
+          inherit self;
         };
 
         formatter = import ./nix/formatters.nix { inherit pkgs; };

@@ -3,19 +3,19 @@
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.11";
-    repx-nix.url = "github:repx-org/repx-nix";
+    repx.url = "path:../../";
   };
 
   outputs =
     {
       self,
       nixpkgs,
-      repx-nix,
+      repx,
       ...
     }:
     let
       system = "x86_64-linux";
-      repx-lib = repx-nix.lib;
+      repx-lib = repx.lib;
 
       overlaySet = import ./nix/overlay.nix;
 
