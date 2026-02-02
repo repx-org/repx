@@ -23,7 +23,7 @@ let
           pkgs.pkgsStatic.gnugrep
           pkgs.pkgsStatic.bash
           pkgs.pkgsStatic.gnutar
-          pkgs.pkgsStatic.gzip
+          pkgs.pkgsStatic.pigz
           pkgs.pkgsStatic.bubblewrap
           rsyncStatic
           pkgs.pkgsStatic.openssh
@@ -39,7 +39,7 @@ let
         cp ${pkgs.pkgsStatic.gnugrep}/bin/grep $out/bin/
         cp ${pkgs.pkgsStatic.bash}/bin/bash $out/bin/
         cp ${pkgs.pkgsStatic.gnutar}/bin/tar $out/bin/
-        cp ${pkgs.pkgsStatic.gzip}/bin/.gzip-wrapped $out/bin/gzip
+        cp ${pkgs.pkgsStatic.pigz}/bin/pigz $out/bin/gzip
         cp ${pkgs.pkgsStatic.bubblewrap}/bin/bwrap $out/bin/
         cp ${pkgs.pkgsStatic.openssh}/bin/* $out/bin/
         cp ${rsyncStatic}/bin/rsync $out/bin/
