@@ -2,6 +2,25 @@
 name = "repx-cli"
 version = "0.1.0"
 edition = "2021"
+description = "Reproducible HPC Experiments Framework CLI"
+license = "MIT"
+repository = "https://github.com/repx-org/repx"
+
+[package.metadata.deb]
+name = "repx"
+maintainer = "RepX Maintainers <maintainers@repx.org>"
+copyright = "2024, RepX Org"
+depends = "$auto"
+section = "utils"
+priority = "optional"
+assets = [
+    ["target/release/repx", "usr/bin/", "755"],
+]
+
+[package.metadata.generate-rpm]
+assets = [
+    { source = "target/release/repx", dest = "/usr/bin/repx", mode = "755" },
+]
 
 [[bin]]
 name = "repx"

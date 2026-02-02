@@ -69,4 +69,4 @@ jobs:
       - uses: DeterminateSystems/magic-nix-cache-action@v7
 
       - name: Run Example Checks
-        run: nix run -L .#check-examples
+        run: nix run -L .#check-repx-examples

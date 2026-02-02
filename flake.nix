@@ -19,21 +19,7 @@
     {
       lib = repx-lib;
 
-      overlays.default = final: _prev: {
-        repx-py = final.callPackage ./python/default.nix { };
-
-        repx-workspace = final.pkgsStatic.callPackage ./default.nix { };
-
-        repx =
-          final.runCommand "repx"
-            {
-              meta.mainProgram = "repx";
-            }
-            ''
-              mkdir -p $out/bin
-              ln -s ${final.repx-workspace}/bin/repx $out/bin/repx
-            '';
-      };
+      overlays.default = import ./nix/overlay.nix;
     }
     // flake-utils.lib.eachDefaultSystem (
       system:
@@ -41,43 +27,43 @@
         overlays = [ self.overlays.default ];
         pkgs = import nixpkgs { inherit system overlays; };
 
-        reference-lab =
-          (pkgs.callPackage ./nix/reference-lab/lab.nix {
-            inherit pkgs repx-lib;
-            gitHash = self.rev or self.dirtyRev or "unknown";
-          }).lab;
+        labs = import ./nix/labs.nix {
+          inherit pkgs repx-lib;
+          gitHash = self.rev or self.dirtyRev or "unknown";
+        };
 
+        docsOutputs = import ./nix/docs {
+          inherit pkgs labs;
+          inherit (pkgs) repx;
+        };
       in
       {
         packages = {
           default = pkgs.repx;
           inherit (pkgs) repx repx-py;
-          inherit reference-lab;
+          inherit (labs) reference-lab;
+          inherit (docsOutputs) docs logo;
+
+          repx-static = pkgs.pkgsStatic.callPackage ./default.nix { };
         };
 
-        apps = {
-          default = flake-utils.lib.mkApp {
-            drv = pkgs.repx;
-            name = "repx";
-          };
-          check-examples = flake-utils.lib.mkApp {
-            drv = pkgs.callPackage ./nix/checks/check-examples.nix {
-              inherit (pkgs) repx;
-            };
-          };
+        apps = import ./nix/apps.nix {
+          inherit pkgs flake-utils;
+          inherit (pkgs) repx;
+          inherit (docsOutputs) docs;
         };
 
         checks = import ./nix/checks.nix {
           inherit pkgs repx-lib;
           inherit (pkgs) repx;
-          referenceLab = reference-lab;
+          referenceLab = labs.reference-lab;
         };
 
         formatter = import ./nix/formatters.nix { inherit pkgs; };
 
         devShells.default = pkgs.mkShell {
-          EXAMPLE_REPX_LAB = reference-lab;
-          REFERENCE_LAB_PATH = reference-lab;
+          EXAMPLE_REPX_LAB = labs.reference-lab;
+          REFERENCE_LAB_PATH = labs.reference-lab;
           buildInputs = with pkgs; [
             openssl
             pkg-config

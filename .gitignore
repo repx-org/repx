@@ -9,3 +9,6 @@
 **/.debug-cache
 **/result
 *fuse_hidden*
+
+**/node_modules
+**/.vitepress

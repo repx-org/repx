@@ -1,0 +1,119 @@
+name: Release (Debug)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-nix-static:
+    name: Build Static (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            arch: amd64
+          - runner: ubuntu-24.04-arm
+            arch: arm64
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@v11
+      - uses: DeterminateSystems/magic-nix-cache-action@v7
+
+      - name: Build Static Binary
+        run: |
+          nix build -L .#repx-static
+
+          mkdir -p dist
+          cp result/bin/repx dist/repx
+
+          cd dist
+          tar -czf ../repx-${{ matrix.arch }}-linux-static.tar.gz repx
+          cd ..
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: repx-${{ matrix.arch }}-linux-static
+          path: repx-${{ matrix.arch }}-linux-static.tar.gz
+
+  build-nix-macos:
+    name: Build macOS
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@v11
+      - uses: DeterminateSystems/magic-nix-cache-action@v7
+
+      - name: Build Binary
+        run: |
+          nix build -L .#repx
+
+          mkdir -p dist
+          cp result/bin/repx dist/repx
+
+          cd dist
+          tar -czf ../repx-amd64-darwin.tar.gz repx
+          cd ..
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: repx-amd64-darwin
+          path: repx-amd64-darwin.tar.gz
+
+  build-packages:
+    name: Build Packages (Deb/RPM)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Packaging Tools
+        run: cargo install cargo-deb cargo-generate-rpm
+
+      - name: Build Binary
+        run: cargo build --release -p repx-cli
+
+      - name: Build Deb
+        run: |
+          cargo deb -p repx-cli --no-build
+          cp target/debian/*.deb .
+
+      - name: Build RPM
+        run: |
+          cargo generate-rpm -p repx-cli
+          cp target/generate-rpm/*.rpm .
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: packages
+          path: |
+            *.deb
+            *.rpm
+
+  publish:
+    name: Publish Release
+    needs: [build-nix-static, build-nix-macos, build-packages]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: '*'
+          merge-multiple: true
+          path: dist
+
+      - name: Create Release (Draft)
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          draft: true
+          prerelease: true
+          tag_name: debug-${{ github.run_number }}
+          name: Debug Release ${{ github.run_number }}
+          generate_release_notes: true

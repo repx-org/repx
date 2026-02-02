@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 1000" width="500">
+  <defs>
+    <polygon id="nix-lambda" points="-237.5,-411.35 -137.5,-584.55 300,173.2 100,173.2 0,0 -100,173.2 -200,173.2 -250,86.6 -100,-173.2" />
+  </defs>
+  <use href="#nix-lambda" fill="#4177b1" transform="translate(400, 710)" />
+  <use href="#nix-lambda" fill="#7ebae4" transform="translate(600, 290) scale(-1, -1)" />
+</svg>

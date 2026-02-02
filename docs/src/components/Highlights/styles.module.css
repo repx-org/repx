@@ -1,0 +1,10 @@
+.cards {
+	display: grid;
+	grid-template-columns: repeat(auto-fill, minmax(400px, 1fr));
+	gap: 24px;
+}
+
+.space {
+	gap: 0.5rem;
+	display: inline-flex;
+}

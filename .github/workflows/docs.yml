@@ -1,0 +1,39 @@
+name: Deploy Documentation
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'docs/**'
+      - 'mkdocs.yml'
+      - '.github/workflows/docs.yml'
+      - 'python/**'
+      - 'flake.nix'
+      - 'flake.lock'
+  workflow_dispatch:
+
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@v11
+      - uses: DeterminateSystems/magic-nix-cache-action@v7
+
+      - name: Build documentation
+        run: |
+          nix build -L .#docs
+          mkdir -p site
+          cp -rL result/* site/
+
+      - name: Deploy to repx-org.github.io
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          deploy_key: ${{ secrets.DOCS_DEPLOY_KEY }}
+          external_repository: repx-org/repx-org.github.io
+          publish_branch: gh-pages
+          publish_dir: ./site
