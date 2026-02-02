@@ -19,7 +19,7 @@ assets = [
 
 [package.metadata.generate-rpm]
 assets = [
-    { source = "target/release/repx", dest = "/usr/bin/repx", mode = "755" },
+    { source = "../../target/release/repx", dest = "/usr/bin/repx", mode = "755" },
 ]
 
 [[bin]]

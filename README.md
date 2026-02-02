@@ -5,9 +5,11 @@
 
 RepX is a framework for reproducible High-Performance Computing (HPC) experiments. It leverages [Nix](https://nixos.org) to guarantee environment reproducibility across diverse execution targets, from local workstations to SLURM-based clusters.
 
+[**Explore the Docs »**](https://repx-org.github.io/)
+
 ## Documentation
 
-Comprehensive documentation is available in the [`docs/`](./docs/docs) directory.
+Comprehensive documentation is available at [repx-org.github.io](https://repx-org.github.io/) and in the [`docs/`](./docs/docs) directory.
 
 *   **Getting Started**: [Quickstart](./docs/docs/getting-started/quickstart.md) | [Installation](./docs/docs/getting-started/installation.md)
 *   **User Guide**: [Defining Experiments](./docs/docs/user-guide/defining-experiments.md)
