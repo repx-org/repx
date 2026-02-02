@@ -1,7 +1,15 @@
-name: Release (Debug)
+name: Release
 
 on:
+  push:
+    tags:
+      - "v*"
   workflow_dispatch:
+    inputs:
+      version:
+        description: "Version tag (e.g. v0.1.0)"
+        required: true
+        default: "v0.1.0"
 
 permissions:
   contents: write
@@ -91,17 +99,45 @@ jobs:
           cp target/generate-rpm/*.rpm ../../
           cd ../..
 
+      - name: Upload Deb
+        uses: actions/upload-artifact@v4
+        with:
+          name: repx-deb
+          path: "*.deb"
+
+      - name: Upload RPM
+        uses: actions/upload-artifact@v4
+        with:
+          name: repx-rpm
+          path: "*.rpm"
+
+  build-python:
+    name: Build Python Library
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install build tools
+        run: pip install build
+
+      - name: Build Package
+        working-directory: python/src
+        run: python -m build
+
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: packages
-          path: |
-            *.deb
-            *.rpm
+          name: python-packages
+          path: python/src/dist/*
 
   publish:
     name: Publish Release
-    needs: [build-nix-static, build-nix-macos, build-packages]
+    needs: [build-nix-static, build-nix-macos, build-packages, build-python]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
@@ -110,12 +146,33 @@ jobs:
           merge-multiple: true
           path: dist
 
-      - name: Create Release (Draft)
+      - name: Generate Checksums
+        run: |
+          mkdir -p checksums
+          cd dist
+          sha256sum * > ../checksums/SHA256SUMS.txt
+          cd ..
+
+      - name: Create Release
         uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
         with:
-          files: dist/*
-          draft: true
-          prerelease: true
-          tag_name: debug-${{ github.run_number }}
-          name: Debug Release ${{ github.run_number }}
+          files: |
+            dist/*
+            checksums/SHA256SUMS.txt
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+
+      - name: Create Release (Manual)
+        uses: softprops/action-gh-release@v2
+        if: github.event_name == 'workflow_dispatch'
+        with:
+          tag_name: ${{ inputs.version }}
+          name: Release ${{ inputs.version }}
+          files: |
+            dist/*
+            checksums/SHA256SUMS.txt
+          draft: false
+          prerelease: false
           generate_release_notes: true
