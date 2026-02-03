@@ -8,18 +8,14 @@ repx-core = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 walkdir = { workspace = true }
-log = { workspace = true }
 thiserror = { workspace = true }
 fs-err = { workspace = true }
 chrono = { workspace = true }
-regex = { workspace = true }
-once_cell = { workspace = true }
 xdg = { workspace = true }
 whoami = { workspace = true }
 wildmatch = "2.6"
 tempfile = { workspace = true }
 sha2 = { workspace = true }
-fs_extra = "1.3"
 toml = { workspace = true }
 num_cpus.workspace = true
 comfy-table = { workspace = true }

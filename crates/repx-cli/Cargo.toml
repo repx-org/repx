@@ -32,7 +32,6 @@ repx-tui = { workspace = true }
 repx-core = { workspace = true }
 repx-viz = { workspace = true }
 clap = { workspace = true, features = ["derive"] }
-anyhow = { workspace = true }
 colored = { workspace = true }
 which = "6.0"
 clap_complete = "4.5.65"

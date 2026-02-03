@@ -6,10 +6,7 @@ edition = { workspace = true }
 [dependencies]
 chrono = { workspace = true, features = ["serde"] }
 toml = { workspace = true }
-clap = { workspace = true }
-num_cpus = { workspace = true }
 once_cell = { workspace = true }
-regex = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tempfile = { workspace = true }

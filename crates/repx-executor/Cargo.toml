@@ -5,12 +5,9 @@ edition = { workspace = true }
 
 [dependencies]
 repx-core = { workspace = true }
-log = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
-shellexpand = { workspace = true }
 nix = { workspace = true, features = ["fs"] }
 tempfile = { workspace = true }
-walkdir = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

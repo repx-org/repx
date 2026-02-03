@@ -6,9 +6,6 @@ edition = { workspace = true }
 [dependencies]
 repx-core = { workspace = true }
 anyhow = { workspace = true }
-serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 regex = { workspace = true }
-colored = { workspace = true }
-log = { workspace = true }
 lazy_static = "1.4"
