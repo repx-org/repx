@@ -23,7 +23,7 @@ in
   docs = pkgs.buildNpmPackage {
     name = "repx-docs";
     src = ../../docs;
-    npmDepsHash = "sha256-j0DNJodnjUNlIJs6I9gjnzv1XFHM3vLIOTjsfpwuoLE=";
+    npmDepsHash = "sha256-QXh5kwQKVcXDJ4R1gXrau+6GI5YfssvkDQ8QusxGYLo=";
 
     preBuild = ''
       mkdir -p static/images

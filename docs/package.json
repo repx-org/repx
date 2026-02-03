@@ -27,6 +27,7 @@
 		"@docusaurus/module-type-aliases": "3.9.2",
 		"@docusaurus/tsconfig": "3.9.2",
 		"@docusaurus/types": "3.9.2",
+		"@easyops-cn/docusaurus-search-local": "^0.52.3",
 		"prettier": "^3.5.3",
 		"typescript": "~5.2.2"
 	},
