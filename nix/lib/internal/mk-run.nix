@@ -109,7 +109,7 @@ let
   loadedPipelines = pkgs.lib.map (
     p:
     let
-      pFn = import p;
+      pFn = if builtins.isFunction p then p else import p;
       pArgs = builtins.functionArgs pFn;
     in
     pkgs.callPackage pFn (
@@ -187,7 +187,7 @@ else
             ;
         };
 
-        pipelineFn = import pipelinePath;
+        pipelineFn = if builtins.isFunction pipelinePath then pipelinePath else import pipelinePath;
         pipelineArgs = builtins.functionArgs pipelineFn;
       in
       pkgs.callPackage pipelineFn (

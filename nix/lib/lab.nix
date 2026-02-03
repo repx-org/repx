@@ -97,7 +97,8 @@ let
         inherit utils;
       };
 
-      runFn = import placeholder.runPath;
+      runFn =
+        if builtins.isFunction placeholder.runPath then placeholder.runPath else import placeholder.runPath;
       runFnArgs = builtins.functionArgs runFn;
       runArgs = pkgs.callPackage runFn (
         {
