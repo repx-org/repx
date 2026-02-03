@@ -3,6 +3,8 @@
   gitHash,
 }:
 let
+  labVersion = "0.1.2";
+
   mkHostTools =
     let
       rsyncStatic =
@@ -138,7 +140,7 @@ let
 
       labCore = pkgs.stdenv.mkDerivation {
         name = "hpc-lab-core";
-        version = "1.0";
+        version = labVersion;
 
         nativeBuildInputs = [
           jobs
@@ -210,7 +212,7 @@ let
     {
       lab = pkgs.stdenv.mkDerivation {
         name = "hpc-experiment-lab";
-        version = "1.0";
+        version = labVersion;
         nativeBuildInputs = with artifacts; [
           labCore
         ];

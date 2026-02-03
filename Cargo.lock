@@ -1490,7 +1490,7 @@ checksum = "7a2d987857b319362043e95f5353c0535c1f58eec5336fdfcf626430af7def58"
 
 [[package]]
 name = "repx-cli"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
  "anyhow",
  "clap",
@@ -1504,7 +1504,7 @@ dependencies = [
 
 [[package]]
 name = "repx-client"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
  "chrono",
  "fs-err",
@@ -1528,7 +1528,7 @@ dependencies = [
 
 [[package]]
 name = "repx-core"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
  "chrono",
  "clap",
@@ -1547,7 +1547,7 @@ dependencies = [
 
 [[package]]
 name = "repx-executor"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
  "log",
  "nix",
@@ -1563,7 +1563,7 @@ dependencies = [
 
 [[package]]
 name = "repx-runner"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
  "assert_cmd",
  "clap",
@@ -1588,7 +1588,7 @@ dependencies = [
 
 [[package]]
 name = "repx-tui"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
  "arboard",
  "chrono",
@@ -1611,7 +1611,7 @@ dependencies = [
 
 [[package]]
 name = "repx-viz"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
  "anyhow",
  "colored",

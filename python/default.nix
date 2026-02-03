@@ -5,7 +5,7 @@
 
 pkgs.python3Packages.buildPythonPackage {
   pname = "repx-py";
-  version = "0.1.0";
+  inherit ((pkgs.lib.importTOML ./src/pyproject.toml).project) version;
 
   src = ./src;
 

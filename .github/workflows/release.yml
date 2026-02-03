@@ -41,6 +41,25 @@ jobs:
           tar -czf ../repx-${{ matrix.arch }}-linux-static.tar.gz repx
           cd ..
 
+      - name: Verify Version
+        run: |
+          VERSION="${{ inputs.version }}"
+          if [[ -z "$VERSION" ]]; then
+            VERSION="${GITHUB_REF#refs/tags/}"
+          fi
+          VERSION="${VERSION#v}"
+          echo "Expected version: $VERSION"
+
+          ./result/bin/repx --version | grep -F "$VERSION"
+
+          NIX_VERSION=$(nix eval --raw .#repx.version)
+          if [[ "$NIX_VERSION" != "$VERSION" ]]; then
+            echo "Nix version mismatch: $NIX_VERSION != $VERSION"
+            exit 1
+          fi
+
+          grep -F "labVersion = \"$VERSION\";" nix/lib/lab-packagers.nix
+
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
@@ -66,6 +85,17 @@ jobs:
           tar -czf ../repx-amd64-darwin.tar.gz repx
           cd ..
 
+      - name: Verify Version
+        run: |
+          VERSION="${{ inputs.version }}"
+          if [[ -z "$VERSION" ]]; then
+            VERSION="${GITHUB_REF#refs/tags/}"
+          fi
+          VERSION="${VERSION#v}"
+          echo "Expected version: $VERSION"
+
+          ./result/bin/repx --version | grep -F "$VERSION"
+
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
@@ -86,6 +116,17 @@ jobs:
 
       - name: Build Binary
         run: cargo build --release -p repx-cli
+
+      - name: Verify Version
+        run: |
+          VERSION="${{ inputs.version }}"
+          if [[ -z "$VERSION" ]]; then
+            VERSION="${GITHUB_REF#refs/tags/}"
+          fi
+          VERSION="${VERSION#v}"
+          echo "Expected version: $VERSION"
+
+          ./target/release/repx --version | grep -F "$VERSION"
 
       - name: Build Deb
         run: |
@@ -128,6 +169,27 @@ jobs:
       - name: Build Package
         working-directory: python/src
         run: python -m build
+
+      - name: Verify Version
+        run: |
+          VERSION="${{ inputs.version }}"
+          if [[ -z "$VERSION" ]]; then
+            VERSION="${GITHUB_REF#refs/tags/}"
+          fi
+          VERSION="${VERSION#v}"
+          echo "Expected version: $VERSION"
+
+          python -m venv venv-verify
+          source venv-verify/bin/activate
+          pip install python/src/dist/*.whl
+
+          INSTALLED_VERSION=$(python -c "import repx_py; print(repx_py.__version__)")
+          echo "Installed: $INSTALLED_VERSION"
+
+          if [[ "$INSTALLED_VERSION" != "$VERSION" ]]; then
+            echo "Python mismatch: $INSTALLED_VERSION != $VERSION"
+            exit 1
+          fi
 
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4

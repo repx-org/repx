@@ -10,6 +10,12 @@ members = [
   "crates/repx-viz",
 ]
 
+[workspace.package]
+version = "0.1.2"
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/repx-org/repx"
+
 [workspace.dependencies]
 repx-core = { path = "crates/repx-core" }
 repx-client = { path = "crates/repx-client" }
