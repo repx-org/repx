@@ -70,6 +70,7 @@
             rustc
             cargo
             clippy
+            cargo-machete
 
             repx-py
             (python3.withPackages (ps: [

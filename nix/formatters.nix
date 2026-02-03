@@ -3,6 +3,7 @@
 let
   treefmt = import ./formatters/treefmt.nix { inherit pkgs; };
   clippyFix = import ./formatters/clippy.nix { inherit pkgs; };
+  macheteFix = import ./formatters/machete.nix { inherit pkgs; };
 in
 pkgs.writeShellScriptBin "custom-formatter" ''
   failed=0
@@ -12,8 +13,9 @@ pkgs.writeShellScriptBin "custom-formatter" ''
   echo "[Formatter] Checking for Rust fixes..."
   if [ -z "$NIX_BUILD_TOP" ]; then
     ${clippyFix}/bin/clippy-fix-project || failed=1
+    ${macheteFix}/bin/machete-fix-project || failed=1
   else
-    echo "[Formatter] Skipping clippy (sandbox detected)."
+    echo "[Formatter] Skipping clippy and machete (sandbox detected)."
   fi
 
   if [ $failed -ne 0 ]; then

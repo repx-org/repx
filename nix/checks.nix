@@ -13,6 +13,7 @@ let
     shebang = (import ./checks/lint/shebangs.nix { inherit pkgs; }).check;
     shellcheck = (import ./checks/lint/shellcheck.nix { inherit pkgs; }).lint;
     clippy = (import ./checks/lint/clippy.nix { inherit pkgs; }).lint;
+    machete = (import ./checks/lint/machete.nix { inherit pkgs; }).lint;
   };
 
   runtimeChecks = {

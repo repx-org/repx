@@ -22,7 +22,8 @@ jobs:
             .#checks.x86_64-linux.statix \
             .#checks.x86_64-linux.formatting \
             .#checks.x86_64-linux.shebang \
-            .#checks.x86_64-linux.shellcheck
+            .#checks.x86_64-linux.shellcheck \
+            .#checks.x86_64-linux.machete
 
   checks:
     name: Check ${{ matrix.check }}

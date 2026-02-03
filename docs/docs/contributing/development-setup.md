@@ -13,7 +13,7 @@ nix develop
 ```
 
 This shell provides:
-*   Rust toolchain (cargo, rustc, clippy)
+*   Rust toolchain (cargo, rustc, clippy, cargo-machete)
 *   Python environment (pytest, pandas)
 *   Node.js (for documentation)
 *   System dependencies (openssl, pkg-config)
