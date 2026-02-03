@@ -146,15 +146,34 @@ impl<'a> VizGenerator<'a> {
         let mut inter_edges: HashSet<(String, String, String)> = HashSet::new();
 
         for (jid, job) in &self.lab.jobs {
+            let run_name = job_to_run
+                .get(jid)
+                .cloned()
+                .unwrap_or_else(|| "detached".to_string());
+            let clean_run = clean_id(&run_name);
+
             let tgt_name = job.name.clone().unwrap_or_else(|| jid.0.clone());
+            let clean_tgt = clean_id(&tgt_name);
+            let unique_tgt = format!("{}_{}", clean_run, clean_tgt);
 
             let inputs = Self::get_job_inputs(job);
 
             for mapping in inputs {
                 if let Some(sid) = &mapping.job_id {
+                    let src_run = job_to_run
+                        .get(sid)
+                        .cloned()
+                        .unwrap_or_else(|| "detached".to_string());
+
                     if let Some(src_job) = self.lab.jobs.get(sid) {
                         let src_name = src_job.name.clone().unwrap_or_else(|| sid.0.clone());
-                        *intra_edges.entry((src_name, tgt_name.clone())).or_default() += 1;
+                        let clean_src_run = clean_id(&src_run);
+                        let clean_src = clean_id(&src_name);
+                        let unique_src = format!("{}_{}", clean_src_run, clean_src);
+
+                        *intra_edges
+                            .entry((unique_src, unique_tgt.clone()))
+                            .or_default() += 1;
                     }
                 }
 
@@ -163,16 +182,14 @@ impl<'a> VizGenerator<'a> {
                         .dependency_type
                         .clone()
                         .unwrap_or_else(|| "hard".to_string());
-                    inter_edges.insert((srun.0.clone(), tgt_name.clone(), dtype));
+                    inter_edges.insert((srun.0.clone(), unique_tgt.clone(), dtype));
                 }
             }
         }
 
         for (run_name, groups) in grouped_jobs {
-            dot.push_str(&format!(
-                "    subgraph cluster_{} {{\n",
-                clean_id(&run_name)
-            ));
+            let clean_run = clean_id(&run_name);
+            dot.push_str(&format!("    subgraph cluster_{} {{\n", clean_run));
             dot.push_str(&format!("        label=\"Run: {}\";\n", run_name));
             dot.push_str("        style=\"dashed,rounded\";\n");
             dot.push_str(&format!("        color=\"{}\";\n", COLOR_CLUSTER_BORDER));
@@ -184,8 +201,9 @@ impl<'a> VizGenerator<'a> {
                 let job_label = format!("{}\\n(x{})", group_name, count);
                 let fill_color = get_fill_color(&group_name);
                 let clean_group = clean_id(&group_name);
+                let unique_node_id = format!("{}_{}", clean_run, clean_group);
 
-                dot.push_str(&format!("        {} [\n", clean_group));
+                dot.push_str(&format!("        {} [\n", unique_node_id));
                 dot.push_str(&format!("            label=\"{}\",\n", job_label));
                 dot.push_str("            shape=\"box\",\n");
                 dot.push_str("            style=\"filled,rounded\",\n");
@@ -197,7 +215,6 @@ impl<'a> VizGenerator<'a> {
                 let varying_params = self.get_varying_params(&job_ids);
                 for (p_key, p_vals) in varying_params {
                     let clean_key = clean_id(&p_key);
-                    let clean_run = clean_id(&run_name);
 
                     let param_node_id = format!("p_{}_{}_{}", clean_run, clean_group, clean_key);
 
@@ -229,7 +246,10 @@ impl<'a> VizGenerator<'a> {
                     dot.push_str("            penwidth=\"0.8\"\n");
                     dot.push_str("        ];\n");
 
-                    dot.push_str(&format!("        {} -> {} [\n", param_node_id, clean_group));
+                    dot.push_str(&format!(
+                        "        {} -> {} [\n",
+                        param_node_id, unique_node_id
+                    ));
                     dot.push_str("            style=\"dotted\",\n");
                     dot.push_str(&format!("            color=\"{}\",\n", PARAM_BORDER));
                     dot.push_str("            arrowhead=\"dot\",\n");
@@ -245,24 +265,22 @@ impl<'a> VizGenerator<'a> {
             let width = if cnt > 1 { "2.0" } else { "1.2" };
             dot.push_str(&format!(
                 "    {} -> {} [penwidth=\"{}\"];\n",
-                clean_id(&src),
-                clean_id(&dst),
-                width
+                src, dst, width
             ));
         }
 
         let mut sorted_inter: Vec<_> = inter_edges.into_iter().collect();
         sorted_inter.sort();
 
-        for (srun, tgt, dtype) in sorted_inter {
-            if let Some(anchor) = run_anchors.get(&srun) {
+        for (srun, unique_tgt, dtype) in sorted_inter {
+            if let Some(anchor_job) = run_anchors.get(&srun) {
+                let clean_srun = clean_id(&srun);
+                let clean_anchor = clean_id(anchor_job);
+                let unique_anchor = format!("{}_{}", clean_srun, clean_anchor);
+
                 let style = if dtype == "soft" { "dashed" } else { "solid" };
-                dot.push_str(&format!(
-                    "    {} -> {} [\n",
-                    clean_id(anchor),
-                    clean_id(&tgt)
-                ));
-                dot.push_str(&format!("        ltail=\"cluster_{}\",\n", clean_id(&srun)));
+                dot.push_str(&format!("    {} -> {} [\n", unique_anchor, unique_tgt));
+                dot.push_str(&format!("        ltail=\"cluster_{}\",\n", clean_srun));
                 dot.push_str(&format!("        style=\"{}\",\n", style));
                 dot.push_str("        color=\"#64748B\"\n");
                 dot.push_str("    ];\n");
@@ -471,7 +489,6 @@ mod tests {
             *PALETTE.get("default").unwrap()
         );
 
-        // Case insensitive
         assert_eq!(
             get_fill_color("STAGE-PRODUCER"),
             *PALETTE.get("producer").unwrap()
@@ -481,7 +498,6 @@ mod tests {
             *PALETTE.get("consumer").unwrap()
         );
 
-        // Empty
         assert_eq!(get_fill_color(""), *PALETTE.get("default").unwrap());
     }
 
@@ -497,7 +513,6 @@ mod tests {
 
     #[test]
     fn test_smart_truncate() {
-        // String handling
         let short = Value::String("short".to_string());
         assert_eq!(smart_truncate(&short, 30), "short");
 
@@ -506,11 +521,9 @@ mod tests {
         assert!(result.len() <= 20);
         assert!(result.contains(".."));
 
-        // Path handling
         let path = Value::String("/very/long/path/to/filename.txt".to_string());
         assert_eq!(smart_truncate(&path, 30), "filename.txt");
 
-        // Array/Object handling strings
         let arr = Value::String("[1, 2, 3]".to_string());
         let res = smart_truncate(&arr, 30);
         assert!(!res.contains('['));
@@ -520,7 +533,6 @@ mod tests {
         let res = smart_truncate(&quoted, 30);
         assert!(!res.contains('\''));
 
-        // Non-string values
         let num = serde_json::json!(12345);
         assert_eq!(smart_truncate(&num, 30), "12345");
 
