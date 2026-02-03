@@ -4,6 +4,7 @@ use crate::{
     targets::{local::LocalTarget, ssh::SshTarget, Target},
 };
 use fs_err;
+use comfy_table::{Table, presets, modifiers::UTF8_ROUND_CORNERS, Color, Attribute, Cell};
 use repx_core::{
     config::{Config, Resources},
     engine,
@@ -260,18 +261,22 @@ impl Client {
         let raw_statuses = self.get_statuses_for_active_target(target_name, Some(scheduler))?;
         let job_statuses = engine::determine_job_statuses(&self.lab, &raw_statuses);
         let jobs_to_run: HashMap<JobId, &Job> = full_dependency_set
-            .into_iter()
+            .iter()
             .filter(|job_id| {
                 !matches!(
                     job_statuses.get(job_id),
                     Some(engine::JobStatus::Succeeded { .. })
                 )
             })
-            .map(|job_id| (job_id.clone(), self.lab.jobs.get(&job_id).unwrap()))
+            .map(|job_id| (job_id.clone(), self.lab.jobs.get(job_id).unwrap()))
             .collect();
 
         if jobs_to_run.is_empty() {
-            return Ok("All required jobs for this submission are already complete.".to_string());
+            let details = self.format_completed_jobs_msg(full_dependency_set.iter().cloned(), target.clone());
+            return Ok(format!(
+                "All required jobs for this submission are already complete.\n{}",
+                details
+            ));
         }
         let jobs_to_run_ids: std::collections::HashSet<JobId> =
             jobs_to_run.keys().cloned().collect();
@@ -335,7 +340,7 @@ impl Client {
             }
         }
 
-        match scheduler {
+        let result = match scheduler {
             "slurm" => slurm::submit_slurm_batch_run(
                 self,
                 jobs_to_submit,
@@ -358,6 +363,44 @@ impl Client {
                 "Unsupported scheduler: '{}'. Must be 'slurm' or 'local'.",
                 scheduler
             )))),
+        };
+
+        match result {
+            Ok(res) => Ok(format!(
+                "{}\n{}",
+                res,
+                self.format_completed_jobs_msg(jobs_to_run_ids.into_iter(), target.clone())
+            )),
+            Err(ClientError::Core(AppError::ExecutionFailed {
+                message,
+                log_path,
+                mut log_summary,
+            })) => {
+                if let Some(path) = log_path {
+                    let job_id = path
+                        .parent()
+                        .and_then(|p| p.file_name())
+                        .and_then(|s| s.to_str())
+                        .unwrap_or("Unknown");
+
+                    let mut table = Table::new();
+                    table
+                        .load_preset(presets::UTF8_FULL)
+                        .apply_modifier(UTF8_ROUND_CORNERS)
+                        .set_header(vec!["Job ID", "Output Directory"]);
+
+                    table.add_row(vec![job_id, path.to_string_lossy().as_ref()]);
+
+                    use std::fmt::Write;
+                    write!(log_summary, "\n{}", table).unwrap();
+                }
+                Err(ClientError::Core(AppError::ExecutionFailed {
+                    message,
+                    log_path: None,
+                    log_summary,
+                }))
+            }
+            Err(e) => Err(e),
         }
     }
     pub fn get_log_tail(
@@ -415,5 +458,36 @@ impl Client {
             return target.scancel(slurm_id);
         }
         Ok(())
+    }
+
+    fn format_completed_jobs_msg(
+        &self,
+        job_ids: impl Iterator<Item = JobId>,
+        target: Arc<dyn Target>,
+    ) -> String {
+        let mut sorted_ids: Vec<_> = job_ids.collect();
+        sorted_ids.sort();
+
+        let mut table = Table::new();
+        table
+            .load_preset(presets::UTF8_FULL)
+            .apply_modifier(UTF8_ROUND_CORNERS)
+            .set_header(vec![
+                Cell::new("Job ID").add_attribute(Attribute::Bold).fg(Color::Cyan),
+                Cell::new("Output Directory").add_attribute(Attribute::Bold).fg(Color::Cyan),
+            ]);
+
+        for job_id in sorted_ids {
+            let out_dir = target
+                .base_path()
+                .join("outputs")
+                .join(&job_id.0)
+                .join("repx");
+            table.add_row(vec![
+                Cell::new(job_id.0.as_str()).fg(Color::Yellow),
+                Cell::new(out_dir.to_string_lossy().as_ref()),
+            ]);
+        }
+        table.to_string()
     }
 }

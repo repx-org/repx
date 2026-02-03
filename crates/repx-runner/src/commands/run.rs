@@ -123,7 +123,7 @@ pub fn handle_run(
 
     match submission_thread.join().unwrap() {
         Ok(message) => {
-            println!("{}", message.green());
+            println!("{}", message);
         }
         Err(e) => {
             return Err(AppError::ExecutionFailed {
