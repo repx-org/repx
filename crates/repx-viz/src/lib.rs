@@ -87,20 +87,14 @@ pub fn run(args: VizArgs) -> Result<()> {
 
 struct VizGenerator<'a> {
     lab: &'a Lab,
-    effective_params_cache: HashMap<JobId, Value>,
 }
 
 impl<'a> VizGenerator<'a> {
     fn new(lab: &'a Lab) -> Self {
-        Self {
-            lab,
-            effective_params_cache: HashMap::new(),
-        }
+        Self { lab }
     }
 
     fn generate_dot(&mut self, args: &VizArgs) -> Result<String> {
-        self.compute_all_effective_params()?;
-
         let mut dot = String::new();
         dot.push_str("digraph \"RepX Topology\" {\n");
 
@@ -308,60 +302,6 @@ impl<'a> VizGenerator<'a> {
         }
     }
 
-    fn compute_all_effective_params(&mut self) -> Result<()> {
-        let job_ids: Vec<JobId> = self.lab.jobs.keys().cloned().collect();
-        for jid in job_ids {
-            self.get_single_effective_params(&jid, &mut HashSet::new())?;
-        }
-        Ok(())
-    }
-
-    fn get_single_effective_params(
-        &mut self,
-        job_id: &JobId,
-        visiting: &mut HashSet<JobId>,
-    ) -> Result<Value> {
-        if let Some(v) = self.effective_params_cache.get(job_id) {
-            return Ok(v.clone());
-        }
-
-        if visiting.contains(job_id) {
-            anyhow::bail!("Circular dependency detected at {}", job_id.0);
-        }
-        visiting.insert(job_id.clone());
-
-        let job = self
-            .lab
-            .jobs
-            .get(job_id)
-            .ok_or_else(|| anyhow::anyhow!("Job ID {} not found", job_id.0))?;
-
-        let mut effective_params = serde_json::Map::new();
-
-        let inputs = Self::get_job_inputs(job);
-        for mapping in inputs {
-            if let Some(dep_id) = &mapping.job_id {
-                if let Ok(Value::Object(map)) = self.get_single_effective_params(dep_id, visiting) {
-                    for (k, v) in map {
-                        effective_params.insert(k, v);
-                    }
-                }
-            }
-        }
-
-        if let Value::Object(map) = &job.params {
-            for (k, v) in map {
-                effective_params.insert(k.clone(), v.clone());
-            }
-        }
-
-        visiting.remove(job_id);
-        let result = Value::Object(effective_params);
-        self.effective_params_cache
-            .insert(job_id.clone(), result.clone());
-        Ok(result)
-    }
-
     fn get_varying_params(&self, job_ids: &[&JobId]) -> BTreeMap<String, Vec<Value>> {
         if job_ids.is_empty() {
             return BTreeMap::new();
@@ -369,9 +309,11 @@ impl<'a> VizGenerator<'a> {
 
         let mut all_keys = HashSet::new();
         for jid in job_ids {
-            if let Some(Value::Object(params)) = self.effective_params_cache.get(jid) {
-                for k in params.keys() {
-                    all_keys.insert(k.clone());
+            if let Some(job) = self.lab.jobs.get(jid) {
+                if let Value::Object(params) = &job.params {
+                    for k in params.keys() {
+                        all_keys.insert(k.clone());
+                    }
                 }
             }
         }
@@ -385,9 +327,10 @@ impl<'a> VizGenerator<'a> {
 
             for jid in job_ids {
                 let val = self
-                    .effective_params_cache
+                    .lab
+                    .jobs
                     .get(jid)
-                    .and_then(|p| p.get(&key))
+                    .and_then(|job| job.params.get(&key))
                     .unwrap_or(&missing_marker);
 
                 let s_val = canonical_json(val);
