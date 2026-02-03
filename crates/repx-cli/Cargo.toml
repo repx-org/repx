@@ -35,3 +35,4 @@ clap = { workspace = true, features = ["derive"] }
 anyhow = "1.0"
 colored = "3.0.0"
 which = "6.0"
+clap_complete = "4.5.65"

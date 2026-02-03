@@ -1,4 +1,5 @@
-use clap::{Args, Parser, Subcommand};
+use clap::{Args, CommandFactory, Parser, Subcommand};
+use clap_complete::{generate, Shell};
 use colored::Colorize;
 use repx_runner::cli::Commands as RunnerCommands;
 use std::path::PathBuf;
@@ -57,6 +58,9 @@ enum Commands {
 
     #[command(about = "Debug/Run a job locally with interactive shell")]
     DebugRun(DebugRunArgs),
+
+    #[command(about = "Generate shell completions")]
+    Completions(CompletionsArgs),
 }
 
 #[derive(Args)]
@@ -81,6 +85,12 @@ struct DebugRunArgs {
 
     #[arg(short, long, help = "Command to run (defaults to shell)")]
     command: Option<String>,
+}
+
+#[derive(Args)]
+struct CompletionsArgs {
+    #[arg(long, help = "Shell to generate completions for")]
+    shell: Shell,
 }
 
 fn main() {
@@ -155,6 +165,11 @@ fn main() {
                     cmd.arg("--command").arg(c);
                 }
             });
+        }
+        Commands::Completions(args) => {
+            let mut cmd = Cli::command();
+            let name = cmd.get_name().to_string();
+            generate(args.shell, &mut cmd, name, &mut std::io::stdout());
         }
     }
 }
