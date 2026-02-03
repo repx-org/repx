@@ -71,14 +71,16 @@ pub struct ListArgs {
 
 #[derive(Subcommand)]
 pub enum ListEntity {
-    Runs,
+    Runs {
+        #[arg(required = false, value_name = "RUN_NAME")]
+        name: Option<String>,
+    },
     Jobs {
-        run_id: String,
+        #[arg(required = false, value_name = "RUN_NAME")]
+        name: Option<String>,
     },
     #[command(alias = "deps")]
-    Dependencies {
-        job_id: String,
-    },
+    Dependencies { job_id: String },
 }
 
 #[derive(Args)]

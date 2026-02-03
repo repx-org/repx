@@ -9,9 +9,12 @@ use std::str::FromStr;
 pub fn handle_list(args: ListArgs, lab_path: &Path) -> Result<(), AppError> {
     let lab = lab::load_from_path(lab_path)?;
 
-    match args.entity.unwrap_or(ListEntity::Runs) {
-        ListEntity::Runs => list_runs(&lab, lab_path),
-        ListEntity::Jobs { run_id } => list_jobs(&lab, &run_id),
+    match args.entity.unwrap_or(ListEntity::Runs { name: None }) {
+        ListEntity::Runs { name } => match name {
+            Some(n) => list_jobs(&lab, Some(&n)),
+            None => list_runs(&lab, lab_path),
+        },
+        ListEntity::Jobs { name } => list_jobs(&lab, name.as_deref()),
         ListEntity::Dependencies { job_id } => list_dependencies(&lab, &job_id),
     }
 }
@@ -28,7 +31,28 @@ fn list_runs(lab: &Lab, lab_path: &Path) -> Result<(), AppError> {
     Ok(())
 }
 
-fn list_jobs(lab: &Lab, run_id_str: &str) -> Result<(), AppError> {
+fn list_jobs(lab: &Lab, run_id_opt: Option<&str>) -> Result<(), AppError> {
+    let run_id_str = match run_id_opt {
+        Some(s) => s,
+        None => {
+            let mut run_ids: Vec<_> = lab.runs.keys().collect();
+            run_ids.sort();
+            for (i, run_id) in run_ids.iter().enumerate() {
+                if i > 0 {
+                    println!();
+                }
+                println!("Jobs in run '{}':", run_id);
+                let run = &lab.runs[*run_id];
+                let mut jobs: Vec<_> = run.jobs.iter().collect();
+                jobs.sort();
+                for job in jobs {
+                    println!("  {}", job);
+                }
+            }
+            return Ok(());
+        }
+    };
+
     let run_id =
         RunId::from_str(run_id_str).map_err(|e| AppError::ConfigurationError(e.to_string()))?;
 
@@ -89,7 +113,7 @@ fn list_jobs(lab: &Lab, run_id_str: &str) -> Result<(), AppError> {
                 }
                 if found_runs.len() == 1 {
                     println!();
-                    return list_jobs(lab, &found_runs[0].0);
+                    return list_jobs(lab, Some(&found_runs[0].0));
                 }
                 return Ok(());
             }
