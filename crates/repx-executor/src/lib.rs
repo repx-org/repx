@@ -558,14 +558,29 @@ impl Executor {
         let mut cmd = TokioCommand::new(bwrap_path);
 
         if self.request.mount_host_paths {
-            cmd.arg("--bind").arg("/").arg("/");
+            let root = Path::new("/");
+            let exclude_dirs = ["dev", "proc", "sys", "nix"];
+            let writable_dirs = ["home", "tmp", "var", "opt", "srv", "mnt", "media", "run"];
 
-            for dir in [
-                "/home", "/tmp", "/var", "/opt", "/srv", "/mnt", "/media", "/run",
-            ] {
-                let p = Path::new(dir);
-                if p.exists() {
-                    cmd.arg("--bind").arg(dir).arg(dir);
+            if let Ok(entries) = std::fs::read_dir(root) {
+                for entry in entries.flatten() {
+                    if let Ok(file_type) = entry.file_type() {
+                        if file_type.is_dir() {
+                            let dir_name = entry.file_name();
+                            let dir_name_str = dir_name.to_string_lossy();
+
+                            if exclude_dirs.contains(&dir_name_str.as_ref()) {
+                                continue;
+                            }
+
+                            let dir_path = entry.path();
+                            if writable_dirs.contains(&dir_name_str.as_ref()) {
+                                cmd.arg("--bind").arg(&dir_path).arg(&dir_path);
+                            } else {
+                                cmd.arg("--ro-bind").arg(&dir_path).arg(&dir_path);
+                            }
+                        }
+                    }
                 }
             }
 
@@ -643,9 +658,7 @@ impl Executor {
             } else {
                 let image_nix = rootfs_path.join("nix");
                 if image_nix.exists() {
-                    if !Path::new("/nix").exists() {
-                        cmd.arg("--tmpfs").arg("/nix");
-                    }
+                    cmd.arg("--dir").arg("/nix");
                     cmd.arg("--bind").arg(image_nix).arg("/nix");
                 }
             }

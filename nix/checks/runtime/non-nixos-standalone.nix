@@ -40,7 +40,7 @@ pkgs.testers.runNixOSTest {
     local_lab = "/home/repxuser/lab"
 
     machine.succeed("mkdir -p /host-root")
-    for d in ["bin", "etc", "usr", "var", "tmp", "home", "run", "dev", "proc", "nix"]:
+    for d in ["bin", "etc", "usr", "var", "tmp", "home", "run", "dev", "proc"]:
         machine.succeed(f"mkdir -p /host-root/{d}")
 
     machine.succeed("chown root:root /host-root")
