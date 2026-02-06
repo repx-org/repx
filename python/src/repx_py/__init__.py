@@ -1,4 +1,11 @@
 import logging
+from importlib.metadata import PackageNotFoundError, version
+
+try:
+    __version__ = version("repx-py")
+except PackageNotFoundError:
+    __version__ = "unknown"
+
 
 from .models import (
     ArtifactResolver,
@@ -18,4 +25,5 @@ __all__ = [
     "JobView",
     "LocalCacheResolver",
     "ManifestResolver",
+    "__version__",
 ]

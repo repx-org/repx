@@ -6,6 +6,7 @@ final: _prev: {
     final.runCommand "repx"
       {
         meta.mainProgram = "repx";
+        inherit (final.repx-workspace) version;
       }
       ''
         mkdir -p $out/bin
