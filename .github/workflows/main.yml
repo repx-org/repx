@@ -23,7 +23,8 @@ jobs:
             .#checks.x86_64-linux.formatting \
             .#checks.x86_64-linux.shebang \
             .#checks.x86_64-linux.shellcheck \
-            .#checks.x86_64-linux.machete
+            .#checks.x86_64-linux.machete \
+            .#checks.x86_64-linux.clippy
 
   checks:
     name: Check ${{ matrix.check }}
@@ -45,7 +46,11 @@ jobs:
           - e2e-remote-local
           - e2e-remote-slurm
           - static-analysis
-          - foreign-distro-compat
+          - non-nixos-standalone
+          - non-nixos-remote
+          - fail_missing
+          - pass_complex
+          - pass_valid
           - e2e-impure
           - e2e-mount-paths
           - e2e-impure-podman
