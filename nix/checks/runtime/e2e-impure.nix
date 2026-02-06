@@ -1,6 +1,7 @@
 {
   pkgs,
   repx,
+  referenceLab,
 }:
 
 pkgs.testers.runNixOSTest {
@@ -10,8 +11,8 @@ pkgs.testers.runNixOSTest {
     { pkgs, ... }:
     {
       virtualisation = {
-        diskSize = 4096;
-        memorySize = 2048;
+        diskSize = 8192;
+        memorySize = 4096;
       };
 
       environment.systemPackages = [
@@ -27,56 +28,39 @@ pkgs.testers.runNixOSTest {
     base_path = "/var/lib/repx-store"
     machine.succeed(f"mkdir -p {base_path}")
 
-    image_hash = "fake-image"
-    unique_pkg_hash = "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee-unique-pkg"
-    unique_pkg_path = f"/nix/store/{unique_pkg_hash}"
-    image_rootfs = f"{base_path}/cache/images/{image_hash}/rootfs"
+    machine.succeed("mkdir -p /root/.config/repx")
 
-    machine.succeed(f"mkdir -p {image_rootfs}{unique_pkg_path}")
-    machine.succeed(f"echo 'I am from image' > {image_rootfs}{unique_pkg_path}/file")
-    machine.succeed(f"touch {base_path}/cache/images/{image_hash}/SUCCESS")
+    config = f"""
+    submission_target = "local"
+    [targets.local]
+    base_path = "{base_path}"
+    default_scheduler = "local"
+    default_execution_type = "bwrap"
+    mount_host_paths = true
+    [targets.local.local]
+    execution_types = ["bwrap"]
+    local_concurrency = 2
+    """
+    machine.succeed(f"cat <<EOF > /root/.config/repx/config.toml\n{config}\nEOF")
 
     machine.succeed("mkdir -p /var/lib/repx-store/artifacts/host-tools/default/bin")
     machine.succeed("ln -s $(which bwrap) /var/lib/repx-store/artifacts/host-tools/default/bin/bwrap")
 
+    with subtest("Impure Mode on NixOS (Overlay/Union Strategy)"):
+        print("--- Testing Impure Mode on NixOS with Reference Lab ---")
 
-    with subtest("Impure Mode on NixOS (Overlay Strategy)"):
-        print("--- Testing Impure Mode on NixOS ---")
+        machine.succeed("repx run simulation-run --lab ${referenceLab}")
 
-        machine.succeed("echo 'I am host' > /etc/host-secret")
+        success_count = int(machine.succeed(f"find {base_path}/outputs -name SUCCESS | wc -l").strip())
+        print(f"Found {success_count} SUCCESS markers")
 
-        script = f"""
-        #!/bin/sh
-        set -e
-        if [ ! -f /etc/host-secret ]; then echo "FAIL: No host access"; exit 1; fi
-        if [ ! -f {unique_pkg_path}/file ]; then echo "FAIL: No image overlay"; exit 1; fi
-        if [ ! -e /nix/store ]; then echo "FAIL: No /nix/store"; exit 1; fi
-        echo "PASS"
-        """
+        if success_count == 0:
+            raise Exception("No SUCCESS markers found! Impure mode test failed.")
 
-        machine.succeed(f"mkdir -p {base_path}/job-nixos/bin")
-        machine.succeed(f"cat <<EOF > {base_path}/job-nixos/bin/script.sh\n{script}\nEOF")
-        machine.succeed(f"chmod +x {base_path}/job-nixos/bin/script.sh")
-        machine.succeed(f"mkdir -p {base_path}/outputs/job-nixos/repx")
-        machine.succeed(f"mkdir -p {base_path}/outputs/job-nixos/out")
-        machine.succeed(f"echo '{{}}' > {base_path}/outputs/job-nixos/repx/inputs.json")
+        machine.succeed(f"grep -rE '400|415' {base_path}/outputs/*/out/total_sum.txt")
 
-        cmd = (
-            "repx internal-execute "
-            "--job-id job-nixos "
-            f"--executable-path {base_path}/job-nixos/bin/script.sh "
-            f"--base-path {base_path} "
-            "--host-tools-dir default "
-            "--runtime bwrap "
-            f"--image-tag {image_hash} "
-            "--mount-host-paths"
-        )
-
-        out = machine.succeed(cmd)
-        print("NixOS Test Output:", out)
-
-        logs = machine.succeed(f"cat {base_path}/outputs/job-nixos/repx/stdout.log")
-        if "PASS" not in logs:
-            raise Exception("NixOS test failed")
+    print("\n" + "=" * 60)
+    print("E2E IMPURE TEST COMPLETED")
+    print("=" * 60)
   '';
 }

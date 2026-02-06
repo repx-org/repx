@@ -4,18 +4,6 @@
   referenceLab,
 }:
 
-let
-  staticBusybox = pkgs.pkgsStatic.busybox;
-
-  busyboxImage = pkgs.dockerTools.buildImage {
-    name = "busybox";
-    tag = "latest";
-    copyToRoot = [ pkgs.busybox ];
-    config = {
-      Cmd = [ "${pkgs.busybox}/bin/sh" ];
-    };
-  };
-in
 pkgs.testers.runNixOSTest {
   name = "non-nixos-remote";
 
@@ -104,24 +92,10 @@ pkgs.testers.runNixOSTest {
 
     base_path = "/home/repxuser/repx-store"
 
-    image_hash = "test-image"
-    target.succeed(f"mkdir -p {base_path}/cache/images/{image_hash}/rootfs/bin")
-    target.succeed(f"mkdir -p {base_path}/cache/images/{image_hash}/rootfs/usr/bin")
-    target.succeed(f"mkdir -p {base_path}/cache/images/{image_hash}/rootfs/tmp")
-    target.succeed(f"cp ${staticBusybox}/bin/busybox {base_path}/cache/images/{image_hash}/rootfs/bin/")
-    target.succeed(f"ln -s /bin/busybox {base_path}/cache/images/{image_hash}/rootfs/bin/sh")
-    target.succeed(f"ln -s /bin/busybox {base_path}/cache/images/{image_hash}/rootfs/bin/cat")
-    target.succeed(f"ln -s /bin/busybox {base_path}/cache/images/{image_hash}/rootfs/bin/echo")
-    target.succeed(f"touch {base_path}/cache/images/{image_hash}/SUCCESS")
-
     target.succeed(f"mkdir -p {base_path}/artifacts/host-tools/default/bin")
     target.succeed(f"ln -s $(which bwrap) {base_path}/artifacts/host-tools/default/bin/bwrap")
     target.succeed(f"ln -s $(which docker) {base_path}/artifacts/host-tools/default/bin/docker")
     target.succeed(f"ln -s $(which podman) {base_path}/artifacts/host-tools/default/bin/podman")
-
-    docker_image_hash = "busybox_latest"
-    target.succeed(f"mkdir -p {base_path}/artifacts/images")
-    target.copy_from_host("${busyboxImage}", f"{base_path}/artifacts/images/{docker_image_hash}.tar")
 
     target.succeed(f"chown -R repxuser:users {base_path}")
 

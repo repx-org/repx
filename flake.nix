@@ -72,6 +72,7 @@
             clippy
             cargo-machete
 
+            repx
             repx-py
             (python3.withPackages (ps: [
               ps.pytest

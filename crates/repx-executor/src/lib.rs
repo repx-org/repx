@@ -643,6 +643,9 @@ impl Executor {
             } else {
                 let image_nix = rootfs_path.join("nix");
                 if image_nix.exists() {
+                    if !Path::new("/nix").exists() {
+                        cmd.arg("--tmpfs").arg("/nix");
+                    }
                     cmd.arg("--bind").arg(image_nix).arg("/nix");
                 }
             }

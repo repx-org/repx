@@ -263,7 +263,8 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<Stdout>>, app: &mut App) -> 
                 }
                 ExternalAction::EditRemote { address, paths } => {
                     suspend_tui(terminal)?;
-                    let editor = std::env::var("EDITOR").unwrap_or_else(|_| "vi".to_string());
+                    let editor =
+                        std::env::var("REPX_REMOTE_EDITOR").unwrap_or_else(|_| "vi".to_string());
                     let remote_paths: Vec<String> = paths
                         .iter()
                         .map(|p| format!("'{}'", p.to_string_lossy().replace('\\', "/")))

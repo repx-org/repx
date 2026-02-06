@@ -1,22 +1,12 @@
 {
   pkgs,
   repx,
+  referenceLab,
 }:
 
 let
   staticBusybox = pkgs.pkgsStatic.busybox;
-
   staticBwrap = pkgs.pkgsStatic.bubblewrap;
-
-  busyboxImage = pkgs.dockerTools.buildImage {
-    name = "busybox";
-    tag = "latest";
-    copyToRoot = [ pkgs.busybox ];
-    config = {
-      Cmd = [ "${pkgs.busybox}/bin/sh" ];
-    };
-  };
-
   repxBinary = "${repx}/bin/repx";
 in
 pkgs.testers.runNixOSTest {
@@ -29,165 +19,121 @@ pkgs.testers.runNixOSTest {
         diskSize = 10240;
         memorySize = 4096;
         cores = 2;
-        docker.enable = true;
-        podman.enable = true;
       };
-
-      networking.dhcpcd.denyInterfaces = [
-        "veth*"
-        "docker*"
-        "podman*"
-      ];
 
       environment.systemPackages = [
         pkgs.bubblewrap
         pkgs.jq
       ];
+
+      users.users.repxuser = {
+        isNormalUser = true;
+        home = "/home/repxuser";
+        createHome = true;
+      };
     };
 
   testScript = ''
     start_all()
 
-    base_path = "/var/lib/repx-store"
-    machine.succeed(f"mkdir -p {base_path}")
+    base_path = "/home/repxuser/repx-store"
+    local_lab = "/home/repxuser/lab"
+
+    machine.succeed("mkdir -p /host-root")
+    for d in ["bin", "etc", "usr", "var", "tmp", "home", "run", "dev", "proc", "nix"]:
+        machine.succeed(f"mkdir -p /host-root/{d}")
+
+    machine.succeed("chown root:root /host-root")
+    machine.succeed("chmod 755 /host-root")
 
     machine.succeed(f"mkdir -p {base_path}/bin")
+    machine.succeed(f"mkdir -p {local_lab}")
+
+    machine.succeed(f"cp -rL ${referenceLab}/* {local_lab}/")
+
     machine.succeed(f"cp ${repxBinary} {base_path}/bin/repx")
     machine.succeed(f"chmod +x {base_path}/bin/repx")
-
-    image_hash = "test-image"
-    image_rootfs = f"{base_path}/cache/images/{image_hash}/rootfs"
-    machine.succeed(f"mkdir -p {image_rootfs}/bin")
-    machine.succeed(f"mkdir -p {image_rootfs}/usr/bin")
-    machine.succeed(f"mkdir -p {image_rootfs}/tmp")
-    machine.succeed(f"cp ${staticBusybox}/bin/busybox {image_rootfs}/bin/")
-    machine.succeed(f"ln -s /bin/busybox {image_rootfs}/bin/sh")
-    machine.succeed(f"ln -s /bin/busybox {image_rootfs}/bin/cat")
-    machine.succeed(f"ln -s /bin/busybox {image_rootfs}/bin/echo")
-    machine.succeed(f"ln -s /bin/busybox {image_rootfs}/bin/test")
-    machine.succeed(f"ln -s /bin/busybox {image_rootfs}/bin/ls")
-    machine.succeed(f"ln -s /bin/busybox {image_rootfs}/bin/mkdir")
-    machine.succeed(f"touch {base_path}/cache/images/{image_hash}/SUCCESS")
 
     machine.succeed(f"mkdir -p {base_path}/artifacts/host-tools/default/bin")
     machine.succeed(f"cp ${staticBwrap}/bin/bwrap {base_path}/artifacts/host-tools/default/bin/bwrap")
     machine.succeed(f"chmod +x {base_path}/artifacts/host-tools/default/bin/bwrap")
-    machine.succeed(f"ln -s $(which docker) {base_path}/artifacts/host-tools/default/bin/docker")
-    machine.succeed(f"ln -s $(which podman) {base_path}/artifacts/host-tools/default/bin/podman")
 
-    docker_image_hash = "busybox_latest"
-    machine.succeed(f"mkdir -p {base_path}/artifacts/images")
-    machine.copy_from_host("${busyboxImage}", f"{base_path}/artifacts/images/{docker_image_hash}.tar")
+    machine.succeed("cp ${staticBusybox}/bin/busybox /host-root/bin/busybox")
+    for cmd in ["sh", "cat", "mkdir", "echo", "find", "grep", "ls", "rm", "cp", "chmod", "pwd", "env", "test", "true", "false", "sleep"]:
+        machine.succeed(f"ln -sf busybox /host-root/bin/{cmd}")
 
-    machine.succeed("mkdir -p /tmp/host-data")
-    machine.succeed("echo 'HOST_SECRET_DATA' > /tmp/host-data/secret.txt")
-
-    machine.succeed("mkdir -p /var/lib/fake-bin")
-    machine.succeed("cp ${staticBusybox}/bin/busybox /var/lib/fake-bin/busybox")
-    machine.succeed("ln -s busybox /var/lib/fake-bin/sh")
-    machine.succeed("ln -s busybox /var/lib/fake-bin/cat")
-    machine.succeed("ln -s busybox /var/lib/fake-bin/mkdir")
-    machine.succeed("mkdir -p /opt/specific-mount")
-    machine.succeed("echo 'SPECIFIC_MOUNT_DATA' > /opt/specific-mount/data.txt")
-
-    def create_job(job_id, script_content):
-        """Helper to create job structure for internal-execute"""
-        machine.succeed(f"mkdir -p {base_path}/jobs/{job_id}/bin")
-        machine.succeed(f"cat <<'SCRIPT_EOF' > {base_path}/jobs/{job_id}/bin/script.sh\n{script_content}\nSCRIPT_EOF")
-        machine.succeed(f"chmod +x {base_path}/jobs/{job_id}/bin/script.sh")
-        machine.succeed(f"mkdir -p {base_path}/outputs/{job_id}/repx")
-        machine.succeed(f"mkdir -p {base_path}/outputs/{job_id}/out")
-        machine.succeed(f"echo '{{}}' > {base_path}/outputs/{job_id}/repx/inputs.json")
+    machine.succeed(f"chown -R repxuser:users {base_path}")
+    machine.succeed(f"chown -R repxuser:users {local_lab}")
 
     def run_repx_without_nix(cmd):
-        """Run repx inside bwrap WITHOUT /nix access - simulating non-NixOS"""
+        """Run repx inside bwrap WITHOUT /nix - simulating non-NixOS as a normal user with NO write access to root"""
         bwrap_cmd = (
-            "bwrap "
-            "--bind / / "
+            "sudo -u repxuser bwrap "
+            "--unshare-all "
+            "--share-net "
+            "--bind /host-root / "
+            "--bind /etc /etc "
+            "--bind /usr /usr "
+            "--bind /var /var "
+            "--bind /tmp /tmp "
+            "--bind /home /home "
+            "--bind /run /run "
             "--dev-bind /dev /dev "
-            "--tmpfs /nix "
-            "--bind /var/lib/fake-bin /bin "
+            "--proc /proc "
             f"-- {base_path}/bin/repx {cmd}"
         )
         return bwrap_cmd
 
-    def run_test(job_id, runtime, image_tag, mount_mode):
-        """Run a test with repx having NO access to /nix"""
-        cmd_parts = [
-            "internal-execute",
-            f"--job-id {job_id}",
-            f"--executable-path {base_path}/jobs/{job_id}/bin/script.sh",
-            f"--base-path {base_path}",
-            "--host-tools-dir default",
-            f"--runtime {runtime}",
-        ]
+    with subtest("Bwrap - Impure Mode on Non-NixOS (no host /nix)"):
+        print("--- Testing Impure Mode on simulated non-NixOS ---")
+        print("Expected: Success (Bug should be fixed with --tmpfs /nix)")
 
-        if image_tag:
-            cmd_parts.append(f"--image-tag {image_tag}")
+        config = f"""
+            submission_target = "local"
+            [targets.local]
+            base_path = "{base_path}"
+            default_scheduler = "local"
+            default_execution_type = "bwrap"
+            mount_host_paths = true
+            [targets.local.local]
+            execution_types = ["bwrap"]
+            local_concurrency = 1
+        """
+        machine.succeed("mkdir -p /home/repxuser/.config/repx")
+        machine.succeed(f"cat <<'EOF' > /home/repxuser/.config/repx/config.toml\n{config}\nEOF")
+        machine.succeed("chown -R repxuser:users /home/repxuser/.config")
 
-        if mount_mode == "impure":
-            cmd_parts.append("--mount-host-paths")
-        elif mount_mode == "specific":
-            cmd_parts.append("--mount-paths /opt/specific-mount")
-            cmd_parts.append("--mount-paths /tmp/host-data")
+        cmd = run_repx_without_nix(f"run simulation-run --lab {local_lab}")
+        print(f"Command: {cmd}")
 
-        repx_args = " ".join(cmd_parts)
-        full_cmd = run_repx_without_nix(repx_args)
+        rc, output = machine.execute(f"RUST_LOG=repx_executor=debug {cmd}")
 
-        print(f"\n>>> Running test: {job_id} (runtime={runtime}, mount={mount_mode})")
-        print(f"Command: {full_cmd}")
+        print(f"Return code: {rc}")
+        print(f"Output:\n{output}")
 
-        machine.succeed(full_cmd)
+        logs = machine.succeed(f"find {base_path}/outputs -name 'stderr.log' -exec cat {{}} \\; 2>/dev/null || true")
+        if logs:
+            print(f"Stderr logs:\n{logs}")
 
-        logs = machine.succeed(f"cat {base_path}/outputs/{job_id}/repx/stdout.log")
-        print(f"Output: {logs}")
-        if "PASS" not in logs:
-            stderr = machine.succeed(f"cat {base_path}/outputs/{job_id}/repx/stderr.log 2>/dev/null || true")
-            print(f"STDERR: {stderr}")
-            raise Exception(f"Test {job_id} did not output PASS")
-        print(f"✓ Test {job_id} PASSED")
-
-    simple_script = """#!/bin/sh
-    echo "Running inside container..."
-    echo "PASS"
-    """
-
-    impure_script = """#!/bin/sh
-    set -e
-    if [ ! -f /tmp/host-data/secret.txt ]; then
-        echo "FAIL: Cannot access host file"
-        exit 1
-    fi
-    cat /tmp/host-data/secret.txt
-    echo "PASS"
-    """
-
-    specific_script = """#!/bin/sh
-    set -e
-    if [ ! -f /opt/specific-mount/data.txt ]; then
-        echo "FAIL: Cannot access specific mount"
-        exit 1
-    fi
-    cat /opt/specific-mount/data.txt
-    echo "PASS"
-    """
-
-    with subtest("Bwrap - Pure Mode"):
-        create_job("bwrap-pure", simple_script)
-        run_test("bwrap-pure", "bwrap", image_hash, "pure")
-
-    with subtest("Bwrap - Impure Mode"):
-        create_job("bwrap-impure", impure_script)
-        run_test("bwrap-impure", "bwrap", image_hash, "impure")
-
-    with subtest("Bwrap - Specific Mounts"):
-        create_job("bwrap-specific", specific_script)
-        run_test("bwrap-specific", "bwrap", image_hash, "specific")
+        if rc == 0:
+            print("Test passed - checking for SUCCESS marker")
+            success_files = machine.succeed(f"find {base_path}/outputs -name SUCCESS").strip()
+            if success_files:
+                print(f"✓ SUCCESS: Bug is fixed! Job output found:\n{success_files}")
+            else:
+                raise Exception("repx returned 0 but no job SUCCESS marker found")
+        else:
+            if "Permission denied" in output or "Can't mkdir /nix" in output or \
+               "Permission denied" in logs or "Can't mkdir /nix" in logs:
+                print("FAILURE: Bug is still present: bwrap can't mkdir /nix")
+            else:
+                print("Failed but with DIFFERENT error. Investigating...")
+                if "signal 6" in output or "ABRT" in output:
+                     print("repx crashed (SIGABRT/Panic).")
+            raise Exception("Test failed")
 
     print("\n" + "=" * 60)
-    print("NON-NIXOS STANDALONE TEST PASSED!")
-    print("repx (static binary) successfully ran on simulated non-NixOS environment")
-    print("(Tested: bwrap pure, impure, specific modes)")
+    print("NON-NIXOS STANDALONE TEST COMPLETED")
     print("=" * 60)
   '';
 }

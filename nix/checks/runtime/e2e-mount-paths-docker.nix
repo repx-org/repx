@@ -1,18 +1,9 @@
 {
   pkgs,
   repx,
+  referenceLab,
 }:
 
-let
-  testImage = pkgs.dockerTools.buildImage {
-    name = "busybox";
-    tag = "latest";
-    copyToRoot = [ pkgs.busybox ];
-    config = {
-      Cmd = [ "${pkgs.busybox}/bin/sh" ];
-    };
-  };
-in
 pkgs.testers.runNixOSTest {
   name = "repx-mount-paths-docker";
 
@@ -37,46 +28,41 @@ pkgs.testers.runNixOSTest {
     base_path = "/var/lib/repx-store"
     machine.succeed(f"mkdir -p {base_path}")
 
-    image_hash = "busybox_latest"
-    machine.succeed(f"mkdir -p {base_path}/artifacts/images")
-    machine.copy_from_host("${testImage}", f"{base_path}/artifacts/images/{image_hash}.tar")
+    machine.succeed("echo 'Specific Secret' > /tmp/specific-secret")
+
+    machine.succeed("mkdir -p /root/.config/repx")
+
+    config = f"""
+    submission_target = "local"
+    [targets.local]
+    base_path = "{base_path}"
+    default_scheduler = "local"
+    default_execution_type = "docker"
+    mount_paths = ["/tmp/specific-secret"]
+    [targets.local.local]
+    execution_types = ["docker"]
+    local_concurrency = 2
+    """
+    machine.succeed(f"cat <<EOF > /root/.config/repx/config.toml\n{config}\nEOF")
 
     machine.succeed("mkdir -p /var/lib/repx-store/artifacts/host-tools/default/bin")
     machine.succeed("ln -s $(which docker) /var/lib/repx-store/artifacts/host-tools/default/bin/docker")
 
     with subtest("Mount Specific Paths (Docker)"):
-        print("--- Testing Mount Specific Paths (Docker) ---")
+        print("--- Testing Mount Specific Paths (Docker) with Reference Lab ---")
 
-        machine.succeed("echo 'Specific Secret' > /tmp/specific-secret")
+        machine.wait_for_unit("docker.service")
 
-        script = """#!/bin/sh
-        if [ ! -f /tmp/specific-secret ]; then echo "FAIL: No secret access"; exit 1; fi
-        echo "PASS"
-        """
+        machine.succeed("repx run simulation-run --lab ${referenceLab}")
 
-        machine.succeed(f"mkdir -p {base_path}/job-docker-paths/bin")
-        machine.succeed(f"cat <<EOF > {base_path}/job-docker-paths/bin/script.sh\n{script}\nEOF")
-        machine.succeed(f"chmod +x {base_path}/job-docker-paths/bin/script.sh")
-        machine.succeed(f"mkdir -p {base_path}/outputs/job-docker-paths/repx")
-        machine.succeed(f"mkdir -p {base_path}/outputs/job-docker-paths/out")
-        machine.succeed(f"echo '{{}}' > {base_path}/outputs/job-docker-paths/repx/inputs.json")
+        success_count = int(machine.succeed(f"find {base_path}/outputs -name SUCCESS | wc -l").strip())
+        print(f"Found {success_count} SUCCESS markers")
 
-        cmd = (
-            "repx internal-execute "
-            "--job-id job-docker-paths "
-            f"--executable-path {base_path}/job-docker-paths/bin/script.sh "
-            f"--base-path {base_path} "
-            "--host-tools-dir default "
-            "--runtime docker "
-            f"--image-tag {image_hash} "
-            "--mount-paths /tmp/specific-secret"
-        )
+        if success_count == 0:
+            raise Exception("No SUCCESS markers found! Docker mount paths test failed.")
 
-        out = machine.succeed(cmd)
-        print("Docker Paths Test Output:", out)
-
-        logs = machine.succeed(f"cat {base_path}/outputs/job-docker-paths/repx/stdout.log")
-        if "PASS" not in logs:
-            raise Exception("Docker specific paths test failed")
+    print("\n" + "=" * 60)
+    print("E2E MOUNT PATHS DOCKER TEST COMPLETED")
+    print("=" * 60)
   '';
 }

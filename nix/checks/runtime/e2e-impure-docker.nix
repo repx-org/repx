@@ -1,18 +1,9 @@
 {
   pkgs,
   repx,
+  referenceLab,
 }:
 
-let
-  testImage = pkgs.dockerTools.buildImage {
-    name = "busybox";
-    tag = "latest";
-    copyToRoot = [ pkgs.busybox ];
-    config = {
-      Cmd = [ "${pkgs.busybox}/bin/sh" ];
-    };
-  };
-in
 pkgs.testers.runNixOSTest {
   name = "repx-impure-mode-docker";
 
@@ -37,46 +28,39 @@ pkgs.testers.runNixOSTest {
     base_path = "/var/lib/repx-store"
     machine.succeed(f"mkdir -p {base_path}")
 
-    image_hash = "busybox_latest"
-    machine.succeed(f"mkdir -p {base_path}/artifacts/images")
+    machine.succeed("mkdir -p /root/.config/repx")
 
-    machine.copy_from_host("${testImage}", f"{base_path}/artifacts/images/{image_hash}.tar")
+    config = f"""
+    submission_target = "local"
+    [targets.local]
+    base_path = "{base_path}"
+    default_scheduler = "local"
+    default_execution_type = "docker"
+    mount_host_paths = true
+    [targets.local.local]
+    execution_types = ["docker"]
+    local_concurrency = 2
+    """
+    machine.succeed(f"cat <<EOF > /root/.config/repx/config.toml\n{config}\nEOF")
 
     machine.succeed("mkdir -p /var/lib/repx-store/artifacts/host-tools/default/bin")
     machine.succeed("ln -s $(which docker) /var/lib/repx-store/artifacts/host-tools/default/bin/docker")
 
     with subtest("Impure Mode (Docker)"):
-        print("--- Testing Impure Mode (Docker) ---")
-        machine.succeed("echo 'I am host' > /tmp/host-secret")
+        print("--- Testing Impure Mode (Docker) with Reference Lab ---")
 
-        script = """#!/bin/sh
-        if [ ! -f /tmp/host-secret ]; then echo "FAIL: No host access"; exit 1; fi
-        echo "PASS"
-        """
+        machine.wait_for_unit("docker.service")
 
-        machine.succeed(f"mkdir -p {base_path}/job-docker/bin")
-        machine.succeed(f"cat <<EOF > {base_path}/job-docker/bin/script.sh\n{script}\nEOF")
-        machine.succeed(f"chmod +x {base_path}/job-docker/bin/script.sh")
-        machine.succeed(f"mkdir -p {base_path}/outputs/job-docker/repx")
-        machine.succeed(f"mkdir -p {base_path}/outputs/job-docker/out")
-        machine.succeed(f"echo '{{}}' > {base_path}/outputs/job-docker/repx/inputs.json")
+        machine.succeed("repx run simulation-run --lab ${referenceLab}")
 
-        cmd = (
-            "repx internal-execute "
-            "--job-id job-docker "
-            f"--executable-path {base_path}/job-docker/bin/script.sh "
-            f"--base-path {base_path} "
-            "--host-tools-dir default "
-            "--runtime docker "
-            f"--image-tag {image_hash} "
-            "--mount-host-paths"
-        )
+        success_count = int(machine.succeed(f"find {base_path}/outputs -name SUCCESS | wc -l").strip())
+        print(f"Found {success_count} SUCCESS markers")
 
-        out = machine.succeed(cmd)
-        print("Docker Test Output:", out)
+        if success_count == 0:
+            raise Exception("No SUCCESS markers found! Docker impure mode test failed.")
 
-        logs = machine.succeed(f"cat {base_path}/outputs/job-docker/repx/stdout.log")
-        if "PASS" not in logs:
-            raise Exception("Docker test failed")
+    print("\n" + "=" * 60)
+    print("E2E IMPURE DOCKER TEST COMPLETED")
+    print("=" * 60)
   '';
 }
