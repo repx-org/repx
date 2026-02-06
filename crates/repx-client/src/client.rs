@@ -3,8 +3,8 @@ use crate::{
     inputs,
     targets::{local::LocalTarget, ssh::SshTarget, Target},
 };
+use comfy_table::{modifiers::UTF8_ROUND_CORNERS, presets, Attribute, Cell, Color, Table};
 use fs_err;
-use comfy_table::{Table, presets, modifiers::UTF8_ROUND_CORNERS, Color, Attribute, Cell};
 use repx_core::{
     config::{Config, Resources},
     engine,
@@ -272,7 +272,8 @@ impl Client {
             .collect();
 
         if jobs_to_run.is_empty() {
-            let details = self.format_completed_jobs_msg(full_dependency_set.iter().cloned(), target.clone());
+            let details =
+                self.format_completed_jobs_msg(full_dependency_set.iter().cloned(), target.clone());
             return Ok(format!(
                 "All required jobs for this submission are already complete.\n{}",
                 details
@@ -473,8 +474,12 @@ impl Client {
             .load_preset(presets::UTF8_FULL)
             .apply_modifier(UTF8_ROUND_CORNERS)
             .set_header(vec![
-                Cell::new("Job ID").add_attribute(Attribute::Bold).fg(Color::Cyan),
-                Cell::new("Output Directory").add_attribute(Attribute::Bold).fg(Color::Cyan),
+                Cell::new("Job ID")
+                    .add_attribute(Attribute::Bold)
+                    .fg(Color::Cyan),
+                Cell::new("Output Directory")
+                    .add_attribute(Attribute::Bold)
+                    .fg(Color::Cyan),
             ]);
 
         for job_id in sorted_ids {

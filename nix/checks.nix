@@ -25,7 +25,12 @@ let
       inherit pkgs repx referenceLab;
     };
     static-analysis = import ./checks/runtime/static-analysis.nix { inherit pkgs repx; };
-    foreign-distro-compat = import ./checks/runtime/simulate-non-nixos.nix { inherit pkgs repx; };
+    non-nixos-standalone = import ./checks/runtime/non-nixos-standalone.nix {
+      inherit pkgs repx;
+    };
+    non-nixos-remote = import ./checks/runtime/non-nixos-remote.nix {
+      inherit pkgs repx referenceLab;
+    };
     e2e-impure = import ./checks/runtime/e2e-impure.nix { inherit pkgs repx; };
     e2e-mount-paths = import ./checks/runtime/e2e-mount-paths.nix { inherit pkgs repx; };
     e2e-impure-podman = import ./checks/runtime/e2e-impure-podman.nix { inherit pkgs repx; };

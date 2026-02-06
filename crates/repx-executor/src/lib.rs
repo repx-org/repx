@@ -569,7 +569,7 @@ impl Executor {
                 }
             }
 
-            if Path::new("/nix").exists() {
+            if Path::new("/nix/store").exists() {
                 let image_store = rootfs_path.join("nix/store");
                 let mut has_image_store_entries = false;
 
@@ -641,7 +641,10 @@ impl Executor {
                     cmd.arg("--ro-bind").arg("/nix/store").arg("/nix/store");
                 }
             } else {
-                cmd.arg("--bind").arg(rootfs_path.join("nix")).arg("/nix");
+                let image_nix = rootfs_path.join("nix");
+                if image_nix.exists() {
+                    cmd.arg("--bind").arg(image_nix).arg("/nix");
+                }
             }
 
             cmd.arg("--unshare-user")
