@@ -3,19 +3,22 @@ use crate::commands::AppContext;
 use repx_client::Client;
 use repx_core::{
     config,
-    error::AppError,
-    log_trace,
+    errors::ConfigError,
     logging::{self, LogLevel},
+    model::SchedulerType,
 };
 
 pub mod cli;
 pub mod commands;
+pub mod error;
 
-pub fn run(cli: Cli) -> Result<(), AppError> {
+use error::CliError;
+
+pub fn run(cli: Cli) -> Result<(), CliError> {
     if cli.verbose > 0 {
         logging::set_log_level(LogLevel::from(cli.verbose + 1));
     }
-    log_trace!(
+    tracing::trace!(
         "repx invoked with: {:?}",
         std::env::args().collect::<Vec<_>>()
     );
@@ -28,12 +31,15 @@ pub fn run(cli: Cli) -> Result<(), AppError> {
         Commands::InternalScatterGather(args) => {
             commands::scatter_gather::handle_scatter_gather(args)
         }
-        Commands::InternalGc(args) => commands::gc::handle_internal_gc(args),
+        Commands::InternalGc(args) => {
+            let rt = tokio::runtime::Runtime::new().unwrap();
+            rt.block_on(commands::gc::async_handle_internal_gc(args))
+        }
         Commands::List(args) => commands::list::handle_list(args, &cli.lab),
         Commands::Gc(args) => {
             let config = config::load_config()?;
             let client = Client::new(config.clone(), cli.lab.clone()).map_err(|e| {
-                AppError::ExecutionFailed {
+                CliError::ExecutionFailed {
                     message: "Failed to initialize client".to_string(),
                     log_path: None,
                     log_summary: e.to_string(),
@@ -51,7 +57,7 @@ pub fn run(cli: Cli) -> Result<(), AppError> {
             let resources = config::load_resources(cli.resources.as_ref())?;
 
             let client = Client::new(config.clone(), cli.lab.clone()).map_err(|e| {
-                AppError::ExecutionFailed {
+                CliError::ExecutionFailed {
                     message: "Failed to initialize client".to_string(),
                     log_path: None,
                     log_summary: e.to_string(),
@@ -61,28 +67,31 @@ pub fn run(cli: Cli) -> Result<(), AppError> {
             let target_name = match cli.target.as_ref().or(config.submission_target.as_ref()) {
                 Some(name) => name.clone(),
                 None => {
-                    return Err(AppError::ConfigurationError(
+                    return Err(CliError::Config(ConfigError::General(
                         "No submission target specified. Set 'submission_target' in your config or use the --target flag.".to_string(),
-                    ))
+                    )))
                 }
             };
 
             let target_config = config.targets.get(&target_name).ok_or_else(|| {
-                AppError::ConfigurationError(format!(
+                CliError::Config(ConfigError::General(format!(
                     "Target '{}' not found in configuration.",
                     target_name
-                ))
+                )))
             })?;
 
-            let scheduler = cli
+            let scheduler: SchedulerType = cli
                 .scheduler
                 .as_deref()
                 .or(target_config.default_scheduler.as_deref())
                 .or(config.default_scheduler.as_deref())
                 .unwrap_or("slurm")
-                .to_string();
+                .parse()
+                .map_err(|e: repx_core::model::ParseSchedulerTypeError| {
+                    CliError::Config(ConfigError::General(e.to_string()))
+                })?;
 
-            let num_jobs = if scheduler == "local" {
+            let num_jobs = if scheduler == SchedulerType::Local {
                 Some(
                     args.jobs
                         .or_else(|| {
@@ -109,7 +118,7 @@ pub fn run(cli: Cli) -> Result<(), AppError> {
                 &config,
                 resources,
                 &target_name,
-                &scheduler,
+                scheduler,
                 num_jobs,
             )
         }

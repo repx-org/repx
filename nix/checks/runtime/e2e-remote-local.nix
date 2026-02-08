@@ -12,7 +12,7 @@ pkgs.testers.runNixOSTest {
       { pkgs, ... }:
       {
         virtualisation = {
-          diskSize = 8172;
+          diskSize = 25600;
           memorySize = 8172;
           cores = 2;
         };
@@ -33,7 +33,7 @@ pkgs.testers.runNixOSTest {
       { pkgs, ... }:
       {
         virtualisation = {
-          diskSize = 8172;
+          diskSize = 25600;
           memorySize = 8172;
           cores = 4;
           docker.enable = true;
@@ -92,6 +92,8 @@ pkgs.testers.runNixOSTest {
 
         config = f"""
         submission_target = "remote"
+        [targets.local]
+        base_path = "/root/repx-local"
         [targets.remote]
         address = "repxuser@server"
         base_path = "/home/repxuser/repx-store"
@@ -112,7 +114,6 @@ pkgs.testers.runNixOSTest {
         server.succeed("rm -rf /home/repxuser/repx-store/outputs/*")
     server.succeed("rm -rf /home/repxuser/repx-store/cache/*")
 
-    # run_remote_test("native") # no native support on remote
     run_remote_test("bwrap")
 
     server.wait_for_unit("docker.service")

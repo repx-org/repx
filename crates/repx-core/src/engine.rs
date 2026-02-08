@@ -122,21 +122,123 @@ pub fn determine_run_aggregate_statuses(
 }
 
 pub fn build_dependency_graph(lab: &Lab, final_job_id: &JobId) -> Vec<JobId> {
-    let mut stack = vec![final_job_id.clone()];
+    let mut stack = vec![(final_job_id.clone(), false)];
     let mut visited = HashSet::new();
     let mut sorted = Vec::new();
 
-    while let Some(job_id) = stack.pop() {
-        if !visited.contains(&job_id) {
-            visited.insert(job_id.clone());
-            if let Some(job) = lab.jobs.get(&job_id) {
-                for dep in get_all_dependencies(job) {
-                    stack.push(dep.clone());
+    while let Some((job_id, children_processed)) = stack.pop() {
+        if children_processed {
+            sorted.push(job_id);
+            continue;
+        }
+
+        if visited.contains(&job_id) {
+            continue;
+        }
+        visited.insert(job_id.clone());
+
+        stack.push((job_id.clone(), true));
+
+        if let Some(job) = lab.jobs.get(&job_id) {
+            for dep in get_all_dependencies(job) {
+                if !visited.contains(dep) {
+                    stack.push((dep.clone(), false));
                 }
             }
-            sorted.push(job_id);
         }
     }
-    sorted.reverse();
+
     sorted
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::JobId;
+    use std::collections::HashMap;
+
+    #[test]
+    fn test_diamond_dependency_graph_order() {
+        let mut lab = Lab {
+            schema_version: "1".to_string(),
+            git_hash: "123".to_string(),
+            content_hash: "123".to_string(),
+            runs: HashMap::new(),
+            jobs: HashMap::new(),
+            host_tools_path: std::path::PathBuf::new(),
+            host_tools_dir_name: "tools".to_string(),
+            referenced_files: vec![],
+        };
+
+        let define_job = |id: &str, inputs: Vec<&str>| {
+            let mut job = Job {
+                name: Some(id.to_string()),
+                params: serde_json::Value::Null,
+                path_in_lab: std::path::PathBuf::new(),
+                stage_type: crate::model::StageType::Simple,
+                executables: HashMap::new(),
+            };
+
+            let mut exe = crate::model::Executable {
+                path: std::path::PathBuf::from("echo"),
+                inputs: vec![],
+                outputs: HashMap::new(),
+            };
+
+            for inp in inputs {
+                exe.inputs.push(crate::model::InputMapping {
+                    job_id: Some(JobId(inp.to_string())),
+                    source_output: None,
+                    target_input: "x".to_string(),
+                    source: None,
+                    source_key: None,
+                    mapping_type: None,
+                    dependency_type: None,
+                    source_run: None,
+                    source_stage_filter: None,
+                });
+            }
+            job.executables.insert("main".to_string(), exe);
+            job
+        };
+
+        lab.jobs
+            .insert(JobId("A".to_string()), define_job("A", vec!["B", "C"]));
+        lab.jobs
+            .insert(JobId("B".to_string()), define_job("B", vec!["D"]));
+        lab.jobs
+            .insert(JobId("C".to_string()), define_job("C", vec!["D"]));
+        lab.jobs
+            .insert(JobId("D".to_string()), define_job("D", vec![]));
+
+        let sorted = build_dependency_graph(&lab, &JobId("A".to_string()));
+        println!("Sorted order: {:?}", sorted);
+
+        let pos_d = sorted.iter().position(|j| j.0 == "D").unwrap();
+        let pos_b = sorted.iter().position(|j| j.0 == "B").unwrap();
+
+        let pos_c = sorted.iter().position(|j| j.0 == "C").unwrap();
+        let pos_a = sorted.iter().position(|j| j.0 == "A").unwrap();
+
+        assert!(
+            pos_d < pos_b,
+            "D (dependency) should run before B (dependent). Order was: {:?}",
+            sorted
+        );
+        assert!(
+            pos_d < pos_c,
+            "D (dependency) should run before C (dependent). Order was: {:?}",
+            sorted
+        );
+        assert!(
+            pos_b < pos_a,
+            "B (dependency) should run before A (dependent). Order was: {:?}",
+            sorted
+        );
+        assert!(
+            pos_c < pos_a,
+            "C (dependency) should run before A (dependent). Order was: {:?}",
+            sorted
+        );
+    }
 }

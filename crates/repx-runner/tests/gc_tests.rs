@@ -10,7 +10,7 @@ use std::path::Path;
 #[test]
 fn test_gc_removes_dead_artifacts_and_outputs() {
     let harness = TestHarness::new();
-    let base_path = harness.cache_dir.path();
+    let base_path = &harness.cache_dir;
     let artifacts_dir = base_path.join("artifacts");
     let outputs_dir = base_path.join("outputs");
     let gcroots_dir = base_path.join("gcroots");
@@ -45,7 +45,7 @@ fn test_gc_removes_dead_artifacts_and_outputs() {
 #[test]
 fn test_gc_preserves_pinned_lab_and_outputs() {
     let harness = TestHarness::new();
-    let base_path = harness.cache_dir.path();
+    let base_path = &harness.cache_dir;
     let outputs_dir = base_path.join("outputs");
     let gcroots_pinned = base_path.join("gcroots/pinned");
     let artifacts_dir = base_path.join("artifacts");
@@ -97,7 +97,7 @@ fn test_gc_preserves_pinned_lab_and_outputs() {
 #[test]
 fn test_gc_preserves_auto_gcroots() {
     let harness = TestHarness::new();
-    let base_path = harness.cache_dir.path();
+    let base_path = &harness.cache_dir;
     let gcroots_auto = base_path.join("gcroots/auto/my-project");
     let artifacts_dir = base_path.join("artifacts");
 
@@ -137,7 +137,7 @@ fn test_gc_root_rotation_keeps_last_5() {
     use std::time::Duration;
 
     let harness = TestHarness::new();
-    let base_path = harness.cache_dir.path();
+    let base_path = &harness.cache_dir;
     let project_id = "test-proj-rotation";
     let lab_hash = "abc-123";
 
@@ -180,7 +180,7 @@ fn test_project_id_generation_includes_git_remote() {
     use std::process::Command;
 
     let mut harness = TestHarness::new();
-    let temp_lab_root = harness.cache_dir.path().join("git_test_lab");
+    let temp_lab_root = harness.cache_dir.join("git_test_lab");
     fs::create_dir_all(&temp_lab_root).unwrap();
 
     let status = Command::new("cp")
@@ -208,6 +208,8 @@ fn test_project_id_generation_includes_git_remote() {
         .expect("Failed to add remote");
     assert!(git_remote.status.success());
 
+    harness.stage_lab();
+
     let lab_abs = fs::canonicalize(&temp_lab_root).unwrap();
     let abs_hash = format!("{:x}", Sha256::digest(lab_abs.to_string_lossy().as_bytes()));
     let remote_hash = format!("{:x}", Sha256::digest(remote_url.as_bytes()));
@@ -216,7 +218,7 @@ fn test_project_id_generation_includes_git_remote() {
     let job_id = harness.get_job_id_by_name("stage-A-producer");
     harness.cmd().arg("run").arg(job_id).assert().success();
 
-    let gcroots_auto = harness.cache_dir.path().join("gcroots/auto");
+    let gcroots_auto = harness.cache_dir.join("gcroots/auto");
     let project_dir = gcroots_auto.join(&expected_project_id);
 
     assert!(
@@ -230,7 +232,7 @@ fn test_project_id_generation_includes_git_remote() {
 #[test]
 fn test_gc_cleans_collection_directories() {
     let harness = TestHarness::new();
-    let base_path = harness.cache_dir.path();
+    let base_path = &harness.cache_dir;
     let artifacts_dir = base_path.join("artifacts");
 
     fs::create_dir_all(&artifacts_dir).unwrap();
@@ -276,7 +278,7 @@ fn test_gc_cleans_collection_directories() {
 #[test]
 fn test_gc_handles_broken_symlinks_gracefully() {
     let harness = TestHarness::new();
-    let base_path = harness.cache_dir.path();
+    let base_path = &harness.cache_dir;
     let gcroots_pinned = base_path.join("gcroots/pinned");
     fs::create_dir_all(&gcroots_pinned).unwrap();
 
@@ -304,7 +306,7 @@ fn test_gc_handles_broken_symlinks_gracefully() {
 #[test]
 fn test_gc_handles_lab_load_failure() {
     let harness = TestHarness::new();
-    let base_path = harness.cache_dir.path();
+    let base_path = &harness.cache_dir;
     let gcroots_pinned = base_path.join("gcroots/pinned");
 
     let corrupt_hash = "corrupt-hash";

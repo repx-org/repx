@@ -142,12 +142,6 @@ else
     image =
       if containerized then
         let
-          # We bundle parameter dependencies into a reference file.
-          # This ensures they are copied to the Nix store of the container
-          # (because they are in the closure of this file),
-          # but they are NOT symlinked to the root filesystem (e.g. /bin, /lib).
-          # This prevents file collisions at the root when multiple data inputs
-          # share filenames (e.g. two inputs both having a "docs" folder).
           paramDepsClosure = pkgs.writeTextDir "share/repx/param-dependencies" (
             builtins.toJSON (paramsDependencies ++ autoParamsDependencies)
           );
@@ -155,6 +149,7 @@ else
         pkgs.dockerTools.buildLayeredImage {
           name = name + "-image";
           tag = "latest";
+          compressor = "none";
           contents = (pkgs.lib.flatten (map getDrvsFromPipeline loadedPipelines)) ++ [
             pkgs.jq
             pkgs.bash

@@ -70,11 +70,9 @@ in
   '' false;
 
   pass_complex = mkTest "pass-complex" ''
-    # echo "commented_out"
     my_var="some_val"
     echo "$my_var"
 
-    # Function definition shouldn't trigger 'my_func' as missing
     my_func() {
       true
     }

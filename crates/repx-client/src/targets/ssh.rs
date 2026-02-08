@@ -1,24 +1,23 @@
-use super::Target;
+use super::common::shell_quote;
+use super::{
+    ArtifactSync, CommandRunner, FileOps, GcOps, JobRunner, RemoteCommand, SlurmOps, TargetInfo,
+};
 use crate::error::{ClientError, Result};
-use repx_core::{error::AppError, log_info, logging, model::JobId};
+use repx_core::{config, constants::dirs, errors::ConfigError, logging, model::JobId};
 use std::{
     collections::HashSet,
     io::Write,
-    os::unix::fs::MetadataExt,
     path::{Path, PathBuf},
     process::Command,
     sync::mpsc::Sender,
 };
 
-fn shell_quote(s: &str) -> String {
-    format!("'{}'", s.replace('\'', "'\\''"))
-}
-
 pub struct SshTarget {
     pub(crate) name: String,
     pub(crate) address: String,
-    pub(crate) config: repx_core::config::Target,
+    pub(crate) config: config::Target,
     pub(crate) local_tools_path: PathBuf,
+    pub(crate) local_temp_path: PathBuf,
     pub(crate) host_tools_dir_name: String,
 }
 
@@ -37,14 +36,13 @@ impl SshTarget {
             return name.to_string();
         }
 
-        let remote_bin = self
-            .artifacts_base_path()
+        self.artifacts_base_path()
             .join("host-tools")
             .join(&self.host_tools_dir_name)
-            .join("bin");
-
-        let tool_path = remote_bin.join(name);
-        tool_path.to_string_lossy().to_string()
+            .join("bin")
+            .join(name)
+            .to_string_lossy()
+            .to_string()
     }
 
     fn deploy_rsync_binary(&self) -> Result<String> {
@@ -53,64 +51,24 @@ impl SshTarget {
 
         let remote_versioned_dir = self.base_path().join("bin").join(&hash);
         let remote_dest_path = remote_versioned_dir.join("rsync");
-        let remote_dest_path_str = remote_dest_path.to_string_lossy().to_string();
+        let remote_dest_str = remote_dest_path.to_string_lossy().to_string();
 
-        let check_cmd = format!(
-            "test -f {} && echo 'exists'",
-            shell_quote(&remote_dest_path_str)
-        );
+        let check_cmd = RemoteCommand::new("test")
+            .arg("-f")
+            .arg(&remote_dest_str)
+            .and(RemoteCommand::new("echo").arg("exists"));
 
-        if let Ok(output) = self.run_command("sh", &["-c", &check_cmd]) {
+        if let Ok(output) = self.run_command("sh", &["-c", &check_cmd.to_shell_string()]) {
             if output.trim() == "exists" {
-                return Ok(remote_dest_path_str);
+                return Ok(remote_dest_str);
             }
         }
 
-        let mkdir_cmd = format!(
-            "mkdir -p {}",
-            shell_quote(&remote_versioned_dir.to_string_lossy())
-        );
-        self.run_command("sh", &["-c", &mkdir_cmd])?;
+        let mkdir_cmd = RemoteCommand::new("mkdir")
+            .arg("-p")
+            .arg(&remote_versioned_dir.to_string_lossy());
 
-        let sftp_bin = self.local_tool("sftp");
-        if sftp_bin.exists() {
-            let mut batch_file = tempfile::Builder::new()
-                .prefix("repx-sftp-batch-")
-                .tempfile()
-                .map_err(AppError::from)?;
-
-            writeln!(
-                batch_file,
-                "put {} {}\nchmod 755 {}",
-                rsync_local_path.to_string_lossy(),
-                remote_dest_path_str,
-                remote_dest_path_str
-            )
-            .map_err(AppError::from)?;
-            batch_file.flush().map_err(AppError::from)?;
-
-            let mut sftp_cmd = Command::new(sftp_bin);
-            sftp_cmd.arg("-b").arg(batch_file.path()).arg(&self.address);
-
-            logging::log_and_print_command(&sftp_cmd);
-            match sftp_cmd.output() {
-                Ok(output) if output.status.success() => return Ok(remote_dest_path_str),
-                Ok(output) => {
-                    let stderr = String::from_utf8_lossy(&output.stderr);
-                    log_info!(
-                        "[WARN] SFTP deployment failed (status {}): {}. Falling back to SCP.",
-                        output.status,
-                        stderr
-                    );
-                }
-                Err(e) => {
-                    log_info!(
-                        "[WARN] SFTP command execution failed: {}. Falling back to SCP.",
-                        e
-                    );
-                }
-            }
-        }
+        self.run_command("sh", &["-c", &mkdir_cmd.to_shell_string()])?;
 
         let mut scp_cmd = Command::new(self.local_tool("scp"));
         scp_cmd.arg(&rsync_local_path).arg(format!(
@@ -118,92 +76,96 @@ impl SshTarget {
             self.address,
             remote_dest_path.display()
         ));
-        logging::log_and_print_command(&scp_cmd);
-        let scp_output = scp_cmd.output().map_err(AppError::from)?;
 
-        if !scp_output.status.success() {
-            let stderr = String::from_utf8_lossy(&scp_output.stderr);
-            return Err(ClientError::Core(AppError::ExecutionFailed {
-                message: format!("scp failed for rsync binary to {}", self.address),
-                log_path: None,
-                log_summary: format!(
-                    "scp exited with status {}. Stderr:\n{}",
-                    scp_output.status, stderr
-                ),
-            }));
+        logging::log_and_print_command(&scp_cmd);
+        let output = scp_cmd
+            .output()
+            .map_err(|e| ClientError::Config(ConfigError::Io(e)))?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(ClientError::Config(ConfigError::General(format!(
+                "scp failed for rsync binary to {}: {}",
+                self.address, stderr
+            ))));
         }
 
-        let chmod_cmd = format!("chmod 755 {}", shell_quote(&remote_dest_path_str));
-        let _ = self.run_command("sh", &["-c", &chmod_cmd]);
+        let chmod_cmd = RemoteCommand::new("chmod").arg("755").arg(&remote_dest_str);
+        let _ = self.run_command("sh", &["-c", &chmod_cmd.to_shell_string()]);
 
-        Ok(remote_dest_path_str)
+        Ok(remote_dest_str)
     }
 }
 
-impl Target for SshTarget {
+impl TargetInfo for SshTarget {
     fn name(&self) -> &str {
         &self.name
     }
+
     fn base_path(&self) -> &Path {
         &self.config.base_path
     }
-    fn config(&self) -> &repx_core::config::Target {
+
+    fn config(&self) -> &config::Target {
         &self.config
     }
+
     fn get_remote_path_str(&self, job_id: &JobId) -> String {
         format!(
             "{}:{}",
             self.address,
             self.base_path()
-                .join("outputs")
+                .join(dirs::OUTPUTS)
                 .join(&job_id.0)
-                .join("out")
+                .join(dirs::OUT)
                 .display()
         )
     }
+}
 
+impl CommandRunner for SshTarget {
     fn run_command(&self, command: &str, args: &[&str]) -> Result<String> {
         let remote_cmd_exe = self.remote_tool(command);
 
         let remote_command_string = if command == "sh" && args.len() == 2 && args[0] == "-c" {
             format!("sh -c {}", shell_quote(args[1]))
         } else {
-            let mut all_parts = vec![remote_cmd_exe.as_str()];
-            all_parts.extend_from_slice(args);
-            all_parts.join(" ")
+            let mut parts = vec![remote_cmd_exe.as_str()];
+            parts.extend_from_slice(args);
+            parts.join(" ")
         };
 
         let mut cmd = Command::new(self.local_tool("ssh"));
         cmd.arg(&self.address).arg(&remote_command_string);
 
         logging::log_and_print_command(&cmd);
-        let output = cmd.output().map_err(|e| AppError::ProcessLaunchFailed {
-            command_name: "ssh".to_string(),
-            source: e,
-        })?;
+        let output = cmd
+            .output()
+            .map_err(|e| ClientError::Config(ConfigError::Io(e)))?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
             return Err(ClientError::TargetCommandFailed {
                 target: self.name.clone(),
-                source: AppError::ExecutionFailed {
-                    message: format!(
-                        "Command '{}' failed on target '{}'",
-                        remote_command_string, self.name
-                    ),
-                    log_path: None,
-                    log_summary: stderr.to_string(),
-                },
+                source: ConfigError::General(format!(
+                    "Command '{}' failed on target '{}': {}",
+                    remote_command_string, self.name, stderr
+                )),
             });
         }
+
         Ok(String::from_utf8_lossy(&output.stdout).to_string())
     }
+}
 
+impl SlurmOps for SshTarget {
     fn scancel(&self, slurm_id: u32) -> Result<()> {
         self.run_command("scancel", &[&slurm_id.to_string()])?;
         Ok(())
     }
+}
 
+impl ArtifactSync for SshTarget {
     fn get_missing_artifacts(&self, artifacts: &HashSet<PathBuf>) -> Result<HashSet<PathBuf>> {
         if artifacts.is_empty() {
             return Ok(HashSet::new());
@@ -213,17 +175,19 @@ impl Target for SshTarget {
         let find_bin = self.remote_tool("find");
         let mkdir_bin = self.remote_tool("mkdir");
 
-        let find_cmd = format!(
-            "{} -p {} && (cd {} && {} . -type f) || true",
-            mkdir_bin,
-            shell_quote(&artifacts_base.to_string_lossy()),
-            shell_quote(&artifacts_base.to_string_lossy()),
-            find_bin
-        );
+        let find_cmd = RemoteCommand::new(&mkdir_bin)
+            .arg("-p")
+            .arg(&artifacts_base.to_string_lossy())
+            .and(
+                RemoteCommand::new("cd")
+                    .arg(&artifacts_base.to_string_lossy())
+                    .and(RemoteCommand::new(&find_bin).arg(".").arg("-type").arg("f")),
+            )
+            .or(RemoteCommand::new("true"));
 
-        let output = self.run_command("sh", &["-c", &find_cmd])?;
+        let output = self.run_command("sh", &["-c", &find_cmd.to_shell_string()])?;
 
-        let existing_artifacts: HashSet<PathBuf> = output
+        let existing: HashSet<PathBuf> = output
             .lines()
             .filter_map(|s| s.strip_prefix("./"))
             .map(PathBuf::from)
@@ -231,9 +195,10 @@ impl Target for SshTarget {
 
         let missing = artifacts
             .iter()
-            .filter(|required| !existing_artifacts.contains(*required))
+            .filter(|p| !existing.contains(*p))
             .cloned()
             .collect();
+
         Ok(missing)
     }
 
@@ -247,15 +212,19 @@ impl Target for SshTarget {
             return Ok(());
         }
 
+        let _ = fs_err::create_dir_all(&self.local_temp_path);
         let mut temp_file = tempfile::Builder::new()
             .prefix("repx-sync-list-")
-            .tempfile()
-            .map_err(AppError::from)?;
+            .tempfile_in(&self.local_temp_path)
+            .map_err(|e| ClientError::Config(ConfigError::Io(e)))?;
 
         for path in artifacts {
-            writeln!(temp_file, "{}", path.to_string_lossy()).map_err(AppError::from)?;
+            writeln!(temp_file, "{}", path.to_string_lossy())
+                .map_err(|e| ClientError::Config(ConfigError::Io(e)))?;
         }
-        temp_file.flush().map_err(AppError::from)?;
+        temp_file
+            .flush()
+            .map_err(|e| ClientError::Config(ConfigError::Io(e)))?;
 
         let remote_rsync_path = self.deploy_rsync_binary()?;
 
@@ -272,199 +241,83 @@ impl Target for SshTarget {
                 self.artifacts_base_path().display()
             ))
             .current_dir(local_lab_path);
-        log_info!("[CMD] Syncing artifact batch with rsync: {:?}", rsync_cmd);
-        let rsync_output = rsync_cmd.output().map_err(AppError::from)?;
 
-        if !rsync_output.status.success() {
-            let stderr = String::from_utf8_lossy(&rsync_output.stderr);
-            return Err(ClientError::Core(AppError::ExecutionFailed {
-                message: "rsync failed".to_string(),
-                log_path: None,
-                log_summary: format!(
-                    "rsync exited with status {}. Stderr:\n{}",
-                    rsync_output.status, stderr
-                ),
-            }));
+        logging::log_and_print_command(&rsync_cmd);
+        let output = rsync_cmd
+            .output()
+            .map_err(|e| ClientError::Config(ConfigError::Io(e)))?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(ClientError::Config(ConfigError::General(format!(
+                "rsync batch sync failed: {}",
+                stderr
+            ))));
         }
-
-        let remote_artifacts_base = self.artifacts_base_path();
-        let chmod_bin = self.remote_tool("chmod");
-        let chmod_cmd_str = format!(
-            "{} -R a-w,a+rX {}",
-            chmod_bin,
-            shell_quote(&remote_artifacts_base.to_string_lossy())
-        );
-
-        self.run_command("sh", &["-c", &chmod_cmd_str])?;
 
         Ok(())
     }
 
     fn sync_artifact(&self, local_path: &Path, relative_path: &Path) -> Result<()> {
-        let remote_dest = self.artifacts_base_path().join(relative_path);
-        let remote_parent = remote_dest.parent().unwrap();
-        let mkdir_cmd = format!("mkdir -p {}", shell_quote(&remote_parent.to_string_lossy()));
-        self.run_command("sh", &["-c", &mkdir_cmd])?;
+        let dest = self.artifacts_base_path().join(relative_path);
+        let dest_str = format!("{}:{}", self.address, dest.display());
+
+        if let Some(parent) = dest.parent() {
+            let mkdir_cmd = RemoteCommand::new("mkdir")
+                .arg("-p")
+                .arg(&parent.to_string_lossy());
+            self.run_command("sh", &["-c", &mkdir_cmd.to_shell_string()])?;
+        }
 
         let mut scp_cmd = Command::new(self.local_tool("scp"));
         if local_path.is_dir() {
             scp_cmd.arg("-r");
         }
-        scp_cmd
-            .arg(local_path)
-            .arg(format!("{}:{}", self.address, remote_dest.display()));
-        log_info!("[CMD] Syncing artifact with scp: {:?}", scp_cmd);
-        let scp_output = scp_cmd.output().map_err(AppError::from)?;
+        scp_cmd.arg(local_path).arg(&dest_str);
 
-        if !scp_output.status.success() {
-            let stderr = String::from_utf8_lossy(&scp_output.stderr);
-            return Err(ClientError::Core(AppError::ExecutionFailed {
-                message: format!("scp failed for {}", local_path.display()),
-                log_path: None,
-                log_summary: format!(
-                    "scp exited with status {}. Stderr:\n{}",
-                    scp_output.status, stderr
-                ),
-            }));
-        }
-
-        let chmod_bin = self.remote_tool("chmod");
-        let mut chmod_cmds = Vec::new();
-        if local_path.is_dir() {
-            chmod_cmds.push(format!(
-                "{} -R a-w,a+rX {}",
-                chmod_bin,
-                shell_quote(&remote_dest.to_string_lossy())
-            ));
-
-            for entry in walkdir::WalkDir::new(local_path).into_iter().flatten() {
-                if entry.file_type().is_file() {
-                    if let Ok(metadata) = entry.metadata() {
-                        if (metadata.mode() & 0o111) != 0 {
-                            let rel_path = entry.path().strip_prefix(local_path).unwrap();
-                            let remote_file_path = remote_dest.join(rel_path);
-                            chmod_cmds.push(format!(
-                                "{} a+x {}",
-                                chmod_bin,
-                                shell_quote(&remote_file_path.to_string_lossy())
-                            ));
-                        }
-                    }
-                }
-            }
-        } else {
-            let is_executable = local_path.metadata().is_ok_and(|m| (m.mode() & 0o111) != 0);
-            let mode = if is_executable { "555" } else { "444" };
-            chmod_cmds.push(format!(
-                "{} {} {}",
-                chmod_bin,
-                mode,
-                shell_quote(&remote_dest.to_string_lossy())
-            ));
-        }
-
-        if !chmod_cmds.is_empty() {
-            let final_chmod_cmd = chmod_cmds.join(" && ");
-            self.run_command("sh", &["-c", &final_chmod_cmd])?;
-        }
-
-        Ok(())
-    }
-    fn spawn_repx_job(
-        &self,
-        repx_binary_path: &Path,
-        args: &[String],
-    ) -> Result<std::process::Child> {
-        let remote_args: Vec<String> = args.iter().map(|a| shell_quote(a)).collect();
-        let remote_cmd = format!(
-            "{} {}",
-            shell_quote(&repx_binary_path.to_string_lossy()),
-            remote_args.join(" ")
-        );
-
-        let mut cmd = Command::new(self.local_tool("ssh"));
-        cmd.arg(&self.address).arg(remote_cmd);
-        cmd.stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped());
-        logging::log_and_print_command(&cmd);
-
-        cmd.spawn().map_err(|e| {
-            ClientError::Core(AppError::ProcessLaunchFailed {
-                command_name: "ssh".to_string(),
-                source: e,
-            })
-        })
-    }
-    fn read_remote_file_tail(&self, path: &Path, line_count: u32) -> Result<Vec<String>> {
-        let quoted_path = shell_quote(&path.to_string_lossy());
-        let tail_bin = self.remote_tool("tail");
-        let cmd_str = format!(
-            "[ -f {} ] && {} -n {} {} || true",
-            quoted_path, tail_bin, line_count, quoted_path
-        );
-        let output = self.run_command("sh", &["-c", &cmd_str])?;
-        Ok(output.lines().map(String::from).collect())
-    }
-
-    fn write_remote_file(&self, path: &Path, content: &str) -> Result<()> {
-        let parent = path.parent().ok_or_else(|| {
-            ClientError::Core(AppError::Io(std::io::Error::new(
-                std::io::ErrorKind::InvalidInput,
-                "Path has no parent",
-            )))
-        })?;
-        let mkdir_bin = self.remote_tool("mkdir");
-        let cat_bin = self.remote_tool("cat");
-
-        let remote_command = format!(
-            "{} -p {} && {} > {}",
-            mkdir_bin,
-            shell_quote(&parent.to_string_lossy()),
-            cat_bin,
-            shell_quote(&path.to_string_lossy())
-        );
-
-        let mut cmd = Command::new(self.local_tool("ssh"));
-        cmd.arg(&self.address)
-            .arg(&remote_command)
-            .stdin(std::process::Stdio::piped())
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped());
-
-        logging::log_and_print_command(&cmd);
-
-        let mut child = cmd.spawn().map_err(|e| AppError::ProcessLaunchFailed {
-            command_name: "ssh".to_string(),
-            source: e,
-        })?;
-
-        let mut stdin = child.stdin.take().expect("Failed to open stdin for ssh");
-        let content_bytes = content.as_bytes().to_vec();
-        std::thread::spawn(move || {
-            let _ = std::io::Write::write_all(&mut stdin, &content_bytes);
-        });
-
-        let output = child.wait_with_output().map_err(|e| {
-            ClientError::Core(AppError::ExecutionFailed {
-                message: "Failed to wait for remote write command".to_string(),
-                log_path: None,
-                log_summary: e.to_string(),
-            })
-        })?;
+        logging::log_and_print_command(&scp_cmd);
+        let output = scp_cmd
+            .output()
+            .map_err(|e| ClientError::Config(ConfigError::Io(e)))?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(ClientError::TargetCommandFailed {
-                target: self.name.clone(),
-                source: AppError::ExecutionFailed {
-                    message: format!("Failed to write remote file '{}'", path.display()),
-                    log_path: None,
-                    log_summary: stderr.to_string(),
-                },
-            });
+            return Err(ClientError::Config(ConfigError::General(format!(
+                "scp failed for {}: {}",
+                relative_path.display(),
+                stderr
+            ))));
         }
+
+        if !local_path.is_dir() {
+            if let Ok(meta) = std::fs::metadata(local_path) {
+                use std::os::unix::fs::MetadataExt;
+                let is_executable = (meta.mode() & 0o111) != 0;
+                if is_executable {
+                    let chmod_cmd = RemoteCommand::new("chmod")
+                        .arg("755")
+                        .arg(&dest.to_string_lossy());
+                    let _ = self.run_command("sh", &["-c", &chmod_cmd.to_shell_string()]);
+                }
+            }
+        }
+
         Ok(())
     }
+
+    fn sync_lab_root(&self, local_lab_path: &Path) -> Result<()> {
+        let remote_artifacts_base = self.artifacts_base_path();
+        self.sync_directory(local_lab_path, &remote_artifacts_base)?;
+
+        let chmod_bin = self.remote_tool("chmod");
+        let cmd = RemoteCommand::new(&chmod_bin)
+            .arg("u+w")
+            .arg(&remote_artifacts_base.to_string_lossy());
+        self.run_command("sh", &["-c", &cmd.to_shell_string()])?;
+
+        Ok(())
+    }
+
     fn sync_directory(&self, local_path: &Path, remote_path: &Path) -> Result<()> {
         let remote_rsync_path = self.deploy_rsync_binary()?;
 
@@ -477,26 +330,268 @@ impl Target for SshTarget {
             .arg(format!("{}:{}", self.address, remote_path.display()));
 
         logging::log_and_print_command(&rsync_cmd);
-        let rsync_output = rsync_cmd.output().map_err(AppError::from)?;
+        let output = rsync_cmd
+            .output()
+            .map_err(|e| ClientError::Config(ConfigError::Io(e)))?;
 
-        if !rsync_output.status.success() {
-            let stderr = String::from_utf8_lossy(&rsync_output.stderr);
-            return Err(ClientError::Core(AppError::ExecutionFailed {
-                message: "rsync failed for directory sync".to_string(),
-                log_path: None,
-                log_summary: format!(
-                    "rsync exited with status {}. Stderr:\n{}",
-                    rsync_output.status, stderr
-                ),
-            }));
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(ClientError::Config(ConfigError::General(format!(
+                "rsync directory sync failed: {}",
+                stderr
+            ))));
         }
+
         Ok(())
     }
 
-    fn sync_lab_root(&self, local_lab_path: &Path) -> Result<()> {
-        let remote_artifacts_base = self.artifacts_base_path();
-        self.sync_directory(local_lab_path, &remote_artifacts_base)
+    fn sync_image_incrementally(
+        &self,
+        image_path: &Path,
+        image_tag: &str,
+        local_cache_root: &Path,
+    ) -> Result<()> {
+        let images_cache = local_cache_root.join("images");
+        let layers_cache = local_cache_root.join("layers");
+
+        fs_err::create_dir_all(&images_cache)
+            .map_err(|e| ClientError::Config(ConfigError::Io(e)))?;
+        fs_err::create_dir_all(&layers_cache)
+            .map_err(|e| ClientError::Config(ConfigError::Io(e)))?;
+
+        let tar_tool = self.local_tool("tar");
+
+        if image_path.is_dir() {
+            let remote_images = self.base_path().join("images");
+
+            let mkdir_cmd = RemoteCommand::new("mkdir")
+                .arg("-p")
+                .arg(&remote_images.to_string_lossy());
+            self.run_command("sh", &["-c", &mkdir_cmd.to_shell_string()])?;
+
+            let image_dir_name = image_path
+                .file_name()
+                .and_then(|s| s.to_str())
+                .unwrap_or("image");
+
+            let remote_image_dir = remote_images.join(image_dir_name);
+
+            self.sync_directory(image_path, &remote_image_dir)?;
+
+            let ln_cmd = RemoteCommand::new("cd")
+                .arg(&remote_images.to_string_lossy())
+                .and(
+                    RemoteCommand::new("ln")
+                        .arg("-sfn")
+                        .arg(image_dir_name)
+                        .arg(image_tag),
+                );
+            self.run_command("sh", &["-c", &ln_cmd.to_shell_string()])?;
+
+            return Ok(());
+        }
+
+        let layers = super::common::get_image_manifest(image_path, &tar_tool)?;
+
+        let remote_layers = self.base_path().join("layers");
+        let remote_images = self.base_path().join("images");
+
+        let mkdir_cmd = RemoteCommand::new("mkdir")
+            .arg("-p")
+            .arg(&remote_images.to_string_lossy())
+            .arg(&remote_layers.to_string_lossy());
+        self.run_command("sh", &["-c", &mkdir_cmd.to_shell_string()])?;
+
+        let check_cmd = RemoteCommand::new("ls")
+            .arg("-1")
+            .arg(&remote_layers.to_string_lossy());
+
+        let remote_layer_list_str = self
+            .run_command("sh", &["-c", &check_cmd.to_shell_string()])
+            .unwrap_or_default();
+
+        let existing_remote_layers: HashSet<String> = remote_layer_list_str
+            .lines()
+            .map(|s| s.trim().to_string())
+            .collect();
+
+        let mut layers_to_sync = Vec::new();
+
+        for layer in &layers {
+            let layer_hash = Path::new(layer)
+                .parent()
+                .and_then(|p| p.to_str())
+                .unwrap_or(layer);
+
+            if !existing_remote_layers.contains(layer_hash) {
+                super::common::extract_layer_to_cache(
+                    image_path,
+                    layer,
+                    layer_hash,
+                    &layers_cache,
+                    &tar_tool,
+                )?;
+                layers_to_sync.push(layers_cache.join(layer_hash));
+            }
+        }
+
+        if !layers_to_sync.is_empty() {
+            let remote_rsync_path = self.deploy_rsync_binary()?;
+            let layers_to_sync_set: HashSet<PathBuf> = layers_to_sync.into_iter().collect();
+
+            for layer_dir in layers_to_sync_set {
+                let dirname = layer_dir.file_name().unwrap().to_string_lossy();
+                let remote_dest = remote_layers.join(dirname.as_ref());
+
+                let mut rsync_cmd = Command::new(self.local_tool("rsync"));
+                rsync_cmd
+                    .arg("-rLtpz")
+                    .arg(format!("--rsync-path={}", remote_rsync_path))
+                    .arg(format!("{}/", layer_dir.display()))
+                    .arg(format!("{}:{}/", self.address, remote_dest.display()));
+
+                logging::log_and_print_command(&rsync_cmd);
+                let output = rsync_cmd
+                    .output()
+                    .map_err(|e| ClientError::Config(ConfigError::Io(e)))?;
+
+                if !output.status.success() {
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    return Err(ClientError::Config(ConfigError::General(format!(
+                        "rsync failed for layer {}: {}",
+                        dirname, stderr
+                    ))));
+                }
+            }
+        }
+
+        let image_filename = image_path.file_name().unwrap().to_str().unwrap();
+        let image_hash_name = super::common::parse_image_hash(image_filename);
+        let remote_image_dir = remote_images.join(image_hash_name);
+
+        let manifest_content = serde_json::to_string(&vec![super::common::ManifestEntry {
+            layers: layers.clone(),
+        }])
+        .map_err(|e| ClientError::Config(ConfigError::Json(e)))?;
+
+        self.write_remote_file(&remote_image_dir.join("manifest.json"), &manifest_content)?;
+
+        let mut link_script = String::from("set -e\n");
+        for layer in &layers {
+            let layer_hash = Path::new(layer)
+                .parent()
+                .and_then(|p| p.to_str())
+                .unwrap_or(layer);
+
+            let link_dir = remote_image_dir.join(layer_hash);
+            link_script.push_str(&format!("mkdir -p {}\n", link_dir.to_string_lossy()));
+
+            let target_path = PathBuf::from("../../layers")
+                .join(layer_hash)
+                .join("layer.tar");
+            let link_path = link_dir.join("layer.tar");
+
+            link_script.push_str(&format!(
+                "ln -sfn {} {}\n",
+                target_path.to_string_lossy(),
+                link_path.to_string_lossy()
+            ));
+        }
+
+        self.run_command("sh", &["-c", &link_script])?;
+
+        let ln_cmd = RemoteCommand::new("cd")
+            .arg(&remote_images.to_string_lossy())
+            .and(
+                RemoteCommand::new("ln")
+                    .arg("-sfn")
+                    .arg(image_hash_name)
+                    .arg(image_tag),
+            );
+        self.run_command("sh", &["-c", &ln_cmd.to_shell_string()])?;
+
+        Ok(())
     }
+}
+
+impl FileOps for SshTarget {
+    fn read_remote_file_tail(&self, path: &Path, line_count: u32) -> Result<Vec<String>> {
+        let quoted_path = path.to_string_lossy();
+        let tail_bin = self.remote_tool("tail");
+
+        let cmd = RemoteCommand::new("[")
+            .arg("-f")
+            .arg(&quoted_path)
+            .arg("]")
+            .and(
+                RemoteCommand::new(&tail_bin)
+                    .arg("-n")
+                    .arg(&line_count.to_string())
+                    .arg(&quoted_path),
+            )
+            .or(RemoteCommand::new("true"));
+
+        let output = self.run_command("sh", &["-c", &cmd.to_shell_string()])?;
+        Ok(output.lines().map(String::from).collect())
+    }
+
+    fn write_remote_file(&self, path: &Path, content: &str) -> Result<()> {
+        let parent = path.parent().ok_or_else(|| ClientError::InvalidPath {
+            path: path.to_path_buf(),
+            reason: "Path has no parent directory".to_string(),
+        })?;
+
+        let mkdir_bin = self.remote_tool("mkdir");
+        let cat_bin = self.remote_tool("cat");
+
+        let remote_command = RemoteCommand::new(&mkdir_bin)
+            .arg("-p")
+            .arg(&parent.to_string_lossy())
+            .and(RemoteCommand::new(&cat_bin).redirect_out(&path.to_string_lossy()));
+
+        let mut cmd = Command::new(self.local_tool("ssh"));
+        cmd.arg(&self.address)
+            .arg(remote_command.to_shell_string())
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped());
+
+        logging::log_and_print_command(&cmd);
+
+        let mut child = cmd
+            .spawn()
+            .map_err(|e| ClientError::Config(ConfigError::Io(e)))?;
+
+        let mut stdin = child.stdin.take().expect("Failed to open stdin");
+        let content_bytes = content.as_bytes().to_vec();
+        std::thread::spawn(move || {
+            let _ = stdin.write_all(&content_bytes);
+        });
+
+        let output = child.wait_with_output().map_err(|e| {
+            ClientError::Config(ConfigError::General(format!(
+                "Failed to wait for remote write: {}",
+                e
+            )))
+        })?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(ClientError::TargetCommandFailed {
+                target: self.name.clone(),
+                source: ConfigError::General(format!(
+                    "Failed to write '{}': {}",
+                    path.display(),
+                    stderr
+                )),
+            });
+        }
+
+        Ok(())
+    }
+}
+
+impl JobRunner for SshTarget {
     fn deploy_repx_binary(&self) -> Result<PathBuf> {
         let runner_exe_path = super::find_local_runner_binary()?;
         let hash = super::compute_file_hash(&runner_exe_path)?;
@@ -504,55 +599,36 @@ impl Target for SshTarget {
         let remote_versioned_dir = self.base_path().join("bin").join(&hash);
         let remote_dest_path = remote_versioned_dir.join("repx");
 
-        let verify_execution = || -> Result<()> {
-            let verify_cmd = format!(
-                "{} --version",
-                shell_quote(&remote_dest_path.to_string_lossy())
-            );
-            match self.run_command("sh", &["-c", &verify_cmd]) {
+        let verify = || -> Result<()> {
+            let cmd = RemoteCommand::new(&remote_dest_path.to_string_lossy()).arg("--version");
+            match self.run_command("sh", &["-c", &cmd.to_shell_string()]) {
                 Ok(_) => Ok(()),
-                Err(e) => {
-                    let msg = format!(
-                        "The deployed repx binary at '{}' failed to execute.\n\
-                         It returned an error when running '--version'.\n\
-                         \n\
-                         Original Error: {}\n\
-                         \n\
-                         POSSIBLE CAUSE: The binary might be incompatible with the target system (e.g. wrong architecture or dynamic linking issues).\n\
-                         \n\
-                         SOLUTION: Ensure you are building a static binary (default in flake) compatible with the target architecture.\n\
-                         You can check the binary type with 'file repx'.",
-                        remote_dest_path.display(),
+                Err(e) => Err(ClientError::TargetCommandFailed {
+                    target: self.name.clone(),
+                    source: ConfigError::General(format!(
+                        "Binary verification failed. The deployed binary failed to execute. Check architecture compatibility.\nError: {}",
                         e
-                    );
-                    Err(ClientError::TargetCommandFailed {
-                        target: self.name.clone(),
-                        source: AppError::ExecutionFailed {
-                            message: "Binary verification failed".to_string(),
-                            log_path: None,
-                            log_summary: msg,
-                        },
-                    })
-                }
+                    )),
+                }),
             }
         };
 
-        let check_cmd = format!(
-            "test -f {} && echo 'exists'",
-            shell_quote(&remote_dest_path.to_string_lossy())
-        );
-        if let Ok(output) = self.run_command("sh", &["-c", &check_cmd]) {
+        let check_cmd = RemoteCommand::new("test")
+            .arg("-f")
+            .arg(&remote_dest_path.to_string_lossy())
+            .and(RemoteCommand::new("echo").arg("exists"));
+
+        if let Ok(output) = self.run_command("sh", &["-c", &check_cmd.to_shell_string()]) {
             if output.trim() == "exists" {
-                verify_execution()?;
+                verify()?;
                 return Ok(remote_dest_path);
             }
         }
 
-        let mkdir_cmd = format!(
-            "mkdir -p {}",
-            shell_quote(&remote_versioned_dir.to_string_lossy())
-        );
-        self.run_command("sh", &["-c", &mkdir_cmd])?;
+        let mkdir_cmd = RemoteCommand::new("mkdir")
+            .arg("-p")
+            .arg(&remote_versioned_dir.to_string_lossy());
+        self.run_command("sh", &["-c", &mkdir_cmd.to_shell_string()])?;
 
         let mut scp_cmd = Command::new(self.local_tool("scp"));
         scp_cmd.arg(&runner_exe_path).arg(format!(
@@ -560,50 +636,75 @@ impl Target for SshTarget {
             self.address,
             remote_dest_path.display()
         ));
-        logging::log_and_print_command(&scp_cmd);
-        let scp_output = scp_cmd.output().map_err(AppError::from)?;
 
-        if !scp_output.status.success() {
-            let stderr = String::from_utf8_lossy(&scp_output.stderr);
-            return Err(ClientError::Core(AppError::ExecutionFailed {
-                message: format!("scp failed for repx binary to {}", self.address),
-                log_path: None,
-                log_summary: format!(
-                    "scp exited with status {}. Stderr:\n{}",
-                    scp_output.status, stderr
-                ),
-            }));
+        logging::log_and_print_command(&scp_cmd);
+        let output = scp_cmd
+            .output()
+            .map_err(|e| ClientError::Config(ConfigError::Io(e)))?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(ClientError::Config(ConfigError::General(format!(
+                "scp failed for repx binary to {}: {}",
+                self.address, stderr
+            ))));
         }
 
-        let chmod_cmd = format!(
-            "chmod 755 {}",
-            shell_quote(&remote_dest_path.to_string_lossy())
-        );
-        self.run_command("sh", &["-c", &chmod_cmd])?;
+        let chmod_cmd = RemoteCommand::new("chmod")
+            .arg("755")
+            .arg(&remote_dest_path.to_string_lossy());
+        self.run_command("sh", &["-c", &chmod_cmd.to_shell_string()])?;
 
-        verify_execution()?;
-
+        verify()?;
         Ok(remote_dest_path)
     }
 
+    fn spawn_repx_job(
+        &self,
+        repx_binary_path: &Path,
+        args: &[String],
+    ) -> Result<std::process::Child> {
+        let remote_cmd = RemoteCommand::new(&repx_binary_path.to_string_lossy()).args(args);
+
+        let mut cmd = Command::new(self.local_tool("ssh"));
+        cmd.arg(&self.address)
+            .arg(remote_cmd.to_shell_string())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped());
+
+        logging::log_and_print_command(&cmd);
+
+        cmd.spawn().map_err(|e| {
+            ClientError::Config(ConfigError::General(format!(
+                "Failed to spawn SSH process: {}",
+                e
+            )))
+        })
+    }
+}
+
+impl GcOps for SshTarget {
     fn register_gc_root(&self, project_id: &str, lab_hash: &str) -> Result<()> {
         let gcroots_dir = self
             .base_path()
             .join("gcroots")
             .join("auto")
             .join(project_id);
-        let timestamp = chrono::Local::now().format("%Y-%m-%d_%H-%M-%S").to_string();
-        let link_name = format!("{}_{}", timestamp, lab_hash);
+
+        let link_name = super::common::generate_gc_link_name(lab_hash);
         let link_path = gcroots_dir.join(&link_name);
 
         let artifacts_base = self.artifacts_base_path();
         let lab_dir = artifacts_base.join("lab");
-        let find_manifest_cmd = format!(
-            "find {} -name '*{}*-lab-metadata.json' | head -n 1",
-            shell_quote(&lab_dir.to_string_lossy()),
-            lab_hash
-        );
-        let manifest_output = self.run_command("sh", &["-c", &find_manifest_cmd])?;
+
+        let find_manifest_cmd = RemoteCommand::new("find")
+            .arg(&lab_dir.to_string_lossy())
+            .arg("-name")
+            .arg(&format!("*{}*-lab-metadata.json", lab_hash))
+            .pipe(RemoteCommand::new("head").arg("-n").arg("1"));
+
+        let manifest_output =
+            self.run_command("sh", &["-c", &find_manifest_cmd.to_shell_string()])?;
         let manifest_path_str = manifest_output.trim();
 
         let target_path_str = if !manifest_path_str.is_empty() {
@@ -616,7 +717,6 @@ impl Target for SshTarget {
             r#"
             mkdir -p {0}
             ln -sfn {1} {2}
-
             cd {0}
             ls -1 | sort -r | tail -n +6 | xargs -r rm
             "#,
@@ -631,11 +731,11 @@ impl Target for SshTarget {
 
     fn garbage_collect(&self) -> Result<String> {
         let repx_bin = self.deploy_repx_binary()?;
-        let cmd = format!(
-            "{} internal-gc --base-path {}",
-            shell_quote(&repx_bin.to_string_lossy()),
-            shell_quote(&self.base_path().to_string_lossy())
-        );
-        self.run_command("sh", &["-c", &cmd])
+        let cmd = RemoteCommand::new(&repx_bin.to_string_lossy())
+            .arg("internal-gc")
+            .arg("--base-path")
+            .arg(&self.base_path().to_string_lossy());
+
+        self.run_command("sh", &["-c", &cmd.to_shell_string()])
     }
 }

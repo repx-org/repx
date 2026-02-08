@@ -45,6 +45,9 @@ let
     e2e-mount-paths-docker = import ./checks/runtime/e2e-mount-paths-docker.nix {
       inherit pkgs repx referenceLab;
     };
+    incremental-sync = import ./checks/runtime/incremental-sync-test.nix {
+      inherit pkgs repx referenceLab;
+    };
   };
 
   libChecks = {
@@ -61,7 +64,41 @@ let
 
   unitChecks = {
     repx-py-tests = import ./checks/unit/repx-py.nix { inherit pkgs referenceLab; };
-    repx-rs-tests = import ./checks/unit/repx-rs.nix { inherit pkgs referenceLab; };
+    rs-client-tests = import ./checks/unit/repx-rs.nix {
+      inherit pkgs referenceLab;
+      testName = "repx-rs-client-tests";
+      cargoTestArgs = "--test wave_scheduler --test data_only_local --test smart_sync_tests";
+    };
+    rs-unit = import ./checks/unit/repx-rs.nix {
+      inherit pkgs referenceLab;
+      testName = "repx-rs-unit";
+      cargoTestArgs = "--lib --bins";
+    };
+    rs-bwrap = import ./checks/unit/repx-rs.nix {
+      inherit pkgs referenceLab;
+      testName = "repx-rs-bwrap";
+      cargoTestArgs = "--test bwrap_tests";
+    };
+    rs-gc = import ./checks/unit/repx-rs.nix {
+      inherit pkgs referenceLab;
+      testName = "repx-rs-gc";
+      cargoTestArgs = "--test gc_tests";
+    };
+    rs-integration = import ./checks/unit/repx-rs.nix {
+      inherit pkgs referenceLab;
+      testName = "repx-rs-integration";
+      cargoTestArgs = "--test e2e_tests --test component_tests --test regression_tests";
+    };
+    rs-containers = import ./checks/unit/repx-rs.nix {
+      inherit pkgs referenceLab;
+      testName = "repx-rs-containers";
+      cargoTestArgs = "--test podman_tests --test docker_tests";
+    };
+    rs-executor = import ./checks/unit/repx-rs.nix {
+      inherit pkgs referenceLab;
+      testName = "repx-rs-executor";
+      cargoTestArgs = "--test executor_tests --test unit_tests";
+    };
   };
 
 in

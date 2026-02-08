@@ -181,9 +181,9 @@ fn draw_graphs(f: &mut Frame, area: Rect, app: &App) {
     let chunks = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
-            Constraint::Percentage(50), // Job Status History
+            Constraint::Percentage(50),
             Constraint::Length(1),
-            Constraint::Min(0), // Job Completion Rate
+            Constraint::Min(0),
         ])
         .split(area);
 
@@ -200,7 +200,6 @@ fn draw_graphs(f: &mut Frame, area: Rect, app: &App) {
         .constraints([Constraint::Min(0), Constraint::Length(1)])
         .split(right_area);
 
-    // Left plot: Job Status History
     let bg = get_color(app, &app.theme.elements.graphs.background.color);
     let status_styles = &app.theme.elements.job_status;
     let status_colors: BTreeMap<&'static str, Color> = [
@@ -233,11 +232,9 @@ fn draw_graphs(f: &mut Frame, area: Rect, app: &App) {
         status_chunks[1],
     );
 
-    // Separator
     let separator = Paragraph::new("│").style(Style::default().add_modifier(Modifier::DIM));
     f.render_widget(separator, separator_area);
 
-    // Right plot: Job Completion Rate
     let rate_data: Vec<f64> = app.completion_rate_history.iter().copied().collect();
     let max_rate = rate_data
         .iter()
@@ -954,7 +951,7 @@ fn build_tree_rows<'a>(
 
                 rows.push(Row::new(vec![
                     selector,
-                    Cell::from(""), // jobid
+                    Cell::from(""),
                     Cell::from(Line::from(vec![
                         Span::raw(item_prefix),
                         Span::styled(display_text, item_style),

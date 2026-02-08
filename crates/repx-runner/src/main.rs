@@ -1,6 +1,6 @@
 use clap::Parser;
 use colored::Colorize;
-use repx_core::{config, log_error, logging};
+use repx_core::{config, logging};
 use repx_runner::cli::{Cli, Commands};
 use repx_runner::run;
 use std::process;
@@ -31,7 +31,7 @@ fn main() {
 
     if let Err(e) = run(cli) {
         let err_msg = format!("[ERROR] {}", e);
-        log_error!("{}", err_msg);
+        tracing::error!("{}", err_msg);
         eprintln!("{}", err_msg.red());
         process::exit(1);
     }

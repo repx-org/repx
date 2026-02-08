@@ -1,5 +1,21 @@
-use crate::error::Result;
-use repx_core::{engine, model::JobId};
+pub mod common;
+pub mod local;
+pub mod remote_command;
+pub mod ssh;
+
+pub use common::*;
+pub use local::LocalTarget;
+pub use remote_command::RemoteCommand;
+pub use ssh::SshTarget;
+
+use crate::error::{ClientError, Result};
+use repx_core::{
+    config,
+    constants::{dirs, markers},
+    engine,
+    errors::ConfigError,
+    model::JobId,
+};
 use sha2::{Digest, Sha256};
 use std::{
     collections::{HashMap, HashSet},
@@ -7,18 +23,14 @@ use std::{
     path::{Path, PathBuf},
     sync::mpsc::Sender,
 };
-use whoami;
-pub mod local;
-pub mod ssh;
 
 pub(crate) fn compute_file_hash(path: &Path) -> Result<String> {
-    let mut file = fs_err::File::open(path).map_err(repx_core::error::AppError::from)?;
+    let mut file = fs_err::File::open(path).map_err(ConfigError::Io)?;
     let mut hasher = Sha256::new();
-    let mut buffer = [0; 8192];
+    let mut buffer = [0u8; 8192];
+
     loop {
-        let count = file
-            .read(&mut buffer)
-            .map_err(repx_core::error::AppError::from)?;
+        let count = file.read(&mut buffer).map_err(ConfigError::Io)?;
         if count == 0 {
             break;
         }
@@ -28,14 +40,13 @@ pub(crate) fn compute_file_hash(path: &Path) -> Result<String> {
 }
 
 pub(crate) fn find_local_runner_binary() -> Result<PathBuf> {
-    use repx_core::error::AppError;
-    let current_exe = std::env::current_exe().map_err(AppError::from)?;
-    let mut exe_dir = current_exe.parent().ok_or_else(|| {
-        AppError::Io(std::io::Error::new(
-            std::io::ErrorKind::NotFound,
-            "Could not find parent directory of the current executable",
-        ))
-    })?;
+    let current_exe = std::env::current_exe().map_err(ConfigError::Io)?;
+    let mut exe_dir = current_exe
+        .parent()
+        .ok_or_else(|| ClientError::InvalidPath {
+            path: current_exe.to_path_buf(),
+            reason: "Could not find parent directory of the current executable".to_string(),
+        })?;
 
     if exe_dir.file_name().and_then(|s| s.to_str()) == Some("deps") {
         if let Some(parent) = exe_dir.parent() {
@@ -46,12 +57,9 @@ pub(crate) fn find_local_runner_binary() -> Result<PathBuf> {
     let runner_exe_path = exe_dir.join("repx");
 
     if !runner_exe_path.exists() {
-        return Err(crate::error::ClientError::Core(AppError::Io(std::io::Error::new(
-            std::io::ErrorKind::NotFound,
-            format!(
-                "repx executable not found at expected path: {}. Please ensure it is built and in the same directory as the TUI.",
-                runner_exe_path.display()
-            ),
+        return Err(ClientError::Config(ConfigError::General(format!(
+            "Could not determine local repx binary path: {}",
+            runner_exe_path.display()
         ))));
     }
     Ok(runner_exe_path)
@@ -71,28 +79,39 @@ pub struct SlurmJobInfo {
     pub state: SlurmState,
 }
 
-pub trait Target: Send + Sync {
+pub trait TargetInfo: Send + Sync {
     fn name(&self) -> &str;
+
     fn base_path(&self) -> &Path;
-    fn config(&self) -> &repx_core::config::Target;
+
+    fn config(&self) -> &config::Target;
+
+    fn get_remote_path_str(&self, job_id: &JobId) -> String;
+
+    fn artifacts_base_path(&self) -> PathBuf {
+        self.base_path().join("artifacts")
+    }
+}
+
+pub trait CommandRunner: TargetInfo {
     fn run_command(&self, command: &str, args: &[&str]) -> Result<String>;
-    fn scancel(&self, slurm_id: u32) -> Result<()>;
+}
+
+pub trait ArtifactSync: TargetInfo {
     fn get_missing_artifacts(&self, artifacts: &HashSet<PathBuf>) -> Result<HashSet<PathBuf>>;
+
     fn sync_artifact(&self, local_path: &Path, relative_path: &Path) -> Result<()>;
+
     fn sync_lab_root(&self, local_lab_path: &Path) -> Result<()>;
-    fn write_remote_file(&self, path: &Path, content: &str) -> Result<()>;
-    fn deploy_repx_binary(&self) -> Result<PathBuf>;
+
     fn sync_directory(&self, local_path: &Path, remote_path: &Path) -> Result<()>;
-    fn read_remote_file_tail(&self, path: &Path, line_count: u32) -> Result<Vec<String>>;
 
-    fn register_gc_root(&self, project_id: &str, lab_hash: &str) -> Result<()>;
-    fn garbage_collect(&self) -> Result<String>;
-
-    fn spawn_repx_job(
+    fn sync_image_incrementally(
         &self,
-        repx_binary_path: &Path,
-        args: &[String],
-    ) -> Result<std::process::Child>;
+        image_path: &Path,
+        image_tag: &str,
+        local_cache_root: &Path,
+    ) -> Result<()>;
 
     fn sync_artifacts_batch(
         &self,
@@ -111,10 +130,16 @@ pub trait Target: Send + Sync {
         }
         Ok(())
     }
+}
 
-    fn artifacts_base_path(&self) -> PathBuf {
-        self.base_path().join("artifacts")
-    }
+pub trait FileOps: TargetInfo {
+    fn write_remote_file(&self, path: &Path, content: &str) -> Result<()>;
+
+    fn read_remote_file_tail(&self, path: &Path, line_count: u32) -> Result<Vec<String>>;
+}
+
+pub trait SlurmOps: CommandRunner {
+    fn scancel(&self, slurm_id: u32) -> Result<()>;
 
     fn squeue(&self) -> Result<HashMap<JobId, SlurmJobInfo>> {
         let user = if self.config().address.is_some() {
@@ -127,16 +152,28 @@ pub trait Target: Send + Sync {
         let output = self.run_command("sh", &["-c", &squeue_command])?;
         Ok(parse_squeue(&output))
     }
+}
+
+pub trait JobRunner: CommandRunner {
+    fn deploy_repx_binary(&self) -> Result<PathBuf>;
+
+    fn spawn_repx_job(
+        &self,
+        repx_binary_path: &Path,
+        args: &[String],
+    ) -> Result<std::process::Child>;
 
     fn check_outcome_markers(&self) -> Result<HashMap<JobId, engine::JobStatus>> {
-        let outputs_path = self.base_path().join("outputs");
+        let outputs_path = self.base_path().join(dirs::OUTPUTS);
         let find_cmd = format!(
-            "find {} -mindepth 3 -maxdepth 3 \\( -name SUCCESS -o -name FAIL \\) -path '*/repx/*'",
-            outputs_path.display()
+            "if [ -d \"{}\" ]; then find \"{}\" -mindepth 3 -maxdepth 3 \\( -name {} -o -name {} \\) -path '*/{}/*'; fi",
+            outputs_path.display(),
+            outputs_path.display(),
+            markers::SUCCESS,
+            markers::FAIL,
+            dirs::REPX
         );
-        let output = self
-            .run_command("sh", &["-c", &find_cmd])
-            .unwrap_or_default();
+        let output = self.run_command("sh", &["-c", &find_cmd])?;
 
         let mut outcomes = HashMap::new();
         for line in output.lines() {
@@ -148,9 +185,9 @@ pub trait Target: Send + Sync {
                     let job_id = JobId(job_id_str.to_string());
                     let location = self.name().to_string();
 
-                    let status = if file_name == "SUCCESS" {
+                    let status = if file_name == markers::SUCCESS {
                         engine::JobStatus::Succeeded { location }
-                    } else if file_name == "FAIL" {
+                    } else if file_name == markers::FAIL {
                         engine::JobStatus::Failed { location }
                     } else {
                         continue;
@@ -161,8 +198,22 @@ pub trait Target: Send + Sync {
         }
         Ok(outcomes)
     }
+}
 
-    fn get_remote_path_str(&self, job_id: &JobId) -> String;
+pub trait GcOps: TargetInfo {
+    fn register_gc_root(&self, project_id: &str, lab_hash: &str) -> Result<()>;
+
+    fn garbage_collect(&self) -> Result<String>;
+}
+
+pub trait Target:
+    TargetInfo + CommandRunner + ArtifactSync + FileOps + SlurmOps + JobRunner + GcOps
+{
+}
+
+impl<T> Target for T where
+    T: TargetInfo + CommandRunner + ArtifactSync + FileOps + SlurmOps + JobRunner + GcOps
+{
 }
 
 fn parse_squeue(output: &str) -> HashMap<JobId, SlurmJobInfo> {
@@ -196,7 +247,6 @@ fn parse_squeue(output: &str) -> HashMap<JobId, SlurmJobInfo> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use repx_core::model::JobId;
 
     #[test]
     fn test_parse_squeue_output() {

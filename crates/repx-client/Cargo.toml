@@ -9,9 +9,9 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 walkdir = { workspace = true }
 thiserror = { workspace = true }
+tracing = { workspace = true }
 fs-err = { workspace = true }
 chrono = { workspace = true }
-xdg = { workspace = true }
 whoami = { workspace = true }
 wildmatch = "2.6"
 tempfile = { workspace = true }
@@ -21,3 +21,4 @@ num_cpus.workspace = true
 comfy-table = { workspace = true }
 
 [dev-dependencies]
+repx-core = { workspace = true }

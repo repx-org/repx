@@ -1,13 +1,15 @@
-use crate::{cli::RunArgs, commands::AppContext};
 use colored::Colorize;
 use indicatif::{ProgressBar, ProgressStyle};
 use repx_client::{ClientEvent, SubmitOptions};
 use repx_core::{
     config::{Config, Resources},
-    error::AppError,
+    errors::ConfigError,
+    model::SchedulerType,
 };
 use std::sync::mpsc;
 use std::thread;
+
+use crate::{cli::RunArgs, commands::AppContext, error::CliError};
 
 pub fn handle_run(
     args: RunArgs,
@@ -15,27 +17,26 @@ pub fn handle_run(
     _config: &Config,
     resources: Option<Resources>,
     target_name: &str,
-    scheduler: &str,
+    scheduler: SchedulerType,
     num_jobs: Option<usize>,
-) -> Result<(), AppError> {
+) -> Result<(), CliError> {
     println!(
         "- Submitting run request to target '{}' using '{}' scheduler...",
         target_name.cyan(),
-        scheduler.cyan()
+        scheduler.to_string().cyan()
     );
 
     let (tx, rx) = mpsc::channel();
     let client = context.client.clone();
     let run_specs = if args.run_specs.is_empty() {
-        return Err(AppError::ConfigurationError(
+        return Err(CliError::Config(ConfigError::General(
             "No run or job specified to run.".to_string(),
-        ));
+        )));
     } else {
         args.run_specs
     };
 
     let target_name_clone = target_name.to_string();
-    let scheduler_clone = scheduler.to_string();
     let submission_thread = thread::spawn(move || {
         let options = SubmitOptions {
             execution_type: None,
@@ -43,7 +44,7 @@ pub fn handle_run(
             num_jobs,
             event_sender: Some(tx),
         };
-        client.submit_batch_run(run_specs, &target_name_clone, &scheduler_clone, options)
+        client.submit_batch_run(run_specs, &target_name_clone, scheduler, options)
     });
     let mut pb: Option<ProgressBar> = None;
 
@@ -86,7 +87,7 @@ pub fn handle_run(
                 println!(
                     "- Submitting {} jobs to {}...",
                     total,
-                    if scheduler == "slurm" {
+                    if scheduler == SchedulerType::Slurm {
                         "SLURM"
                     } else {
                         "local executor"
@@ -126,8 +127,8 @@ pub fn handle_run(
             println!("{}", message);
         }
         Err(e) => {
-            return Err(AppError::ExecutionFailed {
-                message: "Failed to submit run request".to_string(),
+            return Err(CliError::ExecutionFailed {
+                message: "Failed to submit run".to_string(),
                 log_path: None,
                 log_summary: e.to_string(),
             });

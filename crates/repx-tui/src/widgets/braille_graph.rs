@@ -57,8 +57,7 @@ impl Widget for BrailleGraph<'_> {
         let data_len = self.data.len();
 
         let resampled_data: Vec<f64> = if data_len > num_points {
-            // Down-sample by binning and averaging
-            let mut bins = vec![(0.0, 0); num_points]; // (sum, count)
+            let mut bins = vec![(0.0, 0); num_points];
             for (i, &value) in self.data.iter().enumerate() {
                 let bin_index = (i * num_points) / data_len;
                 bins[bin_index].0 += value;
@@ -68,7 +67,6 @@ impl Widget for BrailleGraph<'_> {
                 .map(|&(sum, count)| if count > 0 { sum / count as f64 } else { 0.0 })
                 .collect()
         } else {
-            // Stretch or use as-is
             let mut stretched = Vec::with_capacity(num_points);
             for i in 0..num_points {
                 let original_index = (i * data_len) / num_points;

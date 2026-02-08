@@ -1,10 +1,12 @@
 pub mod app;
+pub mod error;
 pub mod event;
 pub mod model;
 pub mod ui;
 pub mod widgets;
 
 use crate::app::{ExternalAction, LogPollerCommand};
+use crate::error::TuiError;
 use crate::{
     app::{App, SubmissionResult},
     event::handle_key_event,
@@ -17,7 +19,7 @@ use crossterm::{
 };
 use ratatui::{backend::CrosstermBackend, Terminal};
 use repx_client::Client;
-use repx_core::{config, error::AppError, model::JobId, theme};
+use repx_core::{config, model::JobId, model::SchedulerType, theme};
 use std::{
     fs,
     io::{self, Stdout},
@@ -36,7 +38,7 @@ pub struct TuiArgs {
     pub lab: PathBuf,
 }
 
-pub fn run(args: TuiArgs) -> Result<(), AppError> {
+pub fn run(args: TuiArgs) -> Result<(), TuiError> {
     repx_core::logging::set_log_level_from_env();
 
     let logging_config = config::load_config().map(|c| c.logging).unwrap_or_default();
@@ -45,16 +47,16 @@ pub fn run(args: TuiArgs) -> Result<(), AppError> {
         eprintln!("[ERROR] Failed to initialize TUI logger: {}", e);
         std::process::exit(1);
     }
-    repx_core::log_info!("--- Repx TUI Started ---");
+    tracing::info!("--- Repx TUI Started ---");
 
-    let lab_path = fs::canonicalize(&args.lab).map_err(|e| AppError::PathIo {
+    let lab_path = fs::canonicalize(&args.lab).map_err(|e| TuiError::PathIo {
         path: args.lab.clone(),
         source: e,
     })?;
     let config = config::load_config()?;
     let theme = theme::load_theme(&config)?;
     let resources = config::load_resources(None)?;
-    let client = Client::new(config.clone(), lab_path).map_err(|e| AppError::ExecutionFailed {
+    let client = Client::new(config.clone(), lab_path).map_err(|e| TuiError::ExecutionFailed {
         message: "TUI failed to initialize client".to_string(),
         log_path: None,
         log_summary: e.to_string(),
@@ -90,9 +92,10 @@ pub fn run(args: TuiArgs) -> Result<(), AppError> {
 
         let target_name = active_target_clone_for_status.lock().unwrap().clone();
         let scheduler_name = active_scheduler_clone_for_status.lock().unwrap().clone();
+        let scheduler_type: Option<SchedulerType> = scheduler_name.parse().ok();
 
         let statuses = status_client_clone
-            .get_statuses_for_active_target(&target_name, Some(&scheduler_name))
+            .get_statuses_for_active_target(&target_name, scheduler_type)
             .map(|job_statuses| (target_name, job_statuses));
         if status_tx.send(statuses).is_err() {
             break;
@@ -108,7 +111,7 @@ pub fn run(args: TuiArgs) -> Result<(), AppError> {
 
     let xdg_dirs = xdg::BaseDirectories::with_prefix("repx");
     let cache_home = xdg_dirs.get_cache_home().ok_or_else(|| {
-        AppError::Io(std::io::Error::new(
+        TuiError::Io(std::io::Error::new(
             std::io::ErrorKind::NotFound,
             "Could not find cache home directory",
         ))
@@ -207,7 +210,7 @@ pub fn run(args: TuiArgs) -> Result<(), AppError> {
         active_target,
         active_scheduler,
     )
-    .map_err(|e| AppError::ExecutionFailed {
+    .map_err(|e| TuiError::ExecutionFailed {
         message: "TUI app initialization failed".to_string(),
         log_path: None,
         log_summary: e.to_string(),
@@ -328,7 +331,7 @@ fn resume_tui(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> io::Result<(
     Ok(())
 }
 fn restore_terminal(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> io::Result<()> {
-    repx_core::log_info!("--- Repx TUI Shutting Down ---");
+    tracing::info!("--- Repx TUI Shutting Down ---");
     disable_raw_mode()?;
     execute!(
         terminal.backend_mut(),

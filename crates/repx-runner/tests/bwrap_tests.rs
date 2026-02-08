@@ -6,7 +6,7 @@ use std::fs;
 #[test]
 fn test_full_run_local_bwrap() {
     let harness = TestHarness::with_execution_type("bwrap");
-    let artifacts_dir = harness.cache_dir.path().join("artifacts");
+    let artifacts_dir = harness.cache_dir.join("artifacts");
     harness.stage_lab();
 
     let host_tools_bin = artifacts_dir.join("host-tools").join("bin");
@@ -56,7 +56,7 @@ fn test_bwrap_isolation_properties() {
     let harness = TestHarness::with_execution_type("bwrap");
     harness.stage_lab();
 
-    let base_path = harness.cache_dir.path();
+    let base_path = &harness.cache_dir;
     let victim_dir = base_path.join("outputs").join("victim").join("out");
     fs::create_dir_all(&victim_dir).unwrap();
     let victim_file = victim_dir.join("secret.txt");
@@ -65,16 +65,17 @@ fn test_bwrap_isolation_properties() {
     let artifact_file = base_path.join("artifacts").join("host_file.txt");
     fs::write(&artifact_file, "host content").unwrap();
 
-    let attacker_job_id = "job-attacker";
-    harness.stage_job_dirs(attacker_job_id);
-    let attacker_out_path = harness.get_job_output_path(attacker_job_id);
-    fs::write(attacker_out_path.join("repx/inputs.json"), "{}").unwrap();
+    let isolated_job_id = "job-isolated";
+    harness.stage_job_dirs(isolated_job_id);
+    let isolated_job_out_path = harness.get_job_output_path(isolated_job_id);
+    fs::write(isolated_job_out_path.join("repx/inputs.json"), "{}").unwrap();
 
-    let job_package_dir = base_path.join("artifacts/jobs").join(attacker_job_id);
+    let job_package_dir = base_path.join("artifacts/jobs").join(isolated_job_id);
     let bin_dir = job_package_dir.join("bin");
     fs::create_dir_all(&bin_dir).unwrap();
-    let script_path = bin_dir.join("attack.sh");
+    let script_path = bin_dir.join("isolated.sh");
 
+    let _own_out_path = isolated_job_out_path.join("out/own_output.txt");
     let script_content = format!(
         r#"#!/bin/sh
 echo "pwned" > "{}" 2>/dev/null
@@ -116,7 +117,7 @@ exit 0
     let mut cmd = harness.cmd();
     cmd.arg("internal-execute")
         .arg("--job-id")
-        .arg(attacker_job_id)
+        .arg(isolated_job_id)
         .arg("--executable-path")
         .arg(&script_path)
         .arg("--base-path")
@@ -133,7 +134,7 @@ exit 0
     println!("STDOUT: {}", String::from_utf8_lossy(&output.stdout));
     println!("STDERR: {}", String::from_utf8_lossy(&output.stderr));
     let repx_err =
-        fs::read_to_string(attacker_out_path.join("repx/stderr.log")).unwrap_or_default();
+        fs::read_to_string(isolated_job_out_path.join("repx/stderr.log")).unwrap_or_default();
     println!("REPX STDERR: {}", repx_err);
 
     let victim_content = fs::read_to_string(&victim_file).expect("Failed to read victim file");
@@ -149,7 +150,7 @@ exit 0
         "Artifact file was modified! Isolation failed."
     );
 
-    let own_out = attacker_out_path.join("out/own_output.txt");
+    let own_out = isolated_job_out_path.join("out/own_output.txt");
     assert!(
         own_out.exists(),
         "Own output file not found. Script might have failed early."
@@ -157,7 +158,7 @@ exit 0
 
     assert!(
         output.status.success(),
-        "Attacker script failed (check stdout for FAIL messages)"
+        "IsolatedJob script failed (check stdout for FAIL messages)"
     );
 }
 
@@ -166,7 +167,7 @@ fn test_bwrap_impure_mode_access_host() {
     let harness = TestHarness::with_execution_type("bwrap");
     harness.stage_lab();
 
-    let base_path = harness.cache_dir.path();
+    let base_path = &harness.cache_dir;
     let host_marker_file = base_path.join("i_am_on_host.txt");
     fs::write(&host_marker_file, "host data").unwrap();
 
@@ -268,7 +269,7 @@ fn test_bwrap_mount_paths_specific() {
     let harness = TestHarness::with_execution_type("bwrap");
     harness.stage_lab();
 
-    let base_path = harness.cache_dir.path();
+    let base_path = &harness.cache_dir;
     let job_id = "job-mount-paths";
     harness.stage_job_dirs(job_id);
     let job_out_path = harness.get_job_output_path(job_id);

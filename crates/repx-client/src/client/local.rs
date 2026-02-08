@@ -4,7 +4,7 @@ use crate::targets::Target;
 use num_cpus;
 use repx_core::{
     engine,
-    error::AppError,
+    errors::ConfigError,
     model::{Job, JobId},
 };
 use std::collections::{HashMap, HashSet};
@@ -35,7 +35,10 @@ pub fn submit_local_batch_run(
         })
         .cloned()
         .collect();
-    let raw_statuses = client.get_statuses_for_active_target(target.name(), Some("local"))?;
+    let raw_statuses = client.get_statuses_for_active_target(
+        target.name(),
+        Some(repx_core::model::SchedulerType::Local),
+    )?;
     let all_job_statuses = engine::determine_job_statuses(&client.lab, &raw_statuses);
     let mut completed_jobs: HashSet<JobId> = all_job_statuses
         .into_iter()
@@ -68,33 +71,22 @@ pub fn submit_local_batch_run(
             let join_res = handle.join();
             match join_res {
                 Ok(output_res) => {
-                    let output = output_res.map_err(AppError::from)?;
+                    let output = output_res.map_err(|e| ClientError::Config(ConfigError::Io(e)))?;
 
                     if !output.status.success() {
                         let stderr = String::from_utf8_lossy(&output.stderr);
-                        return Err(ClientError::Core(AppError::ExecutionFailed {
-                            message: format!("Local execution of job '{}' failed.", job_id),
-                            log_path: Some(
-                                target
-                                    .base_path()
-                                    .join("outputs")
-                                    .join(job_id.0)
-                                    .join("repx"),
-                            ),
-                            log_summary: format!(
-                                "Process exited with status {}.\n--- STDERR ---\n{}",
-                                output.status, stderr
-                            ),
-                        }));
+                        return Err(ClientError::Config(ConfigError::General(format!(
+                            "Local run script failed: {}",
+                            stderr
+                        ))));
                     }
                     completed_jobs.insert(job_id.clone());
                 }
                 Err(e) => {
-                    return Err(ClientError::Core(AppError::ExecutionFailed {
-                        message: format!("Local execution thread for job '{}' panicked.", job_id),
-                        log_path: None,
-                        log_summary: format!("{:?}", e),
-                    }));
+                    return Err(ClientError::Config(ConfigError::General(format!(
+                        "Failed to launch local process: {:?}",
+                        e
+                    ))));
                 }
             }
         }
@@ -110,14 +102,19 @@ pub fn submit_local_batch_run(
                 .iter()
                 .filter(|job_id| {
                     let job = jobs_in_batch.get(job_id).unwrap();
-                    let is_schedulable_type =
-                        job.stage_type != "worker" && job.stage_type != "gather";
+                    let is_schedulable_type = job.stage_type != repx_core::model::StageType::Worker
+                        && job.stage_type != repx_core::model::StageType::Gather;
 
                     let entrypoint_exe = job
                         .executables
                         .get("main")
                         .or_else(|| job.executables.get("scatter"))
-                        .unwrap();
+                        .unwrap_or_else(|| {
+                            panic!(
+                                "Job '{}' missing required executable 'main' or 'scatter'",
+                                job_id
+                            )
+                        });
 
                     let deps_are_met = entrypoint_exe
                         .inputs
@@ -133,7 +130,7 @@ pub fn submit_local_batch_run(
             ready_candidates.sort();
 
             if ready_candidates.is_empty() && active_handles.is_empty() {
-                return Err(ClientError::Core(AppError::ConfigurationError(
+                return Err(ClientError::Config(ConfigError::General(
                     "Cycle detected in job dependency graph or missing dependency.".to_string(),
                 )));
             }
@@ -152,7 +149,6 @@ pub fn submit_local_batch_run(
                     .and_then(|p| p.file_stem())
                     .and_then(|s| s.to_str());
 
-                let stage_type = &job.stage_type;
                 let execution_type = if options.execution_type.is_none() && image_tag.is_none() {
                     "native"
                 } else {
@@ -173,7 +169,7 @@ pub fn submit_local_batch_run(
                 };
                 let mut args = Vec::new();
 
-                if stage_type == "scatter-gather" {
+                if job.stage_type == repx_core::model::StageType::ScatterGather {
                     args.push("internal-scatter-gather".to_string());
                 } else {
                     args.push("internal-execute".to_string());
@@ -203,10 +199,10 @@ pub fn submit_local_batch_run(
 
                 if target.config().mount_host_paths {
                     if !target.config().mount_paths.is_empty() {
-                        return Err(ClientError::Core(AppError::ConfigurationError(
-                            "Cannot specify both 'mount_host_paths = true' and 'mount_paths'."
-                                .into(),
-                        )));
+                        return Err(ClientError::Config(ConfigError::General(format!(
+                            "Cannot specify both 'mount_host_paths = true' and 'mount_paths' for job '{}'.",
+                            job_id
+                        ))));
                     }
                     args.push("--mount-host-paths".to_string());
                 } else {
@@ -216,7 +212,7 @@ pub fn submit_local_batch_run(
                     }
                 }
 
-                if stage_type == "scatter-gather" {
+                if job.stage_type == repx_core::model::StageType::ScatterGather {
                     let scatter_exe = job.executables.get("scatter").unwrap();
                     let worker_exe = job.executables.get("worker").unwrap();
                     let gather_exe = job.executables.get("gather").unwrap();
@@ -228,8 +224,8 @@ pub fn submit_local_batch_run(
                     let worker_exe_path = artifacts_base.join(&worker_exe.path);
                     let gather_exe_path = artifacts_base.join(&gather_exe.path);
 
-                    let worker_outputs_json =
-                        serde_json::to_string(&worker_exe.outputs).map_err(AppError::from)?;
+                    let worker_outputs_json = serde_json::to_string(&worker_exe.outputs)
+                        .map_err(|e| ClientError::Config(ConfigError::Json(e)))?;
 
                     args.push("--job-package-path".to_string());
                     args.push(job_package_path_on_target.to_string_lossy().to_string());

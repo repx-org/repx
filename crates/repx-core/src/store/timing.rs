@@ -1,4 +1,4 @@
-use crate::error::AppError;
+use crate::errors::ConfigError;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -20,7 +20,7 @@ fn get_timing_path(output_dir: &Path) -> PathBuf {
     output_dir.join(TIMING_FILE)
 }
 
-pub fn read_timestamps(output_dir: &Path) -> Result<JobTimestamps, AppError> {
+pub fn read_timestamps(output_dir: &Path) -> Result<JobTimestamps, ConfigError> {
     let path = get_timing_path(output_dir);
     if !path.exists() {
         return Ok(JobTimestamps::default());
@@ -30,14 +30,14 @@ pub fn read_timestamps(output_dir: &Path) -> Result<JobTimestamps, AppError> {
     Ok(timestamps)
 }
 
-pub fn write_timestamps(output_dir: &Path, timestamps: &JobTimestamps) -> Result<(), AppError> {
+pub fn write_timestamps(output_dir: &Path, timestamps: &JobTimestamps) -> Result<(), ConfigError> {
     let path = get_timing_path(output_dir);
     let content = serde_json::to_string_pretty(timestamps)?;
     fs::write(path, content)?;
     Ok(())
 }
 
-fn update_timestamps<F>(output_dir: &Path, update_fn: F) -> Result<(), AppError>
+fn update_timestamps<F>(output_dir: &Path, update_fn: F) -> Result<(), ConfigError>
 where
     F: FnOnce(&mut JobTimestamps),
 {
@@ -46,7 +46,7 @@ where
     write_timestamps(output_dir, &timestamps)
 }
 
-pub fn record_dispatched(output_dir: &Path) -> Result<(), AppError> {
+pub fn record_dispatched(output_dir: &Path) -> Result<(), ConfigError> {
     update_timestamps(output_dir, |ts| {
         if ts.dispatched.is_none() {
             ts.dispatched = Some(Utc::now());
@@ -54,7 +54,7 @@ pub fn record_dispatched(output_dir: &Path) -> Result<(), AppError> {
     })
 }
 
-pub fn record_started(output_dir: &Path) -> Result<(), AppError> {
+pub fn record_started(output_dir: &Path) -> Result<(), ConfigError> {
     update_timestamps(output_dir, |ts| {
         if ts.started.is_none() {
             ts.started = Some(Utc::now());
@@ -62,7 +62,7 @@ pub fn record_started(output_dir: &Path) -> Result<(), AppError> {
     })
 }
 
-pub fn record_finished(output_dir: &Path) -> Result<(), AppError> {
+pub fn record_finished(output_dir: &Path) -> Result<(), ConfigError> {
     update_timestamps(output_dir, |ts| {
         if ts.finished.is_none() {
             ts.finished = Some(Utc::now());

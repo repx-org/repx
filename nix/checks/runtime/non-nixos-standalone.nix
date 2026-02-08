@@ -16,7 +16,7 @@ pkgs.testers.runNixOSTest {
     { pkgs, ... }:
     {
       virtualisation = {
-        diskSize = 10240;
+        diskSize = 25600;
         memorySize = 4096;
         cores = 2;
       };

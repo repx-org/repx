@@ -1,15 +1,18 @@
 use crate::config::LoggingConfig;
-use crate::error::AppError;
+use crate::errors::ConfigError;
 use chrono::Local;
-use once_cell::sync::Lazy;
 use std::env;
-use std::fs::{self, File, OpenOptions};
-use std::io::Write;
+use std::fs::{self, OpenOptions};
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, SystemTime};
+use tracing::Level;
+use tracing_subscriber::fmt::format::Writer;
+use tracing_subscriber::fmt::time::FormatTime;
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
+use tracing_subscriber::EnvFilter;
 
 #[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -33,10 +36,24 @@ impl From<u8> for LogLevel {
     }
 }
 
-pub static MAX_LOG_LEVEL: AtomicUsize = AtomicUsize::new(LogLevel::Info as usize);
+impl From<LogLevel> for Level {
+    fn from(level: LogLevel) -> Self {
+        match level {
+            LogLevel::Error => Level::ERROR,
+            LogLevel::Warn => Level::WARN,
+            LogLevel::Info => Level::INFO,
+            LogLevel::Debug => Level::DEBUG,
+            LogLevel::Trace => Level::TRACE,
+        }
+    }
+}
+
+static DEFAULT_LOG_LEVEL: Mutex<LogLevel> = Mutex::new(LogLevel::Info);
 
 pub fn set_log_level(level: LogLevel) {
-    MAX_LOG_LEVEL.store(level as usize, Ordering::Relaxed);
+    if let Ok(mut default_level) = DEFAULT_LOG_LEVEL.lock() {
+        *default_level = level;
+    }
 }
 
 pub fn set_log_level_from_env() {
@@ -52,29 +69,23 @@ pub fn set_log_level_from_env() {
     }
 }
 
-static LOG_FILE: Lazy<Mutex<Option<File>>> = Lazy::new(|| Mutex::new(None));
-
-pub fn init_logger(log_path: &Path) -> Result<(), AppError> {
-    if let Some(parent) = log_path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-
-    let mut file = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(log_path)?;
-
-    let timestamp = Local::now().format("%Y-%m-%d %H:%M:%S");
-    let log_line = format!("[{}] [INFO] --- Logger Initialized ---\n", timestamp);
-    let _ = file.write_all(log_line.as_bytes());
-
-    let mut log_file_guard = LOG_FILE.lock().unwrap();
-    *log_file_guard = Some(file);
-
-    Ok(())
+fn get_default_log_level() -> Level {
+    DEFAULT_LOG_LEVEL
+        .lock()
+        .map(|level| (*level).into())
+        .unwrap_or(Level::INFO)
 }
 
-fn rotate_logs(log_dir: &Path, prefix: &str, config: &LoggingConfig) -> Result<(), AppError> {
+struct LocalTimeFormatter;
+
+impl FormatTime for LocalTimeFormatter {
+    fn format_time(&self, w: &mut Writer<'_>) -> std::fmt::Result {
+        let now = Local::now();
+        write!(w, "{}", now.format("%Y-%m-%d %H:%M:%S"))
+    }
+}
+
+fn rotate_logs(log_dir: &Path, prefix: &str, config: &LoggingConfig) -> Result<(), ConfigError> {
     if !log_dir.exists() {
         fs::create_dir_all(log_dir)?;
     }
@@ -128,10 +139,148 @@ fn rotate_logs(log_dir: &Path, prefix: &str, config: &LoggingConfig) -> Result<(
     Ok(())
 }
 
-pub fn init_session_logger(config: &LoggingConfig) -> Result<(), AppError> {
+fn init_tracing_subscriber(log_path: &Path) -> Result<(), ConfigError> {
+    if let Some(parent) = log_path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+
+    let log_file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(log_path)?;
+
+    let workspace_root = env::var("CARGO_MANIFEST_DIR")
+        .ok()
+        .and_then(|p| {
+            let path = PathBuf::from(p);
+            path.parent()?.parent().map(|p| p.to_path_buf())
+        })
+        .or_else(|| {
+            let mut current = env::current_dir().ok()?;
+            loop {
+                if current.join("Cargo.toml").exists() {
+                    if let Ok(content) = std::fs::read_to_string(current.join("Cargo.toml")) {
+                        if content.contains("[workspace]") {
+                            return Some(current);
+                        }
+                    }
+                }
+                current = current.parent()?.to_path_buf();
+            }
+        })
+        .unwrap_or_else(|| env::current_dir().unwrap_or_default());
+
+    let default_level = get_default_log_level();
+    let level_str = match default_level {
+        Level::ERROR => "error",
+        Level::WARN => "warn",
+        Level::INFO => "info",
+        Level::DEBUG => "debug",
+        Level::TRACE => "trace",
+    };
+
+    let env_filter = EnvFilter::try_from_default_env()
+        .or_else(|_| EnvFilter::try_new(level_str))
+        .unwrap_or_else(|_| EnvFilter::new("info"));
+
+    let file_layer = tracing_subscriber::fmt::layer()
+        .with_writer(Mutex::new(log_file))
+        .with_timer(LocalTimeFormatter)
+        .with_ansi(false)
+        .with_target(false)
+        .with_thread_ids(false)
+        .with_thread_names(false)
+        .with_line_number(true)
+        .with_file(true)
+        .with_level(true)
+        .event_format(CustomFormatter {
+            workspace_root: workspace_root.clone(),
+        });
+
+    if env::var("REPX_TEST_LOG_TEE").is_ok() {
+        let stderr_layer = tracing_subscriber::fmt::layer()
+            .with_writer(std::io::stderr)
+            .with_timer(LocalTimeFormatter)
+            .with_ansi(false)
+            .with_target(false)
+            .with_line_number(true)
+            .with_file(true)
+            .with_level(true)
+            .event_format(CustomFormatter { workspace_root });
+
+        tracing_subscriber::registry()
+            .with(env_filter)
+            .with(file_layer)
+            .with(stderr_layer)
+            .init();
+    } else {
+        tracing_subscriber::registry()
+            .with(env_filter)
+            .with(file_layer)
+            .init();
+    }
+
+    tracing::info!("--- Logger Initialized ---");
+
+    Ok(())
+}
+
+struct CustomFormatter {
+    workspace_root: PathBuf,
+}
+
+impl<S, N> tracing_subscriber::fmt::FormatEvent<S, N> for CustomFormatter
+where
+    S: tracing::Subscriber + for<'a> tracing_subscriber::registry::LookupSpan<'a>,
+    N: for<'a> tracing_subscriber::fmt::FormatFields<'a> + 'static,
+{
+    fn format_event(
+        &self,
+        ctx: &tracing_subscriber::fmt::FmtContext<'_, S, N>,
+        mut writer: Writer<'_>,
+        event: &tracing::Event<'_>,
+    ) -> std::fmt::Result {
+        let metadata = event.metadata();
+
+        write!(writer, "[")?;
+        LocalTimeFormatter.format_time(&mut writer)?;
+        write!(writer, "] ")?;
+
+        let level = metadata.level();
+        write!(writer, "[{:5}] ", level)?;
+
+        if let Some(file) = metadata.file() {
+            let display_path = if file.starts_with('/') {
+                let file_path = PathBuf::from(file);
+                if let Ok(rel) = file_path.strip_prefix(&self.workspace_root) {
+                    rel.to_string_lossy().to_string()
+                } else {
+                    file.to_string()
+                }
+            } else if let Some(module) = metadata.module_path() {
+                let parts: Vec<&str> = module.split("::").collect();
+                if let Some(crate_name) = parts.first() {
+                    let crate_dir = crate_name.replace('_', "-");
+                    format!("crates/{}/{}", crate_dir, file)
+                } else {
+                    file.to_string()
+                }
+            } else {
+                file.to_string()
+            };
+
+            write!(writer, "{}:{} ", display_path, metadata.line().unwrap_or(0))?;
+        }
+
+        ctx.field_format().format_fields(writer.by_ref(), event)?;
+        writeln!(writer)
+    }
+}
+
+pub fn init_session_logger(config: &LoggingConfig) -> Result<(), ConfigError> {
     let xdg_dirs = xdg::BaseDirectories::with_prefix("repx");
     let cache_home = xdg_dirs.get_cache_home().ok_or_else(|| {
-        AppError::Io(std::io::Error::new(
+        ConfigError::Io(std::io::Error::new(
             std::io::ErrorKind::NotFound,
             "Could not find cache home directory",
         ))
@@ -145,7 +294,7 @@ pub fn init_session_logger(config: &LoggingConfig) -> Result<(), AppError> {
     let filename = format!("repx_{}_{}.log", timestamp, pid);
     let log_path = logs_dir.join(&filename);
 
-    init_logger(&log_path)?;
+    init_tracing_subscriber(&log_path)?;
 
     let symlink_path = cache_home.join("repx.log");
     let _ = fs::remove_file(&symlink_path);
@@ -159,10 +308,10 @@ pub fn init_session_logger(config: &LoggingConfig) -> Result<(), AppError> {
     Ok(())
 }
 
-pub fn init_tui_logger(config: &LoggingConfig) -> Result<(), AppError> {
+pub fn init_tui_logger(config: &LoggingConfig) -> Result<(), ConfigError> {
     let xdg_dirs = xdg::BaseDirectories::with_prefix("repx");
     let cache_home = xdg_dirs.get_cache_home().ok_or_else(|| {
-        AppError::Io(std::io::Error::new(
+        ConfigError::Io(std::io::Error::new(
             std::io::ErrorKind::NotFound,
             "Could not find cache home directory",
         ))
@@ -176,7 +325,7 @@ pub fn init_tui_logger(config: &LoggingConfig) -> Result<(), AppError> {
     let filename = format!("repx-tui_{}_{}.log", timestamp, pid);
     let log_path = logs_dir.join(&filename);
 
-    init_logger(&log_path)?;
+    init_tracing_subscriber(&log_path)?;
 
     let symlink_path = cache_home.join("repx-tui.log");
     let _ = fs::remove_file(&symlink_path);
@@ -188,59 +337,6 @@ pub fn init_tui_logger(config: &LoggingConfig) -> Result<(), AppError> {
     }
 
     Ok(())
-}
-
-#[doc(hidden)]
-pub fn __write_log_entry(level: &str, message: &str) {
-    let timestamp = Local::now().format("%Y-%m-%d %H:%M:%S");
-    let log_line = format!("[{}] [{}] {}\n", timestamp, level, message);
-
-    if env::var("REPX_TEST_LOG_TEE").is_ok() {
-        eprintln!("[LOG-TEE] {}", log_line.trim());
-    }
-
-    if let Ok(mut log_file_guard) = LOG_FILE.lock() {
-        if let Some(file) = log_file_guard.as_mut() {
-            let _ = file.write_all(log_line.as_bytes());
-        } else {
-            eprint!("{}", log_line);
-        }
-    }
-}
-
-#[macro_export]
-macro_rules! log_message {
-    ($level:expr, $level_str:expr, $($arg:tt)+) => {
-        if $crate::logging::MAX_LOG_LEVEL.load(std::sync::atomic::Ordering::Relaxed) >= $level as usize {
-            let msg = format!($($arg)+);
-            $crate::logging::__write_log_entry($level_str, &msg);
-        }
-    };
-}
-
-#[macro_export]
-macro_rules! log_trace {
-    ($($arg:tt)+) => ($crate::log_message!($crate::logging::LogLevel::Trace, "TRACE", $($arg)+));
-}
-
-#[macro_export]
-macro_rules! log_debug {
-    ($($arg:tt)+) => ($crate::log_message!($crate::logging::LogLevel::Debug, "DEBUG", $($arg)+));
-}
-
-#[macro_export]
-macro_rules! log_info {
-    ($($arg:tt)+) => ($crate::log_message!($crate::logging::LogLevel::Info, "INFO", $($arg)+));
-}
-
-#[macro_export]
-macro_rules! log_warn {
-    ($($arg:tt)+) => ($crate::log_message!($crate::logging::LogLevel::Warn, "WARN", $($arg)+));
-}
-
-#[macro_export]
-macro_rules! log_error {
-    ($($arg:tt)+) => ($crate::log_message!($crate::logging::LogLevel::Error, "ERROR", $($arg)+));
 }
 
 fn format_command_for_display(command: &Command) -> String {
@@ -262,7 +358,7 @@ fn format_command_for_display(command: &Command) -> String {
 
 pub fn log_and_print_command(command: &Command) {
     let command_str = format_command_for_display(command);
-    log_debug!("[CMD] {}", command_str);
+    tracing::debug!("[CMD] {}", command_str);
 }
 
 #[cfg(test)]

@@ -1,17 +1,20 @@
-use crate::cli::InternalScatterGatherArgs;
+use crate::{cli::InternalScatterGatherArgs, error::CliError};
 use futures::future::join_all;
-use repx_core::{error::AppError, log_debug, log_error, log_info, model::JobId};
+use repx_core::{
+    constants::{dirs, markers},
+    errors::ConfigError,
+    model::JobId,
+};
 use repx_executor::{ExecutionRequest, Executor, Runtime};
 use serde_json::Value;
 use std::{
     collections::HashMap,
     fs,
     path::{Path, PathBuf},
-    process::Command,
 };
 use tokio::{process::Command as TokioCommand, runtime::Runtime as TokioRuntime};
 
-pub fn handle_scatter_gather(args: InternalScatterGatherArgs) -> Result<(), AppError> {
+pub fn handle_scatter_gather(args: InternalScatterGatherArgs) -> Result<(), CliError> {
     let rt = TokioRuntime::new().unwrap();
     rt.block_on(async_handle_scatter_gather(args))
 }
@@ -34,38 +37,44 @@ struct ScatterGatherOrchestrator {
     mount_paths: Vec<String>,
 }
 impl ScatterGatherOrchestrator {
-    fn new(args: &InternalScatterGatherArgs) -> Result<Self, AppError> {
+    fn new(args: &InternalScatterGatherArgs) -> Result<Self, CliError> {
         let job_id = JobId(args.job_id.clone());
-        let job_root = args.base_path.join("outputs").join(&job_id.0);
-        let user_out_dir = job_root.join("out");
-        let repx_dir = job_root.join("repx");
+        let job_root = args.base_path.join(dirs::OUTPUTS).join(&job_id.0);
+        let user_out_dir = job_root.join(dirs::OUT);
+        let repx_dir = job_root.join(dirs::REPX);
         let scatter_root = job_root.join("scatter");
-        let scatter_out_dir = scatter_root.join("out");
-        let scatter_repx_dir = scatter_root.join("repx");
+        let scatter_out_dir = scatter_root.join(dirs::OUT);
+        let scatter_repx_dir = scatter_root.join(dirs::REPX);
         let inputs_json_path = repx_dir.join("inputs.json");
 
         let runtime = match args.runtime.as_str() {
             "native" => Runtime::Native,
             "podman" => Runtime::Podman {
                 image_tag: args.image_tag.clone().ok_or_else(|| {
-                    AppError::ConfigurationError("Podman runtime requires --image-tag".into())
+                    CliError::Config(ConfigError::General(
+                        "Podman runtime requires --image-tag".into(),
+                    ))
                 })?,
             },
             "docker" => Runtime::Docker {
                 image_tag: args.image_tag.clone().ok_or_else(|| {
-                    AppError::ConfigurationError("Docker runtime requires --image-tag".into())
+                    CliError::Config(ConfigError::General(
+                        "Docker runtime requires --image-tag".into(),
+                    ))
                 })?,
             },
             "bwrap" => Runtime::Bwrap {
                 image_tag: args.image_tag.clone().ok_or_else(|| {
-                    AppError::ConfigurationError("Bwrap runtime requires --image-tag".into())
+                    CliError::Config(ConfigError::General(
+                        "Bwrap runtime requires --image-tag".into(),
+                    ))
                 })?,
             },
-            other => {
-                return Err(AppError::ConfigurationError(format!(
+            _ => {
+                return Err(CliError::Config(ConfigError::General(format!(
                     "Unsupported runtime: {}",
-                    other
-                )))
+                    args.runtime
+                ))))
             }
         };
         let host_tools_root = args.base_path.join("artifacts").join("host-tools");
@@ -89,7 +98,7 @@ impl ScatterGatherOrchestrator {
             mount_paths: args.mount_paths.clone(),
         })
     }
-    fn init_dirs(&mut self) -> Result<(), AppError> {
+    fn init_dirs(&mut self) -> Result<(), CliError> {
         for dir in [
             &self.user_out_dir,
             &self.repx_dir,
@@ -98,8 +107,8 @@ impl ScatterGatherOrchestrator {
         ] {
             fs::create_dir_all(dir)?;
         }
-        let _ = fs::remove_file(self.repx_dir.join("SUCCESS"));
-        let _ = fs::remove_file(self.repx_dir.join("FAIL"));
+        let _ = fs::remove_file(self.repx_dir.join(markers::SUCCESS));
+        let _ = fs::remove_file(self.repx_dir.join(markers::FAIL));
 
         if self.inputs_json_path.exists() {
             self.static_inputs =
@@ -123,8 +132,8 @@ impl ScatterGatherOrchestrator {
             mount_paths: self.mount_paths.clone(),
         })
     }
-    async fn run_scatter(&self, exe_path: &Path) -> Result<(), AppError> {
-        log_info!("[1/4] Starting scatter phase for job '{}'...", self.job_id);
+    async fn run_scatter(&self, exe_path: &Path) -> Result<(), CliError> {
+        tracing::info!("[1/4] Starting scatter phase for job '{}'...", self.job_id);
         let executor =
             self.create_executor(self.scatter_out_dir.clone(), self.scatter_repx_dir.clone());
         let args = vec![
@@ -134,19 +143,20 @@ impl ScatterGatherOrchestrator {
         executor
             .execute_script(exe_path, &args)
             .await
-            .map_err(|e| AppError::ExecutionFailed {
-                message: format!("Scatter phase failed for job {}", self.job_id),
+            .map_err(|e| CliError::ExecutionFailed {
+                message: "Scatter script failed".to_string(),
                 log_path: Some(self.scatter_repx_dir.clone()),
                 log_summary: e.to_string(),
-            })
+            })?;
+        Ok(())
     }
     async fn run_gather(
         &self,
         exe_path: &Path,
         worker_output_dirs: &[PathBuf],
         worker_outputs_template_json: &str,
-    ) -> Result<(), AppError> {
-        log_info!("[4/4] All workers completed. Starting gather phase...");
+    ) -> Result<(), CliError> {
+        tracing::info!("[4/4] All workers completed. Starting gather phase...");
 
         let mut worker_outs_manifest = Vec::new();
         let worker_job_outputs: HashMap<String, Value> =
@@ -156,10 +166,10 @@ impl ScatterGatherOrchestrator {
             let mut worker_outputs = HashMap::new();
             for (name, template) in &worker_job_outputs {
                 let template_str = template.as_str().ok_or_else(|| {
-                    AppError::ConfigurationError(format!(
+                    CliError::Config(ConfigError::General(format!(
                         "Worker output template for '{}' must be a string.",
                         name
-                    ))
+                    )))
                 })?;
                 let path = template_str.replace("$out", &worker_out_dir.to_string_lossy());
                 worker_outputs.insert(name.clone(), path);
@@ -194,18 +204,19 @@ impl ScatterGatherOrchestrator {
         executor
             .execute_script(exe_path, &args)
             .await
-            .map_err(|e| AppError::ExecutionFailed {
-                message: format!("Gather phase failed for job {}", self.job_id),
+            .map_err(|e| CliError::ExecutionFailed {
+                message: "Gather script failed".to_string(),
                 log_path: Some(self.repx_dir.clone()),
                 log_summary: e.to_string(),
-            })
+            })?;
+        Ok(())
     }
 
     fn prepare_worker(
         &self,
         idx: usize,
         work_item: &Value,
-    ) -> Result<(PathBuf, PathBuf, PathBuf), AppError> {
+    ) -> Result<(PathBuf, PathBuf, PathBuf), CliError> {
         let worker_root = self.job_root.join(format!("worker-{}", idx));
         let worker_out = worker_root.join("out");
         let worker_repx = worker_root.join("repx");
@@ -228,8 +239,8 @@ impl ScatterGatherOrchestrator {
     }
 }
 
-async fn async_handle_scatter_gather(args: InternalScatterGatherArgs) -> Result<(), AppError> {
-    log_debug!(
+async fn async_handle_scatter_gather(args: InternalScatterGatherArgs) -> Result<(), CliError> {
+    tracing::debug!(
         "INTERNAL SCATTER-GATHER (Phase: {}) starting for job '{}'",
         args.phase,
         args.job_id
@@ -245,21 +256,24 @@ async fn async_handle_scatter_gather(args: InternalScatterGatherArgs) -> Result<
         let mut worker_out_dirs = Vec::new();
         for i in 0..work_items.len() {
             let worker_root = orch.job_root.join(format!("worker-{}", i));
-            let worker_repx = worker_root.join("repx");
-            if !worker_repx.join("SUCCESS").exists() {
+            let worker_repx = worker_root.join(dirs::REPX);
+            if !worker_repx.join(markers::SUCCESS).exists() {
                 let msg = format!("Worker #{} SUCCESS marker not found.", i);
-                log_error!("{}", msg);
-                fs::File::create(orch.repx_dir.join("FAIL"))?;
+                tracing::error!("{}", msg);
+                fs::File::create(orch.repx_dir.join(markers::FAIL))?;
                 if let Some(anchor) = args.anchor_id {
-                    let _ = Command::new("scancel").arg(anchor.to_string()).output();
+                    let _ = TokioCommand::new("scancel")
+                        .arg(anchor.to_string())
+                        .output()
+                        .await;
                 }
-                return Err(AppError::ExecutionFailed {
+                return Err(CliError::ExecutionFailed {
                     message: msg,
                     log_path: Some(worker_repx),
                     log_summary: "Worker did not complete successfully".into(),
                 });
             }
-            worker_out_dirs.push(worker_root.join("out"));
+            worker_out_dirs.push(worker_root.join(dirs::OUT));
         }
 
         match orch
@@ -271,19 +285,23 @@ async fn async_handle_scatter_gather(args: InternalScatterGatherArgs) -> Result<
             .await
         {
             Ok(_) => {
-                fs::File::create(orch.repx_dir.join("SUCCESS"))?;
+                fs::File::create(orch.repx_dir.join(markers::SUCCESS))?;
                 if let Some(anchor) = args.anchor_id {
-                    log_info!("Releasing anchor job {}", anchor);
-                    let _ = Command::new("scontrol")
+                    tracing::info!("Releasing anchor job {}", anchor);
+                    let _ = TokioCommand::new("scontrol")
                         .arg("release")
                         .arg(anchor.to_string())
-                        .output();
+                        .output()
+                        .await;
                 }
             }
             Err(e) => {
-                fs::File::create(orch.repx_dir.join("FAIL"))?;
+                fs::File::create(orch.repx_dir.join(markers::FAIL))?;
                 if let Some(anchor) = args.anchor_id {
-                    let _ = Command::new("scancel").arg(anchor.to_string()).output();
+                    let _ = TokioCommand::new("scancel")
+                        .arg(anchor.to_string())
+                        .output()
+                        .await;
                 }
                 return Err(e);
             }
@@ -292,20 +310,23 @@ async fn async_handle_scatter_gather(args: InternalScatterGatherArgs) -> Result<
     }
 
     orch.init_dirs()?;
-    log_info!("Orchestrating scatter-gather stage '{}'", orch.job_id);
+    tracing::info!("Orchestrating scatter-gather stage '{}'", orch.job_id);
 
     if let Err(e) = orch.run_scatter(&args.scatter_exe_path).await {
-        let _ = fs::File::create(orch.scatter_repx_dir.join("FAIL"));
-        fs::File::create(orch.repx_dir.join("FAIL"))?;
+        let _ = fs::File::create(orch.scatter_repx_dir.join(markers::FAIL));
+        fs::File::create(orch.repx_dir.join(markers::FAIL))?;
         if let Some(anchor) = args.anchor_id {
-            let _ = Command::new("scancel").arg(anchor.to_string()).output();
+            let _ = TokioCommand::new("scancel")
+                .arg(anchor.to_string())
+                .output()
+                .await;
         }
-        log_error!("Scatter failed: {}", e);
+        tracing::error!("Scatter failed: {}", e);
         return Err(e);
     }
-    let _ = fs::File::create(orch.scatter_repx_dir.join("SUCCESS"));
+    let _ = fs::File::create(orch.scatter_repx_dir.join(markers::SUCCESS));
 
-    log_info!("[2/4] Scatter finished. Preparing workers...");
+    tracing::info!("[2/4] Scatter finished. Preparing workers...");
     let work_items_str = fs::read_to_string(orch.scatter_out_dir.join("work_items.json"))?;
     let work_items: Vec<Value> = serde_json::from_str(&work_items_str)?;
 
@@ -323,9 +344,9 @@ async fn async_handle_scatter_gather(args: InternalScatterGatherArgs) -> Result<
         .await?;
 
         for (i, repx_dir) in worker_repx_dirs.iter().enumerate() {
-            if !repx_dir.join("SUCCESS").exists() {
-                let _ = fs::File::create(orch.repx_dir.join("FAIL"));
-                return Err(AppError::ExecutionFailed {
+            if !repx_dir.join(markers::SUCCESS).exists() {
+                let _ = fs::File::create(orch.repx_dir.join(markers::FAIL));
+                return Err(CliError::ExecutionFailed {
                     message: format!("Worker #{} failed", i),
                     log_path: Some(repx_dir.clone()),
                     log_summary: "Worker failure".into(),
@@ -340,10 +361,10 @@ async fn async_handle_scatter_gather(args: InternalScatterGatherArgs) -> Result<
             )
             .await
         {
-            fs::File::create(orch.repx_dir.join("FAIL"))?;
+            fs::File::create(orch.repx_dir.join(markers::FAIL))?;
             return Err(e);
         }
-        fs::File::create(orch.repx_dir.join("SUCCESS"))?;
+        fs::File::create(orch.repx_dir.join(markers::SUCCESS))?;
     } else if args.scheduler == "slurm" {
         let slurm_ids = submit_slurm_workers_async(
             &orch,
@@ -355,12 +376,14 @@ async fn async_handle_scatter_gather(args: InternalScatterGatherArgs) -> Result<
 
         submit_slurm_gather_job(&orch, &args, &slurm_ids).await?;
 
-        log_info!("Orchestrator finished submitting workers and gather job. Exiting to free slot.");
+        tracing::info!(
+            "Orchestrator finished submitting workers and gather job. Exiting to free slot."
+        );
     } else {
-        return Err(AppError::ConfigurationError(format!(
+        return Err(CliError::Config(ConfigError::General(format!(
             "Unknown scheduler: {}",
             args.scheduler
-        )));
+        ))));
     }
 
     Ok(())
@@ -370,7 +393,7 @@ async fn submit_slurm_gather_job(
     orch: &ScatterGatherOrchestrator,
     args: &InternalScatterGatherArgs,
     worker_ids: &[String],
-) -> Result<(), AppError> {
+) -> Result<(), CliError> {
     let current_exe = std::env::current_exe()?;
     let current_exe_str = current_exe.to_string_lossy();
 
@@ -427,7 +450,7 @@ async fn submit_slurm_gather_job(
 
     let cmd_str = gather_cmd_parts.join(" ");
 
-    let mut sbatch = Command::new("sbatch");
+    let mut sbatch = TokioCommand::new("sbatch");
     sbatch.arg("--parsable");
     if !worker_ids.is_empty() {
         sbatch.arg(format!("--dependency=afterany:{}", worker_ids.join(":")));
@@ -441,9 +464,9 @@ async fn submit_slurm_gather_job(
         .arg("--wrap")
         .arg(cmd_str);
 
-    let output = sbatch.output()?;
+    let output = sbatch.output().await?;
     if !output.status.success() {
-        return Err(AppError::ExecutionFailed {
+        return Err(CliError::ExecutionFailed {
             message: "Failed to submit Gather job".to_string(),
             log_path: None,
             log_summary: String::from_utf8_lossy(&output.stderr).to_string(),
@@ -458,7 +481,7 @@ async fn submit_slurm_workers_async(
     work_items: &[Value],
     worker_exe: &Path,
     sbatch_opts: &str,
-) -> Result<Vec<String>, AppError> {
+) -> Result<Vec<String>, CliError> {
     let mut slurm_ids = Vec::new();
 
     for (i, item) in work_items.iter().enumerate() {
@@ -472,7 +495,7 @@ async fn submit_slurm_workers_async(
         let cmd = executor
             .build_command_for_script(worker_exe, &args)
             .await
-            .map_err(|e| AppError::ExecutionFailed {
+            .map_err(|e| CliError::ExecutionFailed {
                 message: format!("Failed to build command for worker #{}", i),
                 log_path: None,
                 log_summary: e.to_string(),
@@ -485,7 +508,7 @@ async fn submit_slurm_workers_async(
             w_repx.display()
         );
 
-        let mut sbatch = Command::new("sbatch");
+        let mut sbatch = TokioCommand::new("sbatch");
         sbatch
             .arg("--parsable")
             .args(sbatch_opts.split_whitespace())
@@ -494,9 +517,9 @@ async fn submit_slurm_workers_async(
             .arg("--wrap")
             .arg(wrapped_cmd);
 
-        let output = sbatch.output()?;
+        let output = sbatch.output().await?;
         if !output.status.success() {
-            return Err(AppError::ExecutionFailed {
+            return Err(CliError::ExecutionFailed {
                 message: format!("sbatch submission for worker #{} failed", i),
                 log_path: None,
                 log_summary: String::from_utf8_lossy(&output.stderr).to_string(),
@@ -504,7 +527,7 @@ async fn submit_slurm_workers_async(
         }
         slurm_ids.push(String::from_utf8_lossy(&output.stdout).trim().to_string());
     }
-    log_info!("Submitted {} workers to Slurm.", slurm_ids.len());
+    tracing::info!("Submitted {} workers to Slurm.", slurm_ids.len());
     Ok(slurm_ids)
 }
 async fn run_local_workers(
@@ -513,7 +536,7 @@ async fn run_local_workers(
     worker_exe: &Path,
     out_dirs: &mut Vec<PathBuf>,
     repx_dirs: &mut Vec<PathBuf>,
-) -> Result<(), AppError> {
+) -> Result<(), CliError> {
     let mut tasks = Vec::new();
 
     for (i, item) in work_items.iter().enumerate() {
@@ -532,14 +555,14 @@ async fn run_local_workers(
         tasks.push(tokio::spawn(async move {
             let result = executor.execute_script(&exe, &args).await;
             if result.is_ok() {
-                let _ = fs::File::create(repx_dir_for_task.join("SUCCESS"));
+                let _ = fs::File::create(repx_dir_for_task.join(markers::SUCCESS));
             } else {
-                let _ = fs::File::create(repx_dir_for_task.join("FAIL"));
+                let _ = fs::File::create(repx_dir_for_task.join(markers::FAIL));
             }
             result
         }));
     }
-    log_info!(
+    tracing::info!(
         "[3/4] Waiting for {} local worker jobs to complete...",
         tasks.len()
     );
@@ -548,16 +571,16 @@ async fn run_local_workers(
         match res {
             Ok(Ok(_)) => {}
             Ok(Err(e)) => {
-                fs::File::create(orch.repx_dir.join("FAIL"))?;
-                return Err(AppError::ExecutionFailed {
+                fs::File::create(orch.repx_dir.join(markers::FAIL))?;
+                return Err(CliError::ExecutionFailed {
                     message: format!("Local worker #{} failed", i),
                     log_path: None,
                     log_summary: e.to_string(),
                 });
             }
             Err(e) => {
-                fs::File::create(orch.repx_dir.join("FAIL"))?;
-                return Err(AppError::ExecutionFailed {
+                fs::File::create(orch.repx_dir.join(markers::FAIL))?;
+                return Err(CliError::ExecutionFailed {
                     message: format!("Local worker #{} panicked", i),
                     log_path: None,
                     log_summary: e.to_string(),

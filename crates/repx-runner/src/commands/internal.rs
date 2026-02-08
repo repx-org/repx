@@ -1,13 +1,15 @@
-use crate::cli::InternalOrchestrateArgs;
+use crate::{cli::InternalOrchestrateArgs, error::CliError};
 use repx_client::orchestration::OrchestrationPlan;
-use repx_core::{error::AppError, model::JobId};
+use repx_core::{errors::ConfigError, model::JobId};
 use std::collections::{HashMap, HashSet};
 use std::process::Command;
 
-pub fn handle_internal_orchestrate(args: InternalOrchestrateArgs) -> Result<(), AppError> {
-    let plan_content = std::fs::read_to_string(&args.plan_file).map_err(|e| AppError::PathIo {
-        path: args.plan_file.clone(),
-        source: e,
+pub fn handle_internal_orchestrate(args: InternalOrchestrateArgs) -> Result<(), CliError> {
+    let plan_content = std::fs::read_to_string(&args.plan_file).map_err(|e| {
+        CliError::Config(ConfigError::PathIo {
+            path: args.plan_file.clone(),
+            source: e,
+        })
     })?;
     let plan: OrchestrationPlan = serde_json::from_str(&plan_content)?;
 
@@ -31,9 +33,9 @@ pub fn handle_internal_orchestrate(args: InternalOrchestrateArgs) -> Result<(), 
         current_wave.sort();
 
         if current_wave.is_empty() {
-            return Err(AppError::ConfigurationError(
+            return Err(CliError::Config(ConfigError::General(
                 "Cycle detected in job dependency graph.".to_string(),
-            ));
+            )));
         }
 
         eprintln!(
@@ -58,7 +60,7 @@ pub fn handle_internal_orchestrate(args: InternalOrchestrateArgs) -> Result<(), 
 
             let mut anchor_id = None;
 
-            if job_plan.job_type == "scatter-gather" {
+            if job_plan.job_type == repx_core::model::StageType::ScatterGather {
                 let mut anchor_cmd = Command::new("sbatch");
                 anchor_cmd
                     .arg("--parsable")
@@ -69,17 +71,15 @@ pub fn handle_internal_orchestrate(args: InternalOrchestrateArgs) -> Result<(), 
                     .arg("--error=/dev/null")
                     .arg("--wrap=exit 0");
 
-                let anchor_out =
-                    anchor_cmd
-                        .output()
-                        .map_err(|e| AppError::ProcessLaunchFailed {
-                            command_name: "sbatch (anchor)".to_string(),
-                            source: e,
-                        })?;
+                let anchor_out = anchor_cmd.output().map_err(|e| CliError::ExecutionFailed {
+                    message: "Process launch failed".to_string(),
+                    log_path: None,
+                    log_summary: e.to_string(),
+                })?;
 
                 if !anchor_out.status.success() {
                     let stderr = String::from_utf8_lossy(&anchor_out.stderr);
-                    return Err(AppError::ExecutionFailed {
+                    return Err(CliError::ExecutionFailed {
                         message: format!("Failed to submit anchor for job '{}'", job_id),
                         log_path: None,
                         log_summary: stderr.to_string(),
@@ -90,7 +90,7 @@ pub fn handle_internal_orchestrate(args: InternalOrchestrateArgs) -> Result<(), 
                     .to_string();
                 let aid = aid_str
                     .parse::<u32>()
-                    .map_err(|_| AppError::ExecutionFailed {
+                    .map_err(|_| CliError::ExecutionFailed {
                         message: format!("Failed to parse Anchor ID for job '{}'", job_id),
                         log_path: None,
                         log_summary: aid_str.clone(),
@@ -112,16 +112,15 @@ pub fn handle_internal_orchestrate(args: InternalOrchestrateArgs) -> Result<(), 
 
             sbatch_cmd.arg(&script_path);
 
-            let output = sbatch_cmd
-                .output()
-                .map_err(|e| AppError::ProcessLaunchFailed {
-                    command_name: "sbatch".to_string(),
-                    source: e,
-                })?;
+            let output = sbatch_cmd.output().map_err(|e| CliError::ExecutionFailed {
+                message: "Process launch failed".to_string(),
+                log_path: None,
+                log_summary: e.to_string(),
+            })?;
 
             if !output.status.success() {
                 let stderr = String::from_utf8_lossy(&output.stderr);
-                return Err(AppError::ExecutionFailed {
+                return Err(CliError::ExecutionFailed {
                     message: format!("sbatch command failed for job '{}'", job_id),
                     log_path: Some(script_path),
                     log_summary: stderr.to_string(),
@@ -131,7 +130,7 @@ pub fn handle_internal_orchestrate(args: InternalOrchestrateArgs) -> Result<(), 
             let slurm_id_str = String::from_utf8_lossy(&output.stdout).trim().to_string();
             let slurm_id = slurm_id_str
                 .parse::<u32>()
-                .map_err(|_| AppError::ExecutionFailed {
+                .map_err(|_| CliError::ExecutionFailed {
                     message: format!(
                         "Failed to parse SLURM ID from sbatch output for job '{}'",
                         job_id

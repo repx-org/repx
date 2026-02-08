@@ -1,4 +1,8 @@
-use crate::{error::AppError, model::JobId};
+use crate::{
+    constants::{dirs, markers},
+    errors::ConfigError,
+    model::JobId,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
@@ -20,8 +24,8 @@ pub struct FoundJob {
 pub fn get_job_outcomes(
     store_path: &Path,
     job_ids_to_check: &[JobId],
-) -> Result<HashMap<JobId, FoundJob>, AppError> {
-    let outputs_dir = store_path.join("outputs");
+) -> Result<HashMap<JobId, FoundJob>, ConfigError> {
+    let outputs_dir = store_path.join(dirs::OUTPUTS);
     if !outputs_dir.exists() {
         return Ok(HashMap::new());
     }
@@ -33,8 +37,8 @@ pub fn get_job_outcomes(
             continue;
         }
 
-        let success_marker = job_path.join("SUCCESS");
-        let fail_marker = job_path.join("FAIL");
+        let success_marker = job_path.join(markers::SUCCESS);
+        let fail_marker = job_path.join(markers::FAIL);
 
         if success_marker.exists() {
             outcomes.insert(
@@ -67,7 +71,7 @@ pub fn merge_stores(
     sources: &[PathBuf],
     destination: &Path,
     mut on_progress: impl FnMut(MergeProgress),
-) -> Result<(), AppError> {
+) -> Result<(), ConfigError> {
     fs::create_dir_all(destination)?;
 
     let entries: Vec<_> = sources

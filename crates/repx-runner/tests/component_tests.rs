@@ -9,7 +9,6 @@ fn test_internal_execute_simple_job_ok() {
     let harness = TestHarness::new();
     let job_id = harness.get_job_id_by_name("stage-A-producer");
 
-    harness.stage_lab();
     harness.stage_job_dirs(&job_id);
 
     let job_output_path = harness.get_job_output_path(&job_id);
@@ -22,7 +21,7 @@ fn test_internal_execute_simple_job_ok() {
         .arg("--executable-path")
         .arg(harness.get_staged_executable_path(&job_id))
         .arg("--base-path")
-        .arg(harness.cache_dir.path())
+        .arg(&harness.cache_dir)
         .arg("--host-tools-dir")
         .arg(harness.get_host_tools_dir_name())
         .arg("--runtime")
@@ -47,7 +46,6 @@ fn test_internal_execute_with_inputs_ok() {
     let job_b_id = harness.get_job_id_by_name("stage-B-producer");
     let job_c_id = harness.get_job_id_by_name("stage-C-consumer");
 
-    harness.stage_lab();
     harness.stage_job_dirs(&job_a_id);
     harness.stage_job_dirs(&job_b_id);
     harness.stage_job_dirs(&job_c_id);
@@ -75,7 +73,7 @@ fn test_internal_execute_with_inputs_ok() {
         .arg("--executable-path")
         .arg(harness.get_staged_executable_path(&job_c_id))
         .arg("--base-path")
-        .arg(harness.cache_dir.path())
+        .arg(&harness.cache_dir)
         .arg("--host-tools-dir")
         .arg(harness.get_host_tools_dir_name())
         .arg("--runtime")
@@ -93,6 +91,9 @@ fn test_internal_execute_fails_if_lab_not_staged() {
     let harness = TestHarness::new();
     let job_id = harness.get_job_id_by_name("stage-A-producer");
 
+    let artifacts_dir = harness.cache_dir.join("artifacts");
+    fs::remove_dir_all(&artifacts_dir).expect("Failed to remove artifacts dir");
+
     harness.stage_job_dirs(&job_id);
     let job_output_path = harness.get_job_output_path(&job_id);
     fs::write(job_output_path.join("repx/inputs.json"), "{}").unwrap();
@@ -103,13 +104,13 @@ fn test_internal_execute_fails_if_lab_not_staged() {
         .arg("--executable-path")
         .arg(harness.get_staged_executable_path(&job_id))
         .arg("--base-path")
-        .arg(harness.cache_dir.path())
+        .arg(&harness.cache_dir)
         .arg("--host-tools-dir")
         .arg(harness.get_host_tools_dir_name())
         .arg("--runtime")
         .arg("native");
     cmd.assert()
         .failure()
-        .stderr(predicates::str::contains("Execution failed for job"))
+        .stderr(predicates::str::contains("Execution failed"))
         .stderr(predicates::str::contains("No such file or directory"));
 }

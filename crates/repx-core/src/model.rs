@@ -4,6 +4,100 @@ use std::fmt;
 use std::path::PathBuf;
 use std::str::FromStr;
 
+#[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum StageType {
+    #[default]
+    Simple,
+    ScatterGather,
+    Worker,
+    Gather,
+}
+
+impl fmt::Display for StageType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            StageType::Simple => write!(f, "simple"),
+            StageType::ScatterGather => write!(f, "scatter-gather"),
+            StageType::Worker => write!(f, "worker"),
+            StageType::Gather => write!(f, "gather"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ParseStageTypeError(pub String);
+
+impl fmt::Display for ParseStageTypeError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "invalid stage type: '{}'. Valid values are: simple, scatter-gather, worker, gather",
+            self.0
+        )
+    }
+}
+
+impl std::error::Error for ParseStageTypeError {}
+
+impl FromStr for StageType {
+    type Err = ParseStageTypeError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "simple" => Ok(StageType::Simple),
+            "scatter-gather" => Ok(StageType::ScatterGather),
+            "worker" => Ok(StageType::Worker),
+            "gather" => Ok(StageType::Gather),
+            _ => Err(ParseStageTypeError(s.to_string())),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Hash, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum SchedulerType {
+    #[default]
+    Local,
+    Slurm,
+}
+
+impl fmt::Display for SchedulerType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            SchedulerType::Local => write!(f, "local"),
+            SchedulerType::Slurm => write!(f, "slurm"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ParseSchedulerTypeError(pub String);
+
+impl fmt::Display for ParseSchedulerTypeError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "invalid scheduler type: '{}'. Valid values are: local, slurm",
+            self.0
+        )
+    }
+}
+
+impl std::error::Error for ParseSchedulerTypeError {}
+
+impl FromStr for SchedulerType {
+    type Err = ParseSchedulerTypeError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "local" => Ok(SchedulerType::Local),
+            "slurm" => Ok(SchedulerType::Slurm),
+            _ => Err(ParseSchedulerTypeError(s.to_string())),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize, Ord, PartialOrd)]
 pub struct JobId(pub String);
 
@@ -99,18 +193,14 @@ pub struct Executable {
     pub outputs: HashMap<String, serde_json::Value>,
 }
 
-fn default_stage_type() -> String {
-    "simple".to_string()
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Job {
     pub name: Option<String>,
     pub params: serde_json::Value,
     #[serde(skip)]
     pub path_in_lab: PathBuf,
-    #[serde(rename = "stage_type", default = "default_stage_type")]
-    pub stage_type: String,
+    #[serde(rename = "stage_type", default)]
+    pub stage_type: StageType,
     #[serde(default)]
     pub executables: HashMap<String, Executable>,
 }

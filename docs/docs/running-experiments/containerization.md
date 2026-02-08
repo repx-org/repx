@@ -1,38 +1,99 @@
 # Containerization
 
-RepX ensures reproducibility by running every job in an isolated container environment. This prevents host system libraries from leaking into your experiment and ensures that dependencies defined in Nix are the only ones available.
+RepX isolates job execution using container technologies to ensure reproducibility. Host system libraries are excluded from the execution environment; only dependencies specified in the Nix closure are available.
 
-## Isolation Mechanism
+## Runtime Backends
 
-By default, RepX uses **Bubblewrap (`bwrap`)** for local execution and on clusters where it is available. If configured, it can also use **Docker**, **Podman**, or **Apptainer/Singularity**.
+RepX supports multiple container runtimes:
 
-The container environment:
-*   **Read-only Root:** The root filesystem is read-only.
-*   **Mounts:**
-    *   `/nix/store`: Mounted read-only (so Nix packages work).
-    *   `$out`: Mounted read-write (the job's output directory).
-    *   Inputs: Specific input files are mounted into the container.
-*   **Networking:** Networking is disabled by default to ensure purity (can be enabled via configuration).
+| Runtime | Description | Privileges Required |
+|---------|-------------|---------------------|
+| `native` | Direct process execution (no isolation) | None |
+| `bwrap` | Bubblewrap namespace isolation | None (user namespaces) |
+| `docker` | Docker container engine | Root or docker group |
+| `podman` | Podman rootless containers | None |
 
-## Configuring Runtimes
+## Isolation Properties
 
-You can specify the container runtime in `config.toml` or per-target.
+The container environment enforces the following constraints:
+
+| Property | Configuration |
+|----------|---------------|
+| Root filesystem | Read-only |
+| Nix store | Mounted read-only at `/nix/store` |
+| Output directory | Mounted read-write at `$out` |
+| Input artifacts | Bind-mounted from upstream jobs |
+| Network | Disabled by default |
+
+## Configuration
+
+### Per-Target Runtime Selection
+
+Specify runtime preference in target configuration:
 
 ```toml
-[execution]
-isolation = "bwrap" # options: "bwrap", "docker", "podman", "process" (no isolation)
+[targets.local.local]
+execution_types = ["bwrap", "native"]
+
+[targets.cluster.slurm]
+execution_types = ["podman", "native"]
 ```
 
-## HPC Considerations
+The first available runtime in the list is selected.
 
-On HPC systems, `bwrap` is often preferred because it doesn't require root privileges (unlike Docker). Apptainer (Singularity) is also a common target for RepX which supports converting the Nix closure into a SIF image on the fly (feature in progress).
+### CLI Override
+
+Force a specific runtime via command-line flags:
+
+```bash
+repx run simulation --bwrap
+repx run simulation --docker
+repx run simulation --podman
+repx run simulation --native
+```
+
+## Bubblewrap Execution
+
+Bubblewrap (`bwrap`) provides lightweight namespace isolation without requiring elevated privileges. It is the recommended runtime for HPC environments.
+
+### Rootfs Extraction
+
+Container images are extracted to a rootfs directory for `bwrap` execution:
+
+1. Image tarball is located in the Lab's `image/` directory
+2. Extraction occurs to `node_local_path` if configured, otherwise `base_path`
+3. Extracted rootfs is cached by image hash for reuse
+
+### Mount Configuration
+
+Default `bwrap` mounts:
+
+| Path | Type | Purpose |
+|------|------|---------|
+| `/nix/store` | ro-bind | Nix closure access |
+| `/tmp` | tmpfs | Temporary storage |
+| `$out` | bind | Output directory |
+| Job inputs | ro-bind | Upstream artifacts |
+
+## Impure Mode
+
+For debugging or accessing host resources, impure mode relaxes isolation:
+
+```toml
+[targets.local]
+mount_host_paths = true
+# Or specify explicit paths:
+mount_paths = ["/home/user/data", "/opt/tools"]
+```
+
+Impure mode compromises reproducibility and should be used only for development.
 
 ## Debugging
 
-If you need to inspect the environment of a job, you can use `repx debug-run`:
+Inspect the container environment with `repx debug-run`:
 
 ```bash
 repx debug-run <job_id> --lab ./result
 ```
 
-This drops you into a shell *inside* the container environment, exactly as the job would see it.
+This spawns an interactive shell within the job's execution environment, with all mounts and environment variables configured identically to normal execution.

@@ -39,7 +39,6 @@ class LocalCacheResolver(ArtifactResolver):
         self.cache_dir = Path(cache_dir).resolve()
 
     def resolve_path(self, job: "JobView", relative_path: str) -> Path:
-        # Standard layout: <base_dir>/<job_id>/out/<filename>
         return self.cache_dir / job.id / "out" / relative_path
 
 
