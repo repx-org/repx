@@ -1,4 +1,4 @@
-use crate::error::AppError;
+use crate::errors::ConfigError;
 use crate::theme;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -216,7 +216,7 @@ impl Config {
     }
 }
 
-fn create_default_config_if_missing(xdg_dirs: &BaseDirectories) -> Result<PathBuf, AppError> {
+fn create_default_config_if_missing(xdg_dirs: &BaseDirectories) -> Result<PathBuf, ConfigError> {
     match xdg_dirs.find_config_file(CONFIG_FILE_NAME) {
         Some(path) => Ok(path),
         None => {
@@ -227,7 +227,7 @@ fn create_default_config_if_missing(xdg_dirs: &BaseDirectories) -> Result<PathBu
     }
 }
 
-fn create_default_theme_if_missing(xdg_dirs: &BaseDirectories) -> Result<(), AppError> {
+fn create_default_theme_if_missing(xdg_dirs: &BaseDirectories) -> Result<(), ConfigError> {
     if xdg_dirs.find_config_file(THEME_FILE_NAME).is_none() {
         let theme_path = xdg_dirs.place_config_file(THEME_FILE_NAME)?;
         let default_theme = theme::default_theme();
@@ -237,7 +237,7 @@ fn create_default_theme_if_missing(xdg_dirs: &BaseDirectories) -> Result<(), App
     Ok(())
 }
 
-fn create_default_resources_if_missing(xdg_dirs: &BaseDirectories) -> Result<(), AppError> {
+fn create_default_resources_if_missing(xdg_dirs: &BaseDirectories) -> Result<(), ConfigError> {
     if xdg_dirs.find_config_file(RESOURCES_FILE_NAME).is_none() {
         let resources_path = xdg_dirs.place_config_file(RESOURCES_FILE_NAME)?;
         fs::write(resources_path, DEFAULT_RESOURCES_CONTENT)?;
@@ -259,33 +259,33 @@ pub fn merge_toml_values(a: &mut toml::Value, b: &toml::Value) {
 
 pub fn load_resources(
     extra_path: Option<&std::path::PathBuf>,
-) -> Result<Option<Resources>, AppError> {
+) -> Result<Option<Resources>, ConfigError> {
     let mut merged_value = toml::Value::Table(toml::map::Map::new());
 
     let xdg_dirs = BaseDirectories::with_prefix("repx");
     if let Some(global_path) = xdg_dirs.find_config_file(RESOURCES_FILE_NAME) {
-        crate::log_debug!("Loading global resources from: {}", global_path.display());
+        tracing::debug!("Loading global resources from: {}", global_path.display());
         let content = fs::read_to_string(global_path)?;
-        let global_value: toml::Value = toml::from_str(&content).map_err(AppError::Toml)?;
+        let global_value: toml::Value = toml::from_str(&content).map_err(ConfigError::Toml)?;
         merge_toml_values(&mut merged_value, &global_value);
     }
 
     let cwd_path = std::env::current_dir()?.join(RESOURCES_FILE_NAME);
     if cwd_path.exists() {
-        crate::log_debug!("Loading local resources from: {}", cwd_path.display());
+        tracing::debug!("Loading local resources from: {}", cwd_path.display());
         let content = fs::read_to_string(cwd_path)?;
-        let local_value: toml::Value = toml::from_str(&content).map_err(AppError::Toml)?;
+        let local_value: toml::Value = toml::from_str(&content).map_err(ConfigError::Toml)?;
         merge_toml_values(&mut merged_value, &local_value);
     }
 
     if let Some(path) = extra_path {
         if path.exists() {
-            crate::log_debug!("Loading specified resources from: {}", path.display());
+            tracing::debug!("Loading specified resources from: {}", path.display());
             let content = fs::read_to_string(path)?;
-            let cli_value: toml::Value = toml::from_str(&content).map_err(AppError::Toml)?;
+            let cli_value: toml::Value = toml::from_str(&content).map_err(ConfigError::Toml)?;
             merge_toml_values(&mut merged_value, &cli_value);
         } else {
-            return Err(AppError::PathIo {
+            return Err(ConfigError::PathIo {
                 path: path.clone(),
                 source: std::io::Error::new(std::io::ErrorKind::NotFound, "File not found"),
             });
@@ -295,12 +295,12 @@ pub fn load_resources(
     if merged_value.as_table().is_none_or(|t| t.is_empty()) {
         Ok(None)
     } else {
-        let final_resources: Resources = merged_value.try_into().map_err(AppError::Toml)?;
+        let final_resources: Resources = merged_value.try_into().map_err(ConfigError::Toml)?;
         Ok(Some(final_resources))
     }
 }
 
-pub fn load_config() -> Result<Config, AppError> {
+pub fn load_config() -> Result<Config, ConfigError> {
     let xdg_dirs = BaseDirectories::with_prefix("repx");
 
     let config_path = create_default_config_if_missing(&xdg_dirs)?;
@@ -308,26 +308,25 @@ pub fn load_config() -> Result<Config, AppError> {
     create_default_resources_if_missing(&xdg_dirs)?;
 
     let file_content = fs::read_to_string(config_path)?;
-    let mut config: Config = toml::from_str(&file_content)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+    let mut config: Config = toml::from_str(&file_content)?;
 
     for (name, target) in config.targets.iter_mut() {
         let path_str = target.base_path.display().to_string();
         let expanded_path_str = shellexpand::tilde(&path_str).into_owned();
         target.base_path = PathBuf::from_str(&expanded_path_str).map_err(|e| {
-            AppError::ConfigurationError(format!("Invalid path '{}': {}", expanded_path_str, e))
+            ConfigError::General(format!("Invalid path '{}': {}", expanded_path_str, e))
         })?;
 
         if let Some(local_path) = &target.node_local_path {
             let local_str = local_path.display().to_string();
             let expanded_local = shellexpand::tilde(&local_str).into_owned();
             target.node_local_path = Some(PathBuf::from_str(&expanded_local).map_err(|e| {
-                AppError::ConfigurationError(format!("Invalid path '{}': {}", expanded_local, e))
+                ConfigError::General(format!("Invalid path '{}': {}", expanded_local, e))
             })?);
         }
 
         if target.address.is_none() && !target.base_path.is_absolute() {
-            return Err(AppError::ConfigurationError(format!(
+            return Err(ConfigError::General(format!(
                 "Target '{}': `base_path` for local targets must be an absolute path or start with '~'. Got: '{}'",
                 name,
                 path_str
@@ -337,7 +336,7 @@ pub fn load_config() -> Result<Config, AppError> {
     Ok(config)
 }
 
-pub fn save_config(config: &Config) -> Result<(), AppError> {
+pub fn save_config(config: &Config) -> Result<(), ConfigError> {
     let xdg_dirs = BaseDirectories::with_prefix("repx");
     let config_path = xdg_dirs.place_config_file(CONFIG_FILE_NAME)?;
 

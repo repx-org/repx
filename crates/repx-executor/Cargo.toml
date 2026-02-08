@@ -6,6 +6,7 @@ edition = { workspace = true }
 [dependencies]
 repx-core = { workspace = true }
 thiserror = { workspace = true }
+tracing = { workspace = true }
 tokio = { workspace = true }
 nix = { workspace = true, features = ["fs"] }
 tempfile = { workspace = true }

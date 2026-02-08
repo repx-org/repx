@@ -1,12 +1,16 @@
 use crate::cli::{ListArgs, ListEntity};
-use repx_core::error::AppError;
-use repx_core::lab;
-use repx_core::model::{JobId, Lab, RunId};
-use repx_core::resolver;
+use repx_core::{
+    errors::{ConfigError, DomainError},
+    lab,
+    model::{JobId, Lab, RunId},
+    resolver,
+};
 use std::path::Path;
 use std::str::FromStr;
 
-pub fn handle_list(args: ListArgs, lab_path: &Path) -> Result<(), AppError> {
+use crate::error::CliError;
+
+pub fn handle_list(args: ListArgs, lab_path: &Path) -> Result<(), CliError> {
     let lab = lab::load_from_path(lab_path)?;
 
     match args.entity.unwrap_or(ListEntity::Runs { name: None }) {
@@ -19,7 +23,7 @@ pub fn handle_list(args: ListArgs, lab_path: &Path) -> Result<(), AppError> {
     }
 }
 
-fn list_runs(lab: &Lab, lab_path: &Path) -> Result<(), AppError> {
+fn list_runs(lab: &Lab, lab_path: &Path) -> Result<(), CliError> {
     println!("Available runs in '{}':", lab_path.display());
 
     let mut run_ids: Vec<_> = lab.runs.keys().collect();
@@ -31,7 +35,7 @@ fn list_runs(lab: &Lab, lab_path: &Path) -> Result<(), AppError> {
     Ok(())
 }
 
-fn list_jobs(lab: &Lab, run_id_opt: Option<&str>) -> Result<(), AppError> {
+fn list_jobs(lab: &Lab, run_id_opt: Option<&str>) -> Result<(), CliError> {
     let run_id_str = match run_id_opt {
         Some(s) => s,
         None => {
@@ -53,8 +57,8 @@ fn list_jobs(lab: &Lab, run_id_opt: Option<&str>) -> Result<(), AppError> {
         }
     };
 
-    let run_id =
-        RunId::from_str(run_id_str).map_err(|e| AppError::ConfigurationError(e.to_string()))?;
+    let run_id = RunId::from_str(run_id_str)
+        .map_err(|e| CliError::Config(ConfigError::General(e.to_string())))?;
 
     let matched_run = if let Some(run) = lab.runs.get(&run_id) {
         Some((&run_id, run))
@@ -69,10 +73,10 @@ fn list_jobs(lab: &Lab, run_id_opt: Option<&str>) -> Result<(), AppError> {
             Some(matches[0])
         } else if matches.len() > 1 {
             let options: Vec<String> = matches.iter().map(|(k, _)| k.0.clone()).collect();
-            return Err(AppError::AmbiguousJobId {
+            return Err(CliError::Domain(DomainError::AmbiguousJobId {
                 input: run_id.0,
                 matches: options,
-            });
+            }));
         } else {
             None
         }
@@ -119,11 +123,11 @@ fn list_jobs(lab: &Lab, run_id_opt: Option<&str>) -> Result<(), AppError> {
             }
         }
 
-        Err(AppError::TargetNotFound(run_id.0))
+        Err(CliError::Domain(DomainError::TargetNotFound(run_id.0)))
     }
 }
 
-fn list_dependencies(lab: &Lab, job_id_str: &str) -> Result<(), AppError> {
+fn list_dependencies(lab: &Lab, job_id_str: &str) -> Result<(), CliError> {
     let target_input = RunId(job_id_str.to_string());
     let job_id = resolver::resolve_target_job_id(lab, &target_input)?;
 

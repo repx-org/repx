@@ -16,7 +16,6 @@ pkgs.runCommand "check-static-binary"
       exit 1
     fi
 
-    # Use -L to follow symlinks (since repx is a wrapper/symlink farm)
     file_output=$(file -L "$BINARY")
     echo "$file_output"
 

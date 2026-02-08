@@ -1,5 +1,4 @@
 use crate::config::Config;
-use crate::error::AppError;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fs;
@@ -310,7 +309,7 @@ fn merge_values(a: &mut toml::Value, b: &toml::Value) {
     *a = b.clone();
 }
 
-pub fn load_theme(config: &Config) -> Result<Theme, AppError> {
+pub fn load_theme(config: &Config) -> Result<Theme, std::io::Error> {
     let mut base_theme = match config.theme.as_deref() {
         Some("dracula") => dracula_theme(),
         _ => default_theme(),

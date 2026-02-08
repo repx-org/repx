@@ -1,38 +1,123 @@
 # Core Concepts
 
-RepX is a framework designed to bring Nix-based reproducibility to High-Performance Computing (HPC) workflows. It decouples the definition of experiments from their execution.
+RepX provides reproducible experiment execution on High-Performance Computing infrastructure. The framework separates experiment definition from execution, enabling portable workflows across heterogeneous compute environments.
 
-## The RepX Ecosystem
+## Architecture Overview
 
-The framework consists of three primary components:
+RepX comprises three distinct layers:
 
-1.  **repx (The Definition Layer):** A Nix library for defining stages, pipelines, and parameter sweeps. It builds the static "Lab" artifact.
-2.  **repx CLI (The Execution Layer):** A Rust-based unified CLI (`repx`) that synchronizes the Lab to execution targets (local or SSH/SLURM), orchestrates job execution, and visualizes experiment topologies.
-3.  **repx-py (The Analysis Layer):** A Python library for querying results and metadata from the structured output store.
+| Layer | Component | Function |
+|-------|-----------|----------|
+| Definition | Nix library | Experiment specification, dependency resolution |
+| Execution | Rust CLI | Orchestration, synchronization, job management |
+| Analysis | Python library | Result querying, metadata access |
 
-## Key Terminology
+## Terminology
 
 ### Stage
-An individual unit of work (e.g., a script) with defined inputs, outputs, parameters, and software dependencies.
+
+A discrete computational unit with explicit interfaces:
+
+- **Inputs**: Data dependencies from upstream stages
+- **Outputs**: Produced artifacts consumed by downstream stages
+- **Parameters**: Configuration values affecting execution
+- **Environment**: Software dependencies captured as Nix closures
 
 ### Pipeline
-A sequence of stages connected by data dependencies. The output of one stage becomes the input of another.
+
+A directed acyclic graph (DAG) of stages connected by data flow dependencies. Stage outputs map to downstream stage inputs.
 
 ### Run
-A parameterized instance of a pipeline. You can have multiple runs for the same pipeline structure with different parameter configurations.
 
-### The Lab
-A self-contained directory structure (produced by `nix build`) containing all experiment metadata, build scripts, and dependency closures. It is the "executable" artifact of your experiment.
+A parameterized pipeline instantiation. Multiple runs may share pipeline structure with varying parameter configurations.
+
+### Lab
+
+The build artifact produced by `nix build`. A Lab encapsulates:
+
+- Experiment DAG structure (metadata JSON)
+- Job executables and dependency closures
+- Container images (when applicable)
+- Host tools for target bootstrapping
 
 ## Workflow
 
-1.  **Define:** Create a `flake.nix` using the `repx` library to describe your experiment topology and software dependencies.
-2.  **Build:** Run `nix build` to generate the "Lab" directory.
-3.  **Visualize:** Use `repx viz` to generate a graph of the experiment topology.
-    
-    <div align="center">
-      <img src="/images/simple-topology.svg" alt="Experiment Topology" />
-    </div>
+### 1. Define
 
-4.  **Run:** Use `repx run` to submit the Lab to a target (e.g., your laptop or a supercomputer).
-5.  **Analyze:** Use `repx-py` in Jupyter notebooks to load data from the results.
+Specify experiment structure using the `repx` Nix library:
+
+```nix
+{
+  outputs = { self, repx, ... }: {
+    packages.x86_64-linux.default = repx.lib.runs2Lab [
+      # Run definitions
+    ];
+  };
+}
+```
+
+### 2. Build
+
+Generate the Lab artifact:
+
+```bash
+nix build
+```
+
+### 3. Visualize
+
+Inspect experiment topology:
+
+```bash
+repx viz --format svg
+```
+
+<div align="center">
+  <img src="/images/simple-topology.svg" alt="Experiment Topology" />
+</div>
+
+### 4. Execute
+
+Submit to an execution target:
+
+```bash
+repx run <run_name> --lab ./result [--target <target>]
+```
+
+### 5. Analyze
+
+Query results programmatically:
+
+```python
+from repx_py import Lab
+
+lab = Lab.from_path("./result")
+for job in lab.jobs():
+    print(job.outputs)
+```
+
+## Execution Model
+
+### Scheduling
+
+RepX supports two scheduler backends:
+
+| Scheduler | Use Case |
+|-----------|----------|
+| `local` | Direct execution with concurrency control |
+| `slurm` | HPC cluster submission via SLURM |
+
+### Runtime Environments
+
+Jobs execute in isolated environments:
+
+| Runtime | Description |
+|---------|-------------|
+| Native | Direct process on host system |
+| Bwrap | Bubblewrap namespace isolation |
+| Docker | Docker container |
+| Podman | Podman container |
+
+### Incremental Execution
+
+RepX tracks job completion state. Interrupted executions resume from the last completed job. Container images are synchronized incrementally to minimize transfer overhead during iterative development.

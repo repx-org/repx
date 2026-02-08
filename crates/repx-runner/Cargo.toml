@@ -14,10 +14,12 @@ clap = { workspace = true }
 indicatif = { workspace = true }
 colored = { workspace = true }
 serde_json = { workspace = true }
+tracing = { workspace = true }
 repx-executor = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread"] }
 futures = { workspace = true }
 num_cpus = { workspace = true }
+thiserror = { workspace = true }
 
 
 [dev-dependencies]
@@ -27,3 +29,5 @@ tempfile = { workspace = true }
 repx-client = { workspace = true }
 repx-core = { workspace = true }
 sha2 = { workspace = true }
+uuid = { workspace = true }
+repx-test-utils = { workspace = true }

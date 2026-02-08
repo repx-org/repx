@@ -550,7 +550,6 @@ impl JobsState {
                 if val_str.to_lowercase().contains(term) {
                     return true;
                 }
-                // Check "key=val" format
                 let combined = format!("{}={}", k, val_str);
                 if combined.to_lowercase().contains(term) {
                     return true;

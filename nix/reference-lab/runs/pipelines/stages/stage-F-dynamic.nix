@@ -30,7 +30,6 @@ _: {
       echo "Dynamic stage running in mode: ${params.mode}"
       echo "Multiplier: ${params.multiplier}"
 
-      # Read from input
       input_file="${inputs.source_data}"
       if [[ -f "$input_file" ]]; then
         value=$(cat "$input_file" | head -1)

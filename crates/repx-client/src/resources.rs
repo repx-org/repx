@@ -1,6 +1,5 @@
 use repx_core::{
     config::{ResourceRule, Resources},
-    log_debug,
     model::JobId,
 };
 use wildmatch::WildMatch;
@@ -80,7 +79,7 @@ pub fn resolve_for_job(
         }
     }
 
-    log_debug!(
+    tracing::debug!(
         "Resolved sbatch directives for job '{}' on target '{}': {:?}",
         job_id,
         target_name,
@@ -110,13 +109,13 @@ pub fn resolve_worker_resources(
     });
     if let Some(rule) = final_rule {
         if let Some(worker_rule) = &rule.worker_resources {
-            log_debug!(
+            tracing::debug!(
                 "Applying specific worker_resources override for job '{}'",
                 orchestrator_job_id
             );
             merge_rule(&mut worker_directives, worker_rule);
         } else {
-            log_debug!(
+            tracing::debug!(
                 "No worker_resources override for job '{}'. Workers will inherit parent's resources.",
                 orchestrator_job_id
             );

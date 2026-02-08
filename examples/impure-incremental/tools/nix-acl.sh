@@ -1,15 +1,6 @@
 #!/usr/bin/env bash
 
 # ==============================================================================
-# Generic Nix Impure Build ACL Manager
-#
-# This script manages Filesystem ACLs to grant a Nix builder user temporary,
-# minimal access to one or more directories within a user's home directory.
-#
-# It automatically sets traversal-only permissions on parent directories and
-# full access on the specified target directories.
-#
-# ==============================================================================
 
 readonly NIX_BUILD_GROUP="nixbld"
 

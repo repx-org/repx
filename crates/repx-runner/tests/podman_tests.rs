@@ -9,13 +9,12 @@ fn test_podman_impure_mode_args() {
     let harness = TestHarness::with_execution_type("podman");
     harness.stage_lab();
 
-    let base_path = harness.cache_dir.path();
+    let base_path = &harness.cache_dir;
     let job_id = "job-podman-impure";
     harness.stage_job_dirs(job_id);
 
     let host_tools_dir = harness
         .cache_dir
-        .path()
         .join("artifacts/host-tools")
         .join(harness.get_host_tools_dir_name())
         .join("bin");
@@ -101,13 +100,12 @@ fn test_podman_mount_specific_paths_args() {
     let harness = TestHarness::with_execution_type("podman");
     harness.stage_lab();
 
-    let base_path = harness.cache_dir.path();
+    let base_path = &harness.cache_dir;
     let job_id = "job-podman-specific";
     harness.stage_job_dirs(job_id);
 
     let host_tools_dir = harness
         .cache_dir
-        .path()
         .join("artifacts/host-tools")
         .join(harness.get_host_tools_dir_name())
         .join("bin");

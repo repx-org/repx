@@ -3,7 +3,7 @@
   gitHash,
 }:
 let
-  labVersion = "0.1.2";
+  labVersion = "0.1.3";
 
   mkHostTools =
     let
@@ -153,10 +153,8 @@ let
           cp -R ${jobs}/* $out/jobs
           cp -r ${mkHostTools} $out/host-tools/$(basename ${mkHostTools})
 
-          # Copy root metadata
           cp ${rootMetadata} "$out/revision/${rootMetadataFilename}"
 
-          # Copy run metadata files
           ${pkgs.lib.concatMapStringsSep "\n" (drv: ''
             cp ${drv} "$out/revision/$(basename ${drv})"
           '') (pkgs.lib.attrValues metadataDrvs)}
@@ -164,12 +162,14 @@ let
           ${pkgs.lib.optionalString includeImages ''
             mkdir -p $out/image
             ${pkgs.lib.concatMapStringsSep "\n" (imageDrv: ''
-              image_tarball=$(${pkgs.findutils}/bin/find "${imageDrv}" -name "*.tar.gz")
+              image_tarball=$(${pkgs.findutils}/bin/find "${imageDrv}" -name "*.tar.gz" -o -name "*.tar" | head -n 1)
               if [ -z "$image_tarball" ]; then
                 echo "Error: Could not find container image tarball in ${imageDrv}"; exit 1;
               fi
               final_filename=$(basename "${imageDrv}")
-              cp "$image_tarball" "$out/image/$final_filename"
+              image_dir="$out/image/$final_filename"
+              mkdir -p "$image_dir"
+              ${pkgs.gnutar}/bin/tar -xf "$image_tarball" -C "$image_dir"
             '') imageDerivations}
           ''}
         '';
@@ -225,10 +225,8 @@ let
           mkdir -p $out $out/lab $out/readme
           cp -rL ${artifacts.labCore}/* $out/
 
-          # Copy manifest to lab/ subdirectory with hash preserved
           cp ${artifacts.labManifest} $out/lab/$(basename ${artifacts.labManifest})
 
-          # Copy readme to readme/ subdirectory with hash preserved
           cp ${readme} $out/readme/$(basename ${readme})
 
           echo "Lab directory created successfully."

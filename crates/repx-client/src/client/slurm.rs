@@ -5,8 +5,8 @@ use crate::resources::{self, SbatchDirectives};
 use crate::targets::Target;
 use fs_err;
 use repx_core::{
-    error::AppError,
-    log_debug,
+    constants::dirs,
+    errors::ConfigError,
     model::{Job, JobId},
 };
 use sha2::{Digest, Sha256};
@@ -15,7 +15,6 @@ use std::io::Write;
 use std::path::Path;
 use std::str::FromStr;
 use std::sync::Arc;
-use xdg;
 
 fn generate_repx_invoker_script(
     job_id: &JobId,
@@ -70,23 +69,24 @@ pub fn submit_slurm_batch_run(
     send(ClientEvent::GeneratingSlurmScripts {
         num_jobs: jobs_to_submit.len(),
     });
-    let xdg_dirs = xdg::BaseDirectories::with_prefix("repx");
-    let cache_home = xdg_dirs.get_cache_home().ok_or_else(|| {
-        ClientError::Core(AppError::Io(std::io::Error::new(
-            std::io::ErrorKind::NotFound,
-            "Could not find cache home directory",
-        )))
+    let local_target = client.get_target("local").ok_or_else(|| {
+        ClientError::Config(ConfigError::General(
+            "A 'local' target must be defined in config.toml to store client state.".to_string(),
+        ))
     })?;
-    let local_batch_dir = cache_home
-        .join("submissions")
-        .join(&client.lab.content_hash);
-    fs_err::create_dir_all(&local_batch_dir).map_err(AppError::from)?;
+    let client_temp_dir = local_target.base_path().join("repx").join("temp");
+    let local_batch_dir = client_temp_dir.join("slurm_batch");
+    if local_batch_dir.exists() {
+        let _ = fs_err::remove_dir_all(&local_batch_dir);
+    }
+    fs_err::create_dir_all(&local_batch_dir)
+        .map_err(|e| ClientError::Config(ConfigError::Io(e)))?;
 
     let mut plan = OrchestrationPlan::new(target.base_path(), &client.lab.content_hash);
     let job_ids_in_batch: HashSet<JobId> = jobs_to_submit.keys().cloned().collect();
 
     for (job_id, job) in &jobs_to_submit {
-        let job_root_on_target = target.base_path().join("outputs").join(&job_id.0);
+        let job_root_on_target = target.base_path().join(dirs::OUTPUTS).join(&job_id.0);
         let image_path_opt = client
             .lab
             .runs
@@ -126,7 +126,7 @@ pub fn submit_slurm_batch_run(
         }
         if target.config().mount_host_paths {
             if !target.config().mount_paths.is_empty() {
-                return Err(ClientError::Core(AppError::ConfigurationError(
+                return Err(ClientError::Config(ConfigError::General(
                     "Cannot specify both 'mount_host_paths = true' and 'mount_paths'.".into(),
                 )));
             }
@@ -136,21 +136,23 @@ pub fn submit_slurm_batch_run(
                 repx_args.push_str(&format!(" --mount-paths {}", path));
             }
         }
-        let (repx_command_to_wrap, directives) = if job.stage_type == "scatter-gather" {
+        let (repx_command_to_wrap, directives) = if job.stage_type
+            == repx_core::model::StageType::ScatterGather
+        {
             let scatter_exe = job.executables.get("scatter").ok_or_else(|| {
-                AppError::ConfigurationError(
+                ClientError::Config(ConfigError::General(
                     "Scatter-gather job missing 'scatter' executable".into(),
-                )
+                ))
             })?;
             let worker_exe = job.executables.get("worker").ok_or_else(|| {
-                AppError::ConfigurationError(
+                ClientError::Config(ConfigError::General(
                     "Scatter-gather job missing 'worker' executable".into(),
-                )
+                ))
             })?;
             let gather_exe = job.executables.get("gather").ok_or_else(|| {
-                AppError::ConfigurationError(
+                ClientError::Config(ConfigError::General(
                     "Scatter-gather job missing 'gather' executable".into(),
-                )
+                ))
             })?;
 
             let artifacts_base = target.artifacts_base_path();
@@ -158,8 +160,8 @@ pub fn submit_slurm_batch_run(
             let worker_exe_path = artifacts_base.join(&worker_exe.path);
             let gather_exe_path = artifacts_base.join(&gather_exe.path);
 
-            let worker_outputs_json =
-                serde_json::to_string(&worker_exe.outputs).map_err(AppError::from)?;
+            let worker_outputs_json = serde_json::to_string(&worker_exe.outputs)
+                .map_err(|e| ClientError::Config(ConfigError::Json(e)))?;
 
             let scatter_gather_args = format!(
                 "--job-package-path {} --scatter-exe-path {} --worker-exe-path {} --gather-exe-path {} --worker-outputs-json '{}' {}",
@@ -193,10 +195,10 @@ pub fn submit_slurm_batch_run(
             (command, main_directives)
         } else {
             let main_exe = job.executables.get("main").ok_or_else(|| {
-                AppError::ConfigurationError(format!(
-                    "Simple job '{}' missing 'main' executable",
+                ClientError::Config(ConfigError::General(format!(
+                    "Job '{}' missing required executable 'main'",
                     job_id
-                ))
+                )))
             })?;
             let executable_path_on_target = target.artifacts_base_path().join(&main_exe.path);
 
@@ -223,15 +225,18 @@ pub fn submit_slurm_batch_run(
         let script_hash = format!("{:x}", hash_bytes);
 
         let script_path = local_batch_dir.join(format!("{}.sbatch", script_hash));
-        let mut file = fs_err::File::create(script_path).map_err(AppError::from)?;
+        let mut file = fs_err::File::create(script_path)
+            .map_err(|e| ClientError::Config(ConfigError::Io(e)))?;
         file.write_all(script_content.as_bytes())
-            .map_err(AppError::from)?;
+            .map_err(|e| ClientError::Config(ConfigError::Io(e)))?;
 
         plan.add_job(job_id.clone(), job, script_hash, &job_ids_in_batch);
     }
     let plan_filename = "plan.json";
-    let plan_content = serde_json::to_string_pretty(&plan).map_err(AppError::from)?;
-    fs_err::write(local_batch_dir.join(plan_filename), plan_content).map_err(AppError::from)?;
+    let plan_content = serde_json::to_string_pretty(&plan)
+        .map_err(|e| ClientError::Config(ConfigError::Json(e)))?;
+    fs_err::write(local_batch_dir.join(plan_filename), plan_content)
+        .map_err(|e| ClientError::Config(ConfigError::Io(e)))?;
 
     send(ClientEvent::ExecutingOrchestrator);
     send(ClientEvent::SubmittingJobs {
@@ -252,7 +257,7 @@ pub fn submit_slurm_batch_run(
 
     let orchestrator_output = target.run_command("sh", &["-c", &orchestrator_command])?;
 
-    log_debug!(
+    tracing::debug!(
         "Orchestrator raw output on target '{}':\n---\n{}\n---",
         target.name(),
         orchestrator_output

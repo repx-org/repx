@@ -80,7 +80,7 @@ fn test_partial_run_by_job_id() {
     cmd.arg("run").arg(&stage_c_job_id);
     cmd.assert().success();
 
-    let outputs_dir = harness.cache_dir.path().join("outputs");
+    let outputs_dir = harness.cache_dir.join("outputs");
     let mut jobs_that_should_have_run = dependency_job_ids;
     jobs_that_should_have_run.push(stage_c_job_id.clone());
 

@@ -286,19 +286,18 @@ impl<'a> VizGenerator<'a> {
     }
 
     fn get_job_inputs(job: &'a Job) -> Vec<&'a repx_core::model::InputMapping> {
-        let stage_type = &job.stage_type;
-        if stage_type == "simple" {
-            job.executables
+        match job.stage_type {
+            repx_core::model::StageType::Simple => job
+                .executables
                 .get("main")
                 .map(|e| e.inputs.iter().collect())
-                .unwrap_or_default()
-        } else if stage_type == "scatter-gather" {
-            job.executables
+                .unwrap_or_default(),
+            repx_core::model::StageType::ScatterGather => job
+                .executables
                 .get("scatter")
                 .map(|e| e.inputs.iter().collect())
-                .unwrap_or_default()
-        } else {
-            Vec::new()
+                .unwrap_or_default(),
+            _ => Vec::new(),
         }
     }
 

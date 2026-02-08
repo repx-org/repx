@@ -1,7 +1,7 @@
 use crate::error::{ClientError, Result};
 use repx_core::{
-    error::AppError,
-    log_debug, log_info,
+    constants::dirs,
+    errors::ConfigError,
     model::{Job, JobId, Lab},
 };
 use std::path::Path;
@@ -18,40 +18,39 @@ pub fn generate_and_write_inputs_json(
     let mut inputs_map = serde_json::Map::new();
 
     let exe = job.executables.get(executable_name).ok_or_else(|| {
-        AppError::ConfigurationError(format!(
+        ClientError::Config(ConfigError::General(format!(
             "Job '{}' missing required executable '{}'",
             job_id, executable_name
-        ))
+        )))
     })?;
 
     for mapping in &exe.inputs {
         if let (Some(dep_job_id), Some(source_output)) = (&mapping.job_id, &mapping.source_output) {
-            let dep_job = lab
-                .jobs
-                .get(dep_job_id)
-                .ok_or_else(|| AppError::JobNotFound(dep_job_id.clone()))?;
+            let dep_job = lab.jobs.get(dep_job_id).ok_or_else(|| {
+                ClientError::JobNotTracked(dep_job_id.clone(), "unknown".to_string())
+            })?;
 
-            let dep_exe = if dep_job.stage_type == "scatter-gather" {
+            let dep_exe = if dep_job.stage_type == repx_core::model::StageType::ScatterGather {
                 dep_job.executables.get("gather")
             } else {
                 dep_job.executables.get("main")
             }
             .ok_or_else(|| {
-                AppError::ConfigurationError(format!(
+                ClientError::Config(ConfigError::General(format!(
                     "Could not find output executable for dependency job '{}'",
                     dep_job_id
-                ))
+                )))
             })?;
 
             let value_template_val = dep_exe.outputs.get(source_output).ok_or_else(|| {
-                ClientError::Core(AppError::ConfigurationError(format!(
+                ClientError::Config(ConfigError::General(format!(
                             "Inconsistent metadata: job '{}' requires output '{}' from dependency '{}', but this output is not defined in the dependency's metadata.",
                             job_id, source_output, dep_job_id
                         )))
             })?;
 
             let value_template = value_template_val.as_str().ok_or_else(|| {
-                ClientError::Core(AppError::ConfigurationError(format!(
+                ClientError::Config(ConfigError::General(format!(
                         "Inconsistent metadata: job '{}' requires output '{}' from dependency '{}', but this output is not a string path template.",
                         job_id, source_output, dep_job_id
                     )))
@@ -59,9 +58,9 @@ pub fn generate_and_write_inputs_json(
 
             let dep_output_dir = target
                 .base_path()
-                .join("outputs")
+                .join(dirs::OUTPUTS)
                 .join(&dep_job_id.0)
-                .join("out");
+                .join(dirs::OUT);
             let final_path = value_template.replace("$out", &dep_output_dir.to_string_lossy());
 
             inputs_map.insert(
@@ -100,7 +99,7 @@ pub fn generate_and_write_inputs_json(
                     serde_json::Value::String(remote_path.to_string_lossy().to_string()),
                 );
             } else {
-                log_info!(
+                tracing::info!(
                         "Warning: Could not resolve metadata file for run '{}' in revision directory. Input '{}' will be missing.",
                         run_id, mapping.target_input
                     );
@@ -109,21 +108,21 @@ pub fn generate_and_write_inputs_json(
     }
 
     let json_content = serde_json::to_string_pretty(&serde_json::Value::Object(inputs_map))
-        .map_err(AppError::from)?;
+        .map_err(|e| ClientError::Config(ConfigError::Json(e)))?;
 
     let inputs_json_path_on_target = target
         .base_path()
-        .join("outputs")
+        .join(dirs::OUTPUTS)
         .join(&job_id.0)
-        .join("repx")
+        .join(dirs::REPX)
         .join("inputs.json");
 
-    log_info!(
+    tracing::info!(
         "Generating inputs.json for job '{}' on target '{}'",
         job_id,
         target.name()
     );
-    log_debug!(
+    tracing::debug!(
         "Writing inputs.json to '{}' with content:\n{}",
         inputs_json_path_on_target.display(),
         json_content

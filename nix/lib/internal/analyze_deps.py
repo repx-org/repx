@@ -116,10 +116,6 @@ class CommandVisitor(bashlex.ast.nodevisitor):
 
 
 def extract_from_ast_file(filepath):
-    """
-    Parses the OSH AST text file using robust Regex to handle
-    nested structures and multiline content strings.
-    """
     with open(filepath) as f:
         data = f.read()
 

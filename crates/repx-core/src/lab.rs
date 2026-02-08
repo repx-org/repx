@@ -1,6 +1,5 @@
-use crate::log_debug;
 use crate::{
-    error::AppError,
+    errors::ConfigError,
     model::{Lab, LabManifest, RootMetadata, Run, RunMetadataForLoading},
 };
 use std::collections::HashMap;
@@ -25,8 +24,8 @@ fn find_manifest_path(lab_path: &Path) -> Option<PathBuf> {
     None
 }
 
-pub fn load_from_path(initial_path: &Path) -> Result<Lab, AppError> {
-    log_debug!(
+pub fn load_from_path(initial_path: &Path) -> Result<Lab, ConfigError> {
+    tracing::debug!(
         "Attempting to load lab from initial path: '{}'",
         initial_path.display()
     );
@@ -49,33 +48,33 @@ pub fn load_from_path(initial_path: &Path) -> Result<Lab, AppError> {
         (initial_path.to_path_buf(), None)
     };
 
-    log_debug!(
+    tracing::debug!(
         "Loading and validating lab from resolved directory '{}'...",
         lab_path.display()
     );
 
     if !lab_path.is_dir() {
-        return Err(AppError::LabNotFound(lab_path.to_path_buf()));
+        return Err(ConfigError::LabNotFound(lab_path.to_path_buf()));
     }
 
     let manifest_path = if let Some(p) = specific_manifest {
         p
     } else {
         find_manifest_path(&lab_path)
-            .ok_or_else(|| AppError::MetadataNotFound(lab_path.to_path_buf()))?
+            .ok_or_else(|| ConfigError::MetadataNotFound(lab_path.to_path_buf()))?
     };
 
-    log_debug!("Found lab manifest at: '{}'", manifest_path.display());
+    tracing::debug!("Found lab manifest at: '{}'", manifest_path.display());
 
     let manifest_content = fs::read_to_string(&manifest_path)?;
     let manifest: LabManifest = serde_json::from_str(&manifest_content)?;
     let content_hash = manifest.lab_id;
 
-    log_debug!("Lab Content Hash (ID): {}", content_hash);
+    tracing::debug!("Lab Content Hash (ID): {}", content_hash);
 
     let root_metadata_path = lab_path.join(&manifest.metadata);
     if !root_metadata_path.is_file() {
-        return Err(AppError::Io(std::io::Error::new(
+        return Err(ConfigError::Io(std::io::Error::new(
             std::io::ErrorKind::NotFound,
             format!(
                 "Root metadata file not found at '{}'",
@@ -84,7 +83,7 @@ pub fn load_from_path(initial_path: &Path) -> Result<Lab, AppError> {
         )));
     }
 
-    log_debug!(
+    tracing::debug!(
         "Loading root metadata from '{}'",
         root_metadata_path.display()
     );
@@ -93,7 +92,7 @@ pub fn load_from_path(initial_path: &Path) -> Result<Lab, AppError> {
 
     let host_tools_root = lab_path.join("host-tools");
     if !host_tools_root.is_dir() {
-        return Err(AppError::Io(std::io::Error::new(
+        return Err(ConfigError::Io(std::io::Error::new(
             std::io::ErrorKind::NotFound,
             format!(
                 "'host-tools' directory not found in lab at '{}'",
@@ -106,7 +105,7 @@ pub fn load_from_path(initial_path: &Path) -> Result<Lab, AppError> {
         .filter_map(Result::ok)
         .find(|e| e.path().is_dir())
         .ok_or_else(|| {
-            AppError::Io(std::io::Error::new(
+            ConfigError::Io(std::io::Error::new(
                 std::io::ErrorKind::NotFound,
                 "No tool directory found inside host-tools",
             ))
@@ -140,13 +139,13 @@ pub fn load_from_path(initial_path: &Path) -> Result<Lab, AppError> {
     for run_rel_path in root_meta.runs {
         lab.referenced_files.push(PathBuf::from(&run_rel_path));
         let run_metadata_path = lab_path.join(&run_rel_path);
-        log_debug!(
+        tracing::debug!(
             "Loading run metadata from '{}'",
             run_metadata_path.display()
         );
 
         let run_meta_content = fs::read_to_string(&run_metadata_path).map_err(|e| {
-            AppError::Io(std::io::Error::new(
+            ConfigError::Io(std::io::Error::new(
                 e.kind(),
                 format!(
                     "Failed to read run metadata at {:?}: {}",
@@ -179,7 +178,7 @@ pub fn load_from_path(initial_path: &Path) -> Result<Lab, AppError> {
         }
     }
 
-    log_debug!(
+    tracing::debug!(
         "Successfully parsed all metadata. Total runs: {}, Total jobs: {}",
         lab.runs.len(),
         lab.jobs.len()
@@ -187,12 +186,9 @@ pub fn load_from_path(initial_path: &Path) -> Result<Lab, AppError> {
 
     let jobs_dir = lab_path.join("jobs");
     if !jobs_dir.is_dir() {
-        return Err(AppError::Io(std::io::Error::new(
-            std::io::ErrorKind::NotFound,
-            format!(
-                "Lab integrity check failed: 'jobs' directory not found in lab at '{}'",
-                lab_path.display()
-            ),
+        return Err(ConfigError::IntegrityError(format!(
+            "'jobs' directory not found in lab at '{}'",
+            lab_path.display()
         )));
     }
 
@@ -200,12 +196,9 @@ pub fn load_from_path(initial_path: &Path) -> Result<Lab, AppError> {
         if let Some(image_rel_path) = &run.image {
             let image_full_path = lab_path.join(image_rel_path);
             if !image_full_path.exists() {
-                return Err(AppError::Io(std::io::Error::new(
-                    std::io::ErrorKind::NotFound,
-                    format!(
-                        "Lab integrity check failed: image file '{}' not found for run.",
-                        image_full_path.display()
-                    ),
+                return Err(ConfigError::IntegrityError(format!(
+                    "image file '{}' not found for run.",
+                    image_full_path.display()
                 )));
             }
         }
@@ -214,17 +207,14 @@ pub fn load_from_path(initial_path: &Path) -> Result<Lab, AppError> {
     for (job_id, job) in &lab.jobs {
         let job_pkg_path = lab_path.join(&job.path_in_lab);
         if !job_pkg_path.is_dir() {
-            return Err(AppError::JobPackageIoError {
-                job_id: job_id.clone(),
-                path: job_pkg_path,
-                source: std::io::Error::new(
-                    std::io::ErrorKind::NotFound,
-                    "Job package directory not found",
-                ),
-            });
+            return Err(ConfigError::IntegrityError(format!(
+                "Job package directory not found for job '{}' at '{}'",
+                job_id,
+                job_pkg_path.display()
+            )));
         }
     }
 
-    log_debug!("Lab validation successful.");
+    tracing::debug!("Lab validation successful.");
     Ok(lab)
 }

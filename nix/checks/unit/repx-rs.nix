@@ -1,4 +1,9 @@
-{ pkgs, referenceLab }:
+{
+  pkgs,
+  referenceLab,
+  testName,
+  cargoTestArgs,
+}:
 let
   repxSrc = (pkgs.callPackage ../../../default.nix { }).src;
   cargoDeps = pkgs.rustPlatform.importCargoLock {
@@ -13,13 +18,13 @@ let
   '';
 in
 pkgs.testers.runNixOSTest {
-  name = "repx-rs-tests-vm";
+  name = testName;
 
   nodes.machine =
     { pkgs, ... }:
     {
       virtualisation = {
-        diskSize = 8192;
+        diskSize = 25600;
         memorySize = 4096;
         cores = 4;
       };
@@ -35,7 +40,7 @@ pkgs.testers.runNixOSTest {
           bubblewrap
         ];
         variables = {
-          EXAMPLE_REPX_LAB = referenceLab;
+          REFERENCE_LAB_PATH = referenceLab;
           RUST_BACKTRACE = "1";
         };
       };
@@ -50,6 +55,6 @@ pkgs.testers.runNixOSTest {
     machine.succeed("cp ${cargoConfig} /build/.cargo/config.toml")
     machine.succeed("cd /build && git init && git config user.email 'test@test.com' && git config user.name 'Test' && git add . && git commit -m 'init'")
     machine.succeed("cd /build && cargo build --release --bin repx --offline")
-    machine.succeed("cd /build && cargo test --release --offline")
+    machine.succeed("cd /build && cargo test --release --offline ${cargoTestArgs}")
   '';
 }

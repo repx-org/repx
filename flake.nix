@@ -62,7 +62,6 @@
         formatter = import ./nix/formatters.nix { inherit pkgs; };
 
         devShells.default = pkgs.mkShell {
-          EXAMPLE_REPX_LAB = labs.reference-lab;
           REFERENCE_LAB_PATH = labs.reference-lab;
           buildInputs = with pkgs; [
             openssl
@@ -72,7 +71,6 @@
             clippy
             cargo-machete
 
-            repx
             repx-py
             (python3.withPackages (ps: [
               ps.pytest

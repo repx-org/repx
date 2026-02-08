@@ -1,13 +1,13 @@
 # Configuration
 
-RepX configuration is managed via `config.toml`, typically located at `~/.config/repx/config.toml` (or `$XDG_CONFIG_HOME/repx/config.toml`).
+RepX uses TOML configuration files following XDG Base Directory conventions. The primary configuration file is located at `~/.config/repx/config.toml` (or `$XDG_CONFIG_HOME/repx/config.toml`).
 
 ## Target Configuration
 
-You can define multiple execution targets (e.g., local machine, HPC cluster).
+Targets define execution environments. Each target specifies connection parameters, storage paths, and scheduler preferences.
 
 ```toml
-# Default target if none specified
+# Default target when --target is not specified
 submission_target = "local"
 
 [targets.local]
@@ -19,57 +19,100 @@ address = "user@hpc-login-node"
 base_path = "/scratch/user/repx-store"
 default_scheduler = "slurm"
 
-# Optional: Fast local storage for container caching (e.g., NVMe scratch)
+# Node-local storage for container image caching
+# Recommended for NVMe scratch or local SSD paths
 node_local_path = "/tmp/user/repx"
 
-# Optional: Impure Host Mounts
-# Use this to mount host paths (like /home or /nix/store) into the container.
-# Useful for debugging or accessing large datasets not managed by RepX.
+# Host path mounting (impure mode)
 mount_host_paths = false
-# OR specify specific paths:
 # mount_paths = ["/home/user/data", "/opt/tools"]
 
 [targets.cluster.slurm]
-# Preference for container runtimes
 execution_types = ["podman", "native"]
 ```
 
-## Resources Configuration (`resources.toml`)
+### Target Parameters
 
-The `resources.toml` file maps jobs to scheduler resources (SLURM partitions, memory, time). RepX evaluates rules in order; the last matching rule applies.
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `address` | string | SSH connection string (`user@host`) |
+| `base_path` | path | Root directory for artifacts and outputs |
+| `default_scheduler` | enum | `local` or `slurm` |
+| `node_local_path` | path | Fast local storage for container caching |
+| `mount_host_paths` | bool | Enable impure host path mounting |
+| `mount_paths` | array | Explicit paths to mount into containers |
 
-**Location Priority:**
-1.  CLI Flag: `--resources <PATH>`
-2.  Local file: `./resources.toml`
-3.  Global config: `~/.config/repx/resources.toml`
+### Scheduler Types
+
+RepX supports two scheduler backends:
+
+| Scheduler | Description |
+|-----------|-------------|
+| `local` | Direct process execution with configurable concurrency |
+| `slurm` | SLURM workload manager integration via `sbatch` |
+
+## Resources Configuration
+
+The `resources.toml` file maps jobs to scheduler resources. Rules are evaluated sequentially; the last matching rule takes precedence.
+
+### Resolution Order
+
+1. CLI flag: `--resources <PATH>`
+2. Working directory: `./resources.toml`
+3. Global config: `~/.config/repx/resources.toml`
 
 ### Schema
 
 ```toml
-# Global defaults
 [defaults]
 partition = "main"
 cpus-per-task = 1
 mem = "4G"
 time = "01:00:00"
-sbatch_opts = []  # Extra arguments for sbatch
+sbatch_opts = []
 
-# Specific Rules
 [[rules]]
-# Glob pattern to match Job IDs
 job_id_glob = "*-heavy-*"
-
-# Optional: Only apply this rule for a specific target
-target = "cluster"
-
-# Resources to apply
+target = "cluster"          # Optional: target-specific rule
 mem = "128G"
 cpus-per-task = 16
 
-# Scatter-Gather Specifics
-# You can override resources specifically for the 'worker' jobs 
-# of a scatter-gather stage.
+# Scatter-gather worker overrides
 [rules.worker_resources]
 mem = "64G"
 cpus-per-task = 4
 ```
+
+### Resource Parameters
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `partition` | string | SLURM partition name |
+| `cpus-per-task` | int | CPU cores per job |
+| `mem` | string | Memory limit (e.g., `4G`, `512M`) |
+| `time` | string | Wall time limit (`HH:MM:SS`) |
+| `sbatch_opts` | array | Additional `sbatch` arguments |
+| `job_id_glob` | pattern | Glob pattern for job ID matching |
+| `target` | string | Restrict rule to specific target |
+
+## Stage Types
+
+Jobs are classified by their execution semantics:
+
+| Type | Description |
+|------|-------------|
+| `simple` | Standard single-execution job |
+| `scatter-gather` | Parallel fan-out orchestration |
+| `worker` | Individual scatter partition |
+| `gather` | Aggregation of worker outputs |
+
+## Logging Configuration
+
+Log output is controlled via environment variables and CLI flags:
+
+| Method | Example |
+|--------|---------|
+| Environment | `REPX_LOG_LEVEL=debug repx run ...` |
+| CLI flag | `repx -vv run ...` |
+
+Valid log levels: `error`, `warn`, `info`, `debug`, `trace`

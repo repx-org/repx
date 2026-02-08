@@ -12,7 +12,7 @@ pkgs.testers.runNixOSTest {
       { pkgs, ... }:
       {
         virtualisation = {
-          diskSize = 8192;
+          diskSize = 25600;
           memorySize = 2048;
           cores = 4;
         };
@@ -27,7 +27,7 @@ pkgs.testers.runNixOSTest {
       { pkgs, ... }:
       {
         virtualisation = {
-          diskSize = 8192;
+          diskSize = 25600;
           memorySize = 4096;
           cores = 4;
           docker.enable = true;
@@ -157,6 +157,9 @@ pkgs.testers.runNixOSTest {
 
         config = f"""
         submission_target = "cluster"
+        [targets.local]
+        base_path = "/root/repx-local"
+
         [targets.cluster]
         address = "repxuser@cluster"
         base_path = "/home/repxuser/repx-store"

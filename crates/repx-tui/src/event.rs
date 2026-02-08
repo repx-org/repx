@@ -1,11 +1,10 @@
 use crate::app::{App, InputMode, PanelFocus};
 use crossterm::event::{self, Event as CrosstermEvent, KeyCode, KeyEvent, KeyModifiers};
-use repx_core::log_debug;
 use std::io;
 use std::time::Duration;
 
 pub fn handle_key_event(key: KeyEvent, app: &mut App) {
-    log_debug!(
+    tracing::debug!(
         "Key event received: {:?}, Mode: {:?}, Focus: {:?}",
         key.code,
         app.input_mode,

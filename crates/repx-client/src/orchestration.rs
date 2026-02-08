@@ -1,4 +1,4 @@
-use repx_core::model::{Job, JobId};
+use repx_core::model::{Job, JobId, StageType};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -7,7 +7,7 @@ pub struct JobPlan {
     pub script_hash: String,
     pub dependencies: Vec<JobId>,
     #[serde(default)]
-    pub job_type: String,
+    pub job_type: StageType,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

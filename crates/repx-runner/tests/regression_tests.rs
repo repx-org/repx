@@ -8,7 +8,7 @@ mod harness;
 fn test_auto_fallback_to_native_when_image_missing_with_bwrap_default() {
     let mut harness = TestHarness::with_execution_type("bwrap");
 
-    let temp_lab_dir = harness.cache_dir.path().join("temp_lab_regression_test");
+    let temp_lab_dir = harness.cache_dir.join("temp_lab_regression_test");
 
     let status_cp = std::process::Command::new("cp")
         .arg("-r")

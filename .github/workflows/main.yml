@@ -34,8 +34,14 @@ jobs:
       fail-fast: false
       matrix:
         check:
-          - repx-rs-tests
           - repx-py-tests
+          - rs-client-tests
+          - rs-unit
+          - rs-bwrap
+          - rs-gc
+          - rs-integration
+          - rs-containers
+          - rs-executor
           - integration
           - invalidation
           - pipeline_logic
@@ -57,6 +63,7 @@ jobs:
           - e2e-mount-paths-podman
           - e2e-impure-docker
           - e2e-mount-paths-docker
+          - incremental-sync
     steps:
       - uses: actions/checkout@v4
       - uses: DeterminateSystems/nix-installer-action@v11

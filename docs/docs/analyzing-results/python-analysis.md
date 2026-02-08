@@ -4,14 +4,27 @@ Analyzing reproducible experiments often requires locating specific output files
 
 ## Installation
 
-`repx-py` is part of the RepX flake. You should use it within a Nix devShell or install it in development mode.
+`repx-py` is available as a flake package. Include it in your project's development shell:
+
+```nix
+# flake.nix
+{
+  inputs.repx.url = "github:repx-org/repx";
+  
+  outputs = { self, nixpkgs, repx }: {
+    devShells.x86_64-linux.default = nixpkgs.legacyPackages.x86_64-linux.mkShell {
+      packages = [
+        repx.packages.x86_64-linux.repx-py
+      ];
+    };
+  };
+}
+```
+
+Or build it directly:
 
 ```bash
-# In your flake.nix devShell inputs:
-inputs = [ pkgs.repx-py ];
-
-# Or manually in a clone of the repo:
-pip install -e ./python/src
+nix build github:repx-org/repx#repx-py
 ```
 
 ## Loading an Experiment

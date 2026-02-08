@@ -6,8 +6,9 @@ use crate::model::{StatusCounts, TuiExecutor, TuiRowItem, TuiScheduler, TuiTarge
 use repx_client::{error::ClientError, Client, SubmitOptions};
 use repx_core::{
     config::Resources,
-    engine, log_info, log_warn,
-    model::{JobId, Lab},
+    constants::{dirs, logs},
+    engine,
+    model::{JobId, Lab, SchedulerType},
     theme::Theme,
 };
 use std::collections::{HashSet, VecDeque};
@@ -137,7 +138,7 @@ impl App {
         active_target_ref: Arc<Mutex<String>>,
         active_scheduler_ref: Arc<Mutex<String>>,
     ) -> Result<Self, ClientError> {
-        log_info!("Initializing new App instance.");
+        tracing::info!("Initializing new App instance.");
         let lab = client.lab()?.clone();
         let is_native_lab = lab.is_native();
 
@@ -257,14 +258,14 @@ impl App {
         app.jobs_state.init_from_lab(&app.lab);
         app.jobs_state.rebuild_display_list(&app.lab);
 
-        log_info!("Performing initial data update.");
+        tracing::info!("Performing initial data update.");
 
         if !app.jobs_state.display_rows.is_empty() {
             app.jobs_state.table_state.select(Some(0));
             app.on_selection_change();
         }
 
-        log_info!("App initialized successfully.");
+        tracing::info!("App initialized successfully.");
         Ok(app)
     }
 
@@ -278,7 +279,7 @@ impl App {
                 Ok((target_name, job_statuses)) => {
                     let active_target = self.targets_state.get_active_target_name();
                     if target_name != active_target {
-                        log_info!(
+                        tracing::info!(
                             "Ignoring status update from '{}' (active: '{}')",
                             target_name,
                             active_target
@@ -289,7 +290,7 @@ impl App {
                     let was_loading = self.is_loading;
                     self.is_loading = false;
 
-                    log_info!("Received status update. Applying new statuses.");
+                    tracing::info!("Received status update. Applying new statuses.");
                     self.jobs_state.apply_statuses(&self.lab, job_statuses);
                     if was_loading {
                         let (_, current_completed_count) = self.calculate_current_counts();
@@ -299,7 +300,7 @@ impl App {
                 }
                 Err(e) => {
                     self.is_loading = false;
-                    log_warn!("Background status update failed: {}", e);
+                    tracing::warn!("Background status update failed: {}", e);
                 }
             }
         }
@@ -312,7 +313,7 @@ impl App {
                 .iter_mut()
                 .find(|j| j.full_id == job_id)
             {
-                log_info!("Received log update for job '{}'", job_id);
+                tracing::info!("Received log update for job '{}'", job_id);
                 match log_result {
                     Ok(lines) => job.logs = lines,
                     Err(e) => job.logs = vec![format!("[Error fetching log: {}]", e)],
@@ -334,7 +335,7 @@ impl App {
         while let Ok(result) = self.submission_rx.try_recv() {
             match result {
                 SubmissionResult::Success { submitted_job_ids } => {
-                    log_info!(
+                    tracing::info!(
                         "Received submission success for {} jobs.",
                         submitted_job_ids.len()
                     );
@@ -350,7 +351,7 @@ impl App {
                     affected_job_ids,
                     error,
                 } => {
-                    log_info!(
+                    tracing::info!(
                         "Received submission failure for '{}': {} (affected {} jobs)",
                         failed_run_or_job_id,
                         error,
@@ -501,7 +502,7 @@ impl App {
 
     pub fn set_active_target(&mut self) {
         self.targets_state.set_active();
-        log_info!(
+        tracing::info!(
             "Active target changed to: {}",
             self.targets_state.get_active_target_name()
         );
@@ -524,7 +525,7 @@ impl App {
     }
 
     pub fn quit(&mut self) {
-        log_info!("Quit action triggered.");
+        tracing::info!("Quit action triggered.");
         self.should_quit = true;
     }
 
@@ -584,7 +585,7 @@ impl App {
             .position(|&s| s == self.jobs_state.status_filter)
             .unwrap_or(0);
         let next_index = (current_index + 1) % STATUS_FILTERS.len();
-        log_info!(
+        tracing::info!(
             "Status filter changed to: {}",
             STATUS_FILTERS[next_index].as_str()
         );
@@ -602,7 +603,7 @@ impl App {
         } else {
             current_index - 1
         };
-        log_info!(
+        tracing::info!(
             "Status filter changed to: {}",
             STATUS_FILTERS[prev_index].as_str()
         );
@@ -697,12 +698,12 @@ impl App {
 
         let job_repx_dir = target_config
             .base_path
-            .join("outputs")
+            .join(dirs::OUTPUTS)
             .join(job_id.0.as_str())
-            .join("repx");
+            .join(dirs::REPX);
 
-        let stderr_log = job_repx_dir.join("stderr.log");
-        let stdout_log = job_repx_dir.join("stdout.log");
+        let stderr_log = job_repx_dir.join(logs::STDERR);
+        let stdout_log = job_repx_dir.join(logs::STDOUT);
         let paths = vec![stderr_log, stdout_log];
 
         if let Some(addr) = &target_config.address {
@@ -722,7 +723,7 @@ impl App {
             let tui_log = cache_home.join("repx-tui.log");
             self.pending_action = Some(ExternalAction::EditLocal(vec![repx_log, tui_log]));
         } else {
-            repx_core::log_warn!("Could not determine XDG base directories for repx logs.");
+            tracing::warn!("Could not determine XDG base directories for repx logs.");
         }
     }
 
@@ -758,7 +759,7 @@ impl App {
     pub fn run_selected(&mut self) {
         let raw_selected_ids = self.get_target_ids_for_action();
         if raw_selected_ids.is_empty() {
-            log_info!("'Run' action triggered but no items were selected/targeted.");
+            tracing::info!("'Run' action triggered but no items were selected/targeted.");
             return;
         }
 
@@ -778,7 +779,7 @@ impl App {
         }
 
         if selected_jobs_set.is_empty() {
-            log_info!("Selection resolved to no runnable jobs.");
+            tracing::info!("Selection resolved to no runnable jobs.");
             self.clear_selection();
             return;
         }
@@ -814,7 +815,7 @@ impl App {
                         "Succeeded" | "Running" | "Queued" | "Submitting..."
                     );
                     if !is_submittable {
-                        log_info!(
+                        tracing::info!(
                             "Skipping submission for final job '{}' with status '{}'",
                             id_str,
                             job.status
@@ -828,7 +829,9 @@ impl App {
             .collect();
 
         if ids_to_run.is_empty() {
-            log_info!("All selected items are already completed or in progress. No action taken.");
+            tracing::info!(
+                "All selected items are already completed or in progress. No action taken."
+            );
             self.clear_selection();
             self.rebuild_display_list();
             return;
@@ -842,7 +845,7 @@ impl App {
             })
             .collect();
 
-        log_info!(
+        tracing::info!(
             "Planning to submit {} jobs across {} final job submissions.",
             all_jobs_to_submit.len(),
             ids_to_run.len()
@@ -883,12 +886,14 @@ impl App {
                 .or_else(|| Some(num_cpus::get()))
         };
 
+        let scheduler_type: SchedulerType = scheduler.parse().unwrap_or_default();
+
         let client_clone = self.client.clone();
         let submission_tx_clone = self.submission_tx.clone();
         let resources_clone = self.resources.clone();
         let run_specs_to_submit = ids_to_run;
         thread::spawn(move || {
-            log_info!(
+            tracing::info!(
                 "Submitting batch run for final jobs {:?} to target '{}'",
                 &run_specs_to_submit,
                 &target_name
@@ -904,18 +909,18 @@ impl App {
             match client_clone.submit_batch_run(
                 run_specs_to_submit.clone(),
                 &target_name,
-                &scheduler,
+                scheduler_type,
                 options,
             ) {
                 Ok(msg) => {
-                    log_info!("Batch submission successful: {}", msg);
+                    tracing::info!("Batch submission successful: {}", msg);
                     let _ = submission_tx_clone.send(SubmissionResult::Success {
                         submitted_job_ids: all_jobs_to_submit,
                     });
                 }
                 Err(e) => {
                     let err_string = e.to_string();
-                    log_warn!("Batch submission failed: {}", err_string);
+                    tracing::warn!("Batch submission failed: {}", err_string);
                     let _ = submission_tx_clone.send(SubmissionResult::Failure {
                         failed_run_or_job_id: run_specs_to_submit.join(", "),
                         affected_job_ids: all_jobs_to_submit,
@@ -936,11 +941,11 @@ impl App {
 
     pub fn cancel_selected(&mut self) {
         let ids_to_cancel = self.get_target_ids_for_action();
-        log_info!("'Cancel' action triggered for: {:?}", ids_to_cancel);
+        tracing::info!("'Cancel' action triggered for: {:?}", ids_to_cancel);
 
         for job_id_str in ids_to_cancel {
             let job_id = JobId(job_id_str);
-            log_info!("Sending cancel request for job '{}'", job_id);
+            tracing::info!("Sending cancel request for job '{}'", job_id);
             let _ = self.client.cancel_job(job_id);
         }
         self.clear_selection();
@@ -967,22 +972,22 @@ impl App {
                 match arboard::Clipboard::new() {
                     Ok(mut clipboard) => {
                         if let Err(e) = clipboard.set_text(path_str.clone()) {
-                            log_warn!("Failed to yank path to clipboard (arboard): {}", e);
+                            tracing::warn!("Failed to yank path to clipboard (arboard): {}", e);
                         } else {
                             copied = true;
                         }
                     }
                     Err(e) => {
-                        log_warn!("Failed to initialize clipboard: {}", e);
+                        tracing::warn!("Failed to initialize clipboard: {}", e);
                     }
                 }
 
                 if copied {
-                    log_info!("Yanked path: {}", path_str);
+                    tracing::info!("Yanked path: {}", path_str);
                 }
             });
         } else {
-            log_info!("No job selected to yank path from.");
+            tracing::info!("No job selected to yank path from.");
         }
     }
 
@@ -1000,10 +1005,10 @@ impl App {
             } else if path.exists() {
                 self.pending_action = Some(ExternalAction::ExploreLocal(path));
             } else {
-                log_warn!("Path does not exist: {}", path.display());
+                tracing::warn!("Path does not exist: {}", path.display());
             }
         } else {
-            log_info!("No job selected to explore.");
+            tracing::info!("No job selected to explore.");
         }
     }
     pub fn consume_pending_action(&mut self) -> Option<ExternalAction> {
@@ -1022,9 +1027,9 @@ impl App {
                 Some(
                     target_config
                         .base_path
-                        .join("outputs")
+                        .join(dirs::OUTPUTS)
                         .join(job.full_id.to_string())
-                        .join("out"),
+                        .join(dirs::OUT),
                 )
             }
             TuiRowItem::Run { .. } => None,

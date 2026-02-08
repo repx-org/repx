@@ -226,13 +226,6 @@ fn test_empty_input_graph() {
     assert_eq!(harness.submission_log, expected);
 }
 
-/// Graph:
-///       start
-///      /     \
-///   mid_a   mid_b
-///      \     /
-///        end
-///
 #[test]
 fn test_diamond_dependency() {
     let graph = graph! {
@@ -252,15 +245,6 @@ fn test_diamond_dependency() {
     assert_eq!(harness.submission_log, expected);
 }
 
-/// Graph:
-///   top_a ---------------+
-///     |                  |
-///     v                  v
-/// independent_leaf   shared_mid
-///                        |
-///                        v
-///   top_b----------->shared_leaf
-///
 #[test]
 fn test_shared_sub_graph() {
     let graph = graph! {
@@ -281,13 +265,6 @@ fn test_shared_sub_graph() {
     assert_eq!(harness.submission_log, expected);
 }
 
-/// Graph:
-///   start_a          start_b          start_c
-///    /   \            /   \            /   \
-/// mid_a1 mid_a2    mid_b1 mid_b2    mid_c1 mid_c2
-///    \   /            \   /            \   /
-///    end_a            end_b            end_c
-///
 #[test]
 fn test_multiple_independent_diamond_graphs() {
     let graph = graph! {
@@ -317,15 +294,6 @@ fn test_multiple_independent_diamond_graphs() {
     assert_eq!(harness.submission_log, expected);
 }
 
-/// Graph:
-///   start_a ────> mid_a1 ────> end_a
-///      │             ▲           ▲
-///      │             │           │
-///      └───────────> mid_a2 ──────┘
-///                        │
-///                        ▼
-///   start_b ────> mid_b1 ────> end_b
-///
 #[test]
 fn test_intertwined_graphs_with_shared_dependency() {
     let graph = graph! {

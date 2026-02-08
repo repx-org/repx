@@ -1,5 +1,5 @@
 use crate::{
-    error::AppError,
+    errors::DomainError,
     model::{Job, JobId, Lab, RunId},
 };
 use std::collections::HashSet;
@@ -15,7 +15,7 @@ fn get_all_dependencies(job: &Job) -> impl Iterator<Item = &JobId> {
 pub fn resolve_all_final_job_ids<'a>(
     lab: &'a Lab,
     run_id: &RunId,
-) -> Result<Vec<&'a JobId>, AppError> {
+) -> Result<Vec<&'a JobId>, DomainError> {
     if let Some(run) = lab.runs.get(run_id) {
         let run_jobs_set: HashSet<_> = run.jobs.iter().collect();
         let mut dep_ids_in_run: HashSet<&JobId> = HashSet::new();
@@ -39,29 +39,26 @@ pub fn resolve_all_final_job_ids<'a>(
         return Ok(final_jobs);
     }
 
-    let matching_jobs: Vec<&JobId> = lab
+    let candidates: Vec<&JobId> = lab
         .jobs
         .keys()
         .filter(|job_id| job_id.0.starts_with(&run_id.0))
         .collect();
 
-    match matching_jobs.len() {
-        0 => Err(AppError::TargetNotFound(run_id.0.clone())),
-        1 => Ok(vec![matching_jobs[0]]),
-        _ => {
-            let matches: Vec<String> = matching_jobs
-                .iter()
-                .map(|job_id| job_id.0.clone())
-                .collect();
-            Err(AppError::AmbiguousJobId {
-                input: run_id.0.clone(),
-                matches,
-            })
-        }
+    match candidates.len() {
+        0 => Err(DomainError::TargetNotFound(run_id.0.clone())),
+        1 => Ok(vec![candidates[0]]),
+        _ => Err(DomainError::AmbiguousJobId {
+            input: run_id.0.clone(),
+            matches: candidates.iter().map(|id| id.to_string()).collect(),
+        }),
     }
 }
 
-pub fn resolve_target_job_id<'a>(lab: &'a Lab, user_input: &RunId) -> Result<&'a JobId, AppError> {
+pub fn resolve_target_job_id<'a>(
+    lab: &'a Lab,
+    user_input: &RunId,
+) -> Result<&'a JobId, DomainError> {
     if let Some(run) = lab.runs.get(user_input) {
         let run_jobs_set: HashSet<_> = run.jobs.iter().collect();
         let mut dep_ids_in_run: HashSet<&JobId> = HashSet::new();
@@ -85,33 +82,27 @@ pub fn resolve_target_job_id<'a>(lab: &'a Lab, user_input: &RunId) -> Result<&'a
         match final_jobs.len() {
             1 => return Ok(final_jobs[0]),
             _ => {
-                return Err(AppError::AmbiguousRun(
+                return Err(DomainError::AmbiguousRun(
                     user_input.0.clone(),
-                    final_jobs.into_iter().cloned().collect(),
+                    run.jobs.clone(),
                 ));
             }
         }
     }
 
-    let matching_jobs: Vec<&JobId> = lab
+    let candidates: Vec<&JobId> = lab
         .jobs
         .keys()
         .filter(|job_id| job_id.0.starts_with(&user_input.0))
         .collect();
 
-    match matching_jobs.len() {
-        0 => Err(AppError::TargetNotFound(user_input.0.clone())),
-        1 => Ok(matching_jobs[0]),
-        _ => {
-            let matches: Vec<String> = matching_jobs
-                .iter()
-                .map(|job_id| job_id.0.clone())
-                .collect();
-            Err(AppError::AmbiguousJobId {
-                input: user_input.0.clone(),
-                matches,
-            })
-        }
+    match candidates.len() {
+        0 => Err(DomainError::TargetNotFound(user_input.0.clone())),
+        1 => Ok(candidates[0]),
+        _ => Err(DomainError::AmbiguousJobId {
+            input: user_input.0.clone(),
+            matches: candidates.iter().map(|id| id.to_string()).collect(),
+        }),
     }
 }
 
@@ -148,7 +139,7 @@ mod tests {
             name: None,
             params: serde_json::Value::Null,
             path_in_lab: PathBuf::new(),
-            stage_type: "simple".to_string(),
+            stage_type: crate::model::StageType::Simple,
             executables: HashMap::from([("main".to_string(), main_executable)]),
         }
     }
@@ -164,7 +155,7 @@ mod tests {
                     Run {
                         image: None,
                         jobs: vec![JobId("job-a1".into()), JobId("job-a2".into())],
-                        dependencies: HashMap::new(), // ADDED: Initialize missing field
+                        dependencies: HashMap::new(),
                     },
                 ),
                 (
@@ -172,7 +163,7 @@ mod tests {
                     Run {
                         image: None,
                         jobs: vec![JobId("job-b1".into()), JobId("job-b2".into())],
-                        dependencies: HashMap::new(), // ADDED: Initialize missing field
+                        dependencies: HashMap::new(),
                     },
                 ),
             ]),
@@ -203,7 +194,7 @@ mod tests {
         let lab = test_lab();
         let input = RunId("run-b-ambiguous".to_string());
         let result = resolve_target_job_id(&lab, &input);
-        assert!(matches!(result, Err(AppError::AmbiguousRun(_, _))));
+        assert!(matches!(result, Err(DomainError::AmbiguousRun(_, _))));
     }
 
     #[test]
@@ -227,7 +218,7 @@ mod tests {
         let lab = test_lab();
         let input = RunId("multi".to_string());
         let result = resolve_target_job_id(&lab, &input);
-        assert!(matches!(result, Err(AppError::AmbiguousJobId { .. })));
+        assert!(matches!(result, Err(DomainError::AmbiguousJobId { .. })));
     }
 
     #[test]
@@ -235,6 +226,6 @@ mod tests {
         let lab = test_lab();
         let input = RunId("does-not-exist".to_string());
         let result = resolve_target_job_id(&lab, &input);
-        assert!(matches!(result, Err(AppError::TargetNotFound(_))));
+        assert!(matches!(result, Err(DomainError::TargetNotFound(_))));
     }
 }

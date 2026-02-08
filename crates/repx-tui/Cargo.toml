@@ -17,9 +17,11 @@ repx-client = { workspace = true }
 crossterm = { workspace = true }
 ratatui = { version = "0.29.0", features = ["crossterm"] }
 clap = { workspace = true, features = ["derive"] }
+tracing = { workspace = true }
 xdg = { workspace = true }
 chrono = { workspace = true, features = ["serde"] }
 serde_json = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 num_cpus = { workspace = true }
 arboard = { version = "3.6", features = ["wayland-data-control"] }
+thiserror = { workspace = true }

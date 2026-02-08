@@ -3,7 +3,7 @@ use crate::error::{ClientError, Result};
 use crate::targets::SlurmState;
 use repx_core::{
     engine,
-    model::{JobId, RunId},
+    model::{JobId, RunId, SchedulerType},
 };
 use std::collections::{BTreeMap, HashMap};
 
@@ -64,7 +64,7 @@ pub fn get_statuses(
 pub fn get_statuses_for_active_target(
     client: &Client,
     active_target_name: &str,
-    active_scheduler: Option<&str>,
+    active_scheduler: Option<SchedulerType>,
 ) -> Result<HashMap<JobId, engine::JobStatus>> {
     let mut job_statuses = HashMap::new();
     let target = client
@@ -103,7 +103,7 @@ pub fn get_statuses_for_active_target(
 
     let should_query_slurm = target.config().slurm.is_some()
         && match active_scheduler {
-            Some("slurm") => true,
+            Some(SchedulerType::Slurm) => true,
             Some(_) => false,
             None => has_tracked_slurm_jobs,
         };

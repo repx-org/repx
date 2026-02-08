@@ -11,7 +11,6 @@
   run =
     { outputs, ... }:
     ''
-      # Generate a simple sine wave in python
       python3 -c "
       import math
       with open('${outputs."data.csv"}', 'w') as f:

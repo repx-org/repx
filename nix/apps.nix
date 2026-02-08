@@ -5,26 +5,38 @@
   docs,
 }:
 {
-  default = flake-utils.lib.mkApp {
-    drv = repx;
-    name = "repx";
-  };
-
-  check-repx-examples = flake-utils.lib.mkApp {
-    drv = pkgs.callPackage ./apps/check-repx-examples.nix {
-      inherit repx;
+  default =
+    flake-utils.lib.mkApp {
+      drv = repx;
+      name = "repx";
+    }
+    // {
+      meta.description = "The RepX runner binary";
     };
-  };
 
-  docs-preview = flake-utils.lib.mkApp {
-    drv = pkgs.writeShellScriptBin "docs-preview" ''
-      echo "Building documentation..."
-      ${docs}
+  check-repx-examples =
+    flake-utils.lib.mkApp {
+      drv = pkgs.callPackage ./apps/check-repx-examples.nix {
+        inherit repx;
+      };
+    }
+    // {
+      meta.description = "Check RepX examples for correctness";
+    };
 
-      echo -e "\n\033[1;32mServing documentation at http://localhost:8080/\033[0m"
+  docs-preview =
+    flake-utils.lib.mkApp {
+      drv = pkgs.writeShellScriptBin "docs-preview" ''
+        echo "Building documentation..."
+        ${docs}
 
-      cd ${docs}
-      ${pkgs.python3}/bin/python3 -m http.server 8080
-    '';
-  };
+        echo -e "\n\033[1;32mServing documentation at http://localhost:8080/\033[0m"
+
+        cd ${docs}
+        ${pkgs.python3}/bin/python3 -m http.server 8080
+      '';
+    }
+    // {
+      meta.description = "Preview documentation locally";
+    };
 }

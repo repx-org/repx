@@ -11,7 +11,7 @@ pkgs.testers.runNixOSTest {
     { pkgs, ... }:
     {
       virtualisation = {
-        diskSize = 4096;
+        diskSize = 25600;
         memorySize = 2048;
         docker.enable = true;
         podman.enable = true;

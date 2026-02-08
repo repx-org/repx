@@ -18,7 +18,6 @@ let
       '';
 
   nativeContent = ''
-    # HPC Experiment Lab: How to Use
 
     This lab directory is a self-contained "seed" for your experiments. It contains all the job scripts, their dependencies, and metadata describing the experiment structure. It does **not** contain any orchestration tools. You are expected to use your own scripts or a workflow manager to execute the jobs in the correct order.
 
@@ -42,23 +41,18 @@ let
 
       1.  **Find the script:**
           ```bash
-          # Example for one job:
           ls -l jobs/${exampleJobId}/bin/
           ```
 
       2.  **Execute the script:**
           The script expects two arguments: `(output_directory) (inputs.json_path)`.
           ```bash
-          # Create a temporary output directory and an inputs file.
-          # For a job with no dependencies, the inputs file can be an empty JSON object.
           OUT_DIR=$(mktemp -d)
           INPUTS_JSON=$(mktemp)
           echo "{}" > $INPUTS_JSON
 
-          # Run the script
           jobs/${exampleJobId}/bin/* "$OUT_DIR" "$INPUTS_JSON"
 
-          # View the results
           echo "Job finished. Results are in: $OUT_DIR"
           ls -l $OUT_DIR
           ```
