@@ -137,6 +137,8 @@ pub struct InternalExecuteArgs {
     pub mount_paths: Vec<String>,
     #[arg(long)]
     pub executable_path: PathBuf,
+    #[arg(long, default_value_t = false, help = "Enable debug logging to stderr")]
+    pub debug: bool,
 }
 
 #[derive(Args)]

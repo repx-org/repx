@@ -99,10 +99,10 @@ pkgs.testers.runNixOSTest {
     print("--- 3. First Sync & Run ---")
     client.succeed("repx run simulation-run --lab ${referenceLab}")
 
-    server.succeed("ls -R /home/repxuser/repx-store/images")
+    server.succeed("ls -R /home/repxuser/repx-store/artifacts/images")
 
     print("--- 4. Sabotage: Deleting a layer ---")
-    layers = server.succeed("find /home/repxuser/repx-store/images -name 'layer.tar'").splitlines()
+    layers = server.succeed("find /home/repxuser/repx-store/artifacts/images -name 'layer.tar'").splitlines()
     if not layers:
         raise Exception("No layers found on server!")
     victim_layer = layers[0]

@@ -103,24 +103,24 @@ fn test_local_target_smart_sync() {
         .sync_image_incrementally(&image1_path, "latest", &cache_root)
         .expect("Sync failed");
 
-    let layers_dir = cache_root.join("layers");
+    let store_dir = cache_root.join("store");
     assert!(
-        layers_dir.join("hashA/layer.tar").exists(),
-        "hashA should exist"
+        store_dir.join("hashA-layer.tar").exists(),
+        "hashA-layer.tar should exist in store"
     );
     assert!(
-        layers_dir.join("hashB/layer.tar").exists(),
-        "hashB should exist"
+        store_dir.join("hashB-layer.tar").exists(),
+        "hashB-layer.tar should exist in store"
     );
 
     let images_dir = cache_root.join("images");
-
     let image1_cache = images_dir.join("image1");
     assert!(image1_cache.exists());
+
     let link_a = image1_cache.join("hashA/layer.tar");
     assert!(link_a.is_symlink());
     let target_path = fs::read_link(&link_a).unwrap();
-    let expected_target = layers_dir.join("hashA/layer.tar");
+    let expected_target = store_dir.join("hashA-layer.tar");
     assert_eq!(target_path, expected_target);
 
     let image2_path = create_dummy_image(
@@ -134,14 +134,32 @@ fn test_local_target_smart_sync() {
         .expect("Sync failed");
 
     assert!(
-        layers_dir.join("hashC/layer.tar").exists(),
-        "hashC should exist"
+        store_dir.join("hashC-layer.tar").exists(),
+        "hashC-layer.tar should exist in store"
     );
     assert!(
-        layers_dir.join("hashA/layer.tar").exists(),
-        "hashA should still exist"
+        store_dir.join("hashA-layer.tar").exists(),
+        "hashA-layer.tar should still exist"
     );
 
-    let count = fs::read_dir(&layers_dir).unwrap().count();
-    assert_eq!(count, 3, "Should have exactly 3 layers (A, B, C)");
+    let count = fs::read_dir(&store_dir)
+        .unwrap()
+        .filter(|e| {
+            e.as_ref()
+                .ok()
+                .map(|e| e.file_name().to_string_lossy().ends_with("-layer.tar"))
+                .unwrap_or(false)
+        })
+        .count();
+    assert_eq!(count, 3, "Should have exactly 3 layers (A, B, C) in store");
+
+    let image2_cache = images_dir.join("image2");
+    assert!(image2_cache.exists());
+    let link_a_in_image2 = image2_cache.join("hashA/layer.tar");
+    assert!(link_a_in_image2.is_symlink());
+    let target_path_2 = fs::read_link(&link_a_in_image2).unwrap();
+    assert_eq!(
+        target_path_2, expected_target,
+        "image2 should share same layer as image1"
+    );
 }

@@ -165,6 +165,42 @@ impl SlurmOps for SshTarget {
     }
 }
 
+impl SshTarget {
+    fn sync_directory_impl(
+        &self,
+        local_path: &Path,
+        remote_path: &Path,
+        follow_symlinks: bool,
+    ) -> Result<()> {
+        let remote_rsync_path = self.deploy_rsync_binary()?;
+
+        let mut rsync_cmd = Command::new(self.local_tool("rsync"));
+        let flags = if follow_symlinks { "-rLtpz" } else { "-rltpz" };
+        rsync_cmd
+            .arg(flags)
+            .arg("--chmod=Du+w")
+            .arg("--mkpath")
+            .arg(format!("--rsync-path={}", remote_rsync_path))
+            .arg(format!("{}/", local_path.display()))
+            .arg(format!("{}:{}", self.address, remote_path.display()));
+
+        logging::log_and_print_command(&rsync_cmd);
+        let output = rsync_cmd
+            .output()
+            .map_err(|e| ClientError::Config(ConfigError::Io(e)))?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(ClientError::Config(ConfigError::General(format!(
+                "rsync directory sync failed: {}",
+                stderr
+            ))));
+        }
+
+        Ok(())
+    }
+}
+
 impl ArtifactSync for SshTarget {
     fn get_missing_artifacts(&self, artifacts: &HashSet<PathBuf>) -> Result<HashSet<PathBuf>> {
         if artifacts.is_empty() {
@@ -231,6 +267,7 @@ impl ArtifactSync for SshTarget {
         let mut rsync_cmd = Command::new(self.local_tool("rsync"));
         rsync_cmd
             .arg("-rLtpz")
+            .arg("--chmod=Du+w")
             .arg(format!("--rsync-path={}", remote_rsync_path))
             .arg("--files-from")
             .arg(temp_file.path())
@@ -319,30 +356,7 @@ impl ArtifactSync for SshTarget {
     }
 
     fn sync_directory(&self, local_path: &Path, remote_path: &Path) -> Result<()> {
-        let remote_rsync_path = self.deploy_rsync_binary()?;
-
-        let mut rsync_cmd = Command::new(self.local_tool("rsync"));
-        rsync_cmd
-            .arg("-rLtpz")
-            .arg("--mkpath")
-            .arg(format!("--rsync-path={}", remote_rsync_path))
-            .arg(format!("{}/", local_path.display()))
-            .arg(format!("{}:{}", self.address, remote_path.display()));
-
-        logging::log_and_print_command(&rsync_cmd);
-        let output = rsync_cmd
-            .output()
-            .map_err(|e| ClientError::Config(ConfigError::Io(e)))?;
-
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(ClientError::Config(ConfigError::General(format!(
-                "rsync directory sync failed: {}",
-                stderr
-            ))));
-        }
-
-        Ok(())
+        self.sync_directory_impl(local_path, remote_path, false)
     }
 
     fn sync_image_incrementally(
@@ -351,18 +365,53 @@ impl ArtifactSync for SshTarget {
         image_tag: &str,
         local_cache_root: &Path,
     ) -> Result<()> {
-        let images_cache = local_cache_root.join("images");
-        let layers_cache = local_cache_root.join("layers");
+        let store_cache = local_cache_root.join("store");
 
-        fs_err::create_dir_all(&images_cache)
-            .map_err(|e| ClientError::Config(ConfigError::Io(e)))?;
-        fs_err::create_dir_all(&layers_cache)
+        fs_err::create_dir_all(&store_cache)
             .map_err(|e| ClientError::Config(ConfigError::Io(e)))?;
 
         let tar_tool = self.local_tool("tar");
 
         if image_path.is_dir() {
-            let remote_images = self.base_path().join("images");
+            let parent = image_path.parent();
+            let store_dir = parent.and_then(|p| p.parent()).map(|p| p.join("store"));
+
+            if let Some(store_path) = store_dir {
+                if store_path.exists() {
+                    let remote_store = self.artifacts_base_path().join("store");
+                    let remote_images = self.artifacts_base_path().join("images");
+
+                    let mkdir_cmd = RemoteCommand::new("mkdir")
+                        .arg("-p")
+                        .arg(&remote_store.to_string_lossy())
+                        .arg(&remote_images.to_string_lossy());
+                    self.run_command("sh", &["-c", &mkdir_cmd.to_shell_string()])?;
+
+                    self.sync_directory(&store_path, &remote_store)?;
+
+                    let image_dir_name = image_path
+                        .file_name()
+                        .and_then(|s| s.to_str())
+                        .unwrap_or("image");
+                    let remote_image_dir = remote_images.join(image_dir_name);
+                    self.sync_directory(image_path, &remote_image_dir)?;
+
+                    let ln_cmd = RemoteCommand::new("cd")
+                        .arg(&remote_images.to_string_lossy())
+                        .and(RemoteCommand::new("rm").arg("-f").arg(image_tag))
+                        .and(
+                            RemoteCommand::new("ln")
+                                .arg("-sfn")
+                                .arg(image_dir_name)
+                                .arg(image_tag),
+                        );
+                    self.run_command("sh", &["-c", &ln_cmd.to_shell_string()])?;
+
+                    return Ok(());
+                }
+            }
+
+            let remote_images = self.artifacts_base_path().join("images");
 
             let mkdir_cmd = RemoteCommand::new("mkdir")
                 .arg("-p")
@@ -376,7 +425,7 @@ impl ArtifactSync for SshTarget {
 
             let remote_image_dir = remote_images.join(image_dir_name);
 
-            self.sync_directory(image_path, &remote_image_dir)?;
+            self.sync_directory_impl(image_path, &remote_image_dir, true)?;
 
             let ln_cmd = RemoteCommand::new("cd")
                 .arg(&remote_images.to_string_lossy())
@@ -393,24 +442,24 @@ impl ArtifactSync for SshTarget {
 
         let layers = super::common::get_image_manifest(image_path, &tar_tool)?;
 
-        let remote_layers = self.base_path().join("layers");
-        let remote_images = self.base_path().join("images");
+        let remote_store = self.artifacts_base_path().join("store");
+        let remote_images = self.artifacts_base_path().join("images");
 
         let mkdir_cmd = RemoteCommand::new("mkdir")
             .arg("-p")
             .arg(&remote_images.to_string_lossy())
-            .arg(&remote_layers.to_string_lossy());
+            .arg(&remote_store.to_string_lossy());
         self.run_command("sh", &["-c", &mkdir_cmd.to_shell_string()])?;
 
         let check_cmd = RemoteCommand::new("ls")
             .arg("-1")
-            .arg(&remote_layers.to_string_lossy());
+            .arg(&remote_store.to_string_lossy());
 
-        let remote_layer_list_str = self
+        let remote_store_list_str = self
             .run_command("sh", &["-c", &check_cmd.to_shell_string()])
             .unwrap_or_default();
 
-        let existing_remote_layers: HashSet<String> = remote_layer_list_str
+        let existing_remote_items: HashSet<String> = remote_store_list_str
             .lines()
             .map(|s| s.trim().to_string())
             .collect();
@@ -423,32 +472,32 @@ impl ArtifactSync for SshTarget {
                 .and_then(|p| p.to_str())
                 .unwrap_or(layer);
 
-            if !existing_remote_layers.contains(layer_hash) {
-                super::common::extract_layer_to_cache(
+            let flat_layer_name = format!("{}-layer.tar", layer_hash);
+
+            if !existing_remote_items.contains(&flat_layer_name) {
+                super::common::extract_layer_to_flat_store(
                     image_path,
                     layer,
                     layer_hash,
-                    &layers_cache,
+                    &store_cache,
                     &tar_tool,
                 )?;
-                layers_to_sync.push(layers_cache.join(layer_hash));
+                layers_to_sync.push((store_cache.join(&flat_layer_name), flat_layer_name));
             }
         }
 
         if !layers_to_sync.is_empty() {
             let remote_rsync_path = self.deploy_rsync_binary()?;
-            let layers_to_sync_set: HashSet<PathBuf> = layers_to_sync.into_iter().collect();
 
-            for layer_dir in layers_to_sync_set {
-                let dirname = layer_dir.file_name().unwrap().to_string_lossy();
-                let remote_dest = remote_layers.join(dirname.as_ref());
+            for (local_layer_path, layer_name) in &layers_to_sync {
+                let remote_dest = remote_store.join(layer_name);
 
                 let mut rsync_cmd = Command::new(self.local_tool("rsync"));
                 rsync_cmd
-                    .arg("-rLtpz")
+                    .arg("-tpz")
                     .arg(format!("--rsync-path={}", remote_rsync_path))
-                    .arg(format!("{}/", layer_dir.display()))
-                    .arg(format!("{}:{}/", self.address, remote_dest.display()));
+                    .arg(local_layer_path)
+                    .arg(format!("{}:{}", self.address, remote_dest.display()));
 
                 logging::log_and_print_command(&rsync_cmd);
                 let output = rsync_cmd
@@ -459,7 +508,7 @@ impl ArtifactSync for SshTarget {
                     let stderr = String::from_utf8_lossy(&output.stderr);
                     return Err(ClientError::Config(ConfigError::General(format!(
                         "rsync failed for layer {}: {}",
-                        dirname, stderr
+                        layer_name, stderr
                     ))));
                 }
             }
@@ -486,14 +535,12 @@ impl ArtifactSync for SshTarget {
             let link_dir = remote_image_dir.join(layer_hash);
             link_script.push_str(&format!("mkdir -p {}\n", link_dir.to_string_lossy()));
 
-            let target_path = PathBuf::from("../../layers")
-                .join(layer_hash)
-                .join("layer.tar");
+            let target_path = format!("../../store/{}-layer.tar", layer_hash);
             let link_path = link_dir.join("layer.tar");
 
             link_script.push_str(&format!(
                 "ln -sfn {} {}\n",
-                target_path.to_string_lossy(),
+                target_path,
                 link_path.to_string_lossy()
             ));
         }

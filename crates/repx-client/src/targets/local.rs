@@ -170,13 +170,18 @@ impl ArtifactSync for LocalTarget {
         image_tag: &str,
         local_cache_root: &Path,
     ) -> Result<()> {
-        let dest_dir = self.base_path().join("images");
-        fs_err::create_dir_all(&dest_dir).map_err(|e| ClientError::Config(ConfigError::Io(e)))?;
-        let dest_image_path = dest_dir.join(image_tag);
+        let dest_images_dir = self.base_path().join("images");
+        let dest_store_dir = self.base_path().join("store");
+        fs_err::create_dir_all(&dest_images_dir)
+            .map_err(|e| ClientError::Config(ConfigError::Io(e)))?;
+        fs_err::create_dir_all(&dest_store_dir)
+            .map_err(|e| ClientError::Config(ConfigError::Io(e)))?;
 
-        let layers_cache = local_cache_root.join("layers");
+        let dest_image_path = dest_images_dir.join(image_tag);
+
+        let store_cache = local_cache_root.join("store");
         let images_cache = local_cache_root.join("images");
-        fs_err::create_dir_all(&layers_cache)
+        fs_err::create_dir_all(&store_cache)
             .map_err(|e| ClientError::Config(ConfigError::Io(e)))?;
         fs_err::create_dir_all(&images_cache)
             .map_err(|e| ClientError::Config(ConfigError::Io(e)))?;
@@ -219,27 +224,28 @@ impl ArtifactSync for LocalTarget {
             .map_err(|e| ClientError::Config(ConfigError::Io(e)))?;
 
         for layer in &layers {
-            let layer_dir_name = Path::new(layer)
+            let layer_hash = Path::new(layer)
                 .parent()
                 .and_then(|p| p.to_str())
                 .unwrap_or(layer);
 
-            super::common::extract_layer_to_cache(
+            super::common::extract_layer_to_flat_store(
                 image_path,
                 layer,
-                layer_dir_name,
-                &layers_cache,
+                layer_hash,
+                &store_cache,
                 &tar_tool,
             )?;
 
-            let image_layer_dir = image_cache_dir.join(layer_dir_name);
+            let image_layer_dir = image_cache_dir.join(layer_hash);
             fs_err::create_dir_all(&image_layer_dir)
                 .map_err(|e| ClientError::Config(ConfigError::Io(e)))?;
 
-            let target_layer_tar = layers_cache.join(layer_dir_name).join("layer.tar");
+            let flat_layer_name = format!("{}-layer.tar", layer_hash);
+            let target_layer_tar = store_cache.join(&flat_layer_name);
             let link_path = image_layer_dir.join("layer.tar");
 
-            if link_path.exists() {
+            if link_path.exists() || link_path.is_symlink() {
                 let _ = fs_err::remove_file(&link_path);
             }
             std::os::unix::fs::symlink(&target_layer_tar, &link_path)
