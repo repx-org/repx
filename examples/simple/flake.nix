@@ -38,6 +38,7 @@
         default = pkgs.mkShell {
           buildInputs = [
             pkgs.repx-py
+            pkgs.repx
             (pkgs.python3.withPackages (ps: [
               ps.matplotlib
               ps.pandas
