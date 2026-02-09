@@ -1,6 +1,9 @@
 { pkgs }:
 stageDef:
 let
+  common = import ./internal/common.nix;
+  baseContainerPkgs = common.mkRuntimePackages pkgs;
+
   paramsDef = stageDef.paramInputs or { };
   dependencyDerivations = stageDef.dependencyDerivations or [ ];
   runDependencies = stageDef.runDependencies or [ ];
@@ -55,7 +58,7 @@ let
     inherit pkgs;
   };
 
-  binPath = pkgs.lib.makeBinPath runDependencies;
+  binPath = pkgs.lib.makeBinPath (baseContainerPkgs ++ runDependencies);
 
   header = ''
     export PATH="${binPath}"${if binPath == "" then "" else ":"}$PATH
@@ -115,9 +118,6 @@ let
   dependencyManifestJson = builtins.toJSON (map toString depders);
 
   analyzerScript = ./internal/analyze_deps.py;
-
-  common = import ./internal/common.nix;
-  baseContainerPkgs = common.mkRuntimePackages pkgs;
 
   shellBuiltins = [
     "cd"
