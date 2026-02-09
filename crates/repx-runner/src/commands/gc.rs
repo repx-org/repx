@@ -134,6 +134,7 @@ pub async fn async_handle_internal_gc(args: InternalGcArgs) -> Result<(), CliErr
             "lab",
             "revision",
             "readme",
+            "store",
         ];
 
         for entry in fs::read_dir(&artifacts_dir)? {

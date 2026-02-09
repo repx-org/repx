@@ -308,6 +308,22 @@ pub fn init_session_logger(config: &LoggingConfig) -> Result<(), ConfigError> {
     Ok(())
 }
 
+pub fn init_stderr_logger() {
+    let env_filter = EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| EnvFilter::new(get_default_log_level().to_string()));
+
+    tracing_subscriber::fmt()
+        .with_env_filter(env_filter)
+        .with_writer(std::io::stderr)
+        .with_timer(LocalTimeFormatter)
+        .with_ansi(true)
+        .with_target(false)
+        .with_line_number(false)
+        .with_file(false)
+        .with_level(true)
+        .init();
+}
+
 pub fn init_tui_logger(config: &LoggingConfig) -> Result<(), ConfigError> {
     let xdg_dirs = xdg::BaseDirectories::with_prefix("repx");
     let cache_home = xdg_dirs.get_cache_home().ok_or_else(|| {

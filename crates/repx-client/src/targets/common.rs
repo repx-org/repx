@@ -283,3 +283,52 @@ pub fn extract_layer_to_cache(
 
     Ok(())
 }
+
+pub fn extract_layer_to_flat_store(
+    image_path: &Path,
+    layer_path_in_tar: &str,
+    layer_hash: &str,
+    store_cache: &Path,
+    tar_tool: &Path,
+) -> Result<()> {
+    let flat_layer_name = format!("{}-layer.tar", layer_hash);
+    let layer_dest_path = store_cache.join(&flat_layer_name);
+
+    if layer_dest_path.exists() {
+        return Ok(());
+    }
+
+    let temp_path = store_cache.join(format!(".tmp_{}", flat_layer_name));
+    if temp_path.exists() {
+        let _ = fs_err::remove_file(&temp_path);
+    }
+
+    tracing::info!(
+        "Extracting layer {} from {} to flat store",
+        layer_hash,
+        image_path.display()
+    );
+
+    let mut tar_cmd = Command::new(tar_tool);
+    tar_cmd
+        .arg("-xf")
+        .arg(image_path)
+        .arg(layer_path_in_tar)
+        .arg("-O");
+
+    let output = tar_cmd.output().map_err(ConfigError::Io)?;
+
+    if !output.status.success() {
+        return Err(ClientError::Config(ConfigError::General(format!(
+            "Failed to extract layer {} from {}: {}",
+            layer_path_in_tar,
+            image_path.display(),
+            String::from_utf8_lossy(&output.stderr)
+        ))));
+    }
+
+    fs_err::write(&temp_path, &output.stdout).map_err(ConfigError::Io)?;
+    fs_err::rename(&temp_path, &layer_dest_path).map_err(ConfigError::Io)?;
+
+    Ok(())
+}

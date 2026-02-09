@@ -170,6 +170,8 @@ impl BwrapRuntime {
 
         std::fs::File::create(&success_marker).map_err(ExecutorError::Io)?;
 
+        let _ = tokio::fs::remove_file(&lock_path).await;
+
         tracing::info!("Successfully extracted rootfs for '{}'", image_tag);
         Ok(extract_dir)
     }
@@ -318,10 +320,15 @@ impl BwrapRuntime {
                 .arg(&request.repx_out_dir)
                 .arg(&request.repx_out_dir);
 
+            let canonical_job_path = request
+                .job_package_path
+                .canonicalize()
+                .unwrap_or_else(|_| request.job_package_path.clone());
+
             cmd.arg("--dir")
                 .arg(&request.job_package_path)
                 .arg("--ro-bind")
-                .arg(&request.job_package_path)
+                .arg(&canonical_job_path)
                 .arg(&request.job_package_path);
         }
 
@@ -359,10 +366,21 @@ impl BwrapRuntime {
         cmd.arg("--setenv").arg("TERM").arg("xterm");
 
         cmd.arg("--chdir").arg(&request.user_out_dir);
+        cmd.arg("--");
         cmd.arg(script_path);
         cmd.args(args);
 
         ctx.restrict_command_environment(&mut cmd, &[]);
+
+        tracing::info!(
+            job_id = %request.job_id,
+            mount_host_paths = request.mount_host_paths,
+            job_package_path = %request.job_package_path.display(),
+            script_path = %script_path.display(),
+            rootfs_path = %rootfs_path.display(),
+            "Building bwrap command"
+        );
+        tracing::debug!(command = ?cmd.as_std(), "Full bwrap command");
 
         Ok(cmd)
     }

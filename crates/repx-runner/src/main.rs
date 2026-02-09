@@ -18,6 +18,8 @@ fn main() {
             | Commands::InternalGc(_)
     );
 
+    let debug_requested = matches!(&cli.command, Commands::InternalExecute(args) if args.debug);
+
     if !is_internal {
         let logging_config = config::load_config().map(|c| c.logging).unwrap_or_default();
 
@@ -27,6 +29,8 @@ fn main() {
                 format!("[ERROR] Failed to initialize session logger: {}", e).red()
             );
         }
+    } else if debug_requested {
+        logging::init_stderr_logger();
     }
 
     if let Err(e) = run(cli) {

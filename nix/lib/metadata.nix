@@ -41,7 +41,7 @@ let
       imageDrv = runDef.image;
       imagePath =
         if includeImages && imageDrv != null then
-          "image/" + (builtins.baseNameOf (toString imageDrv))
+          "images/" + (builtins.baseNameOf (toString imageDrv))
         else
           null;
 
