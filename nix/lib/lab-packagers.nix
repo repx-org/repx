@@ -1,9 +1,10 @@
 {
   pkgs,
   gitHash,
+  lab_version,
 }:
 let
-  labVersion = "0.1.3";
+  repxVersion = "0.1.3";
 
   rsyncStatic =
     (pkgs.pkgsStatic.rsync.override {
@@ -99,7 +100,12 @@ let
       );
 
       metadataHelpers = (import ./metadata.nix) {
-        inherit pkgs gitHash includeImages;
+        inherit
+          pkgs
+          gitHash
+          repxVersion
+          includeImages
+          ;
       };
 
       metadataDrvs =
@@ -150,7 +156,7 @@ let
 
       labCore = pkgs.stdenv.mkDerivation {
         name = "hpc-lab-core";
-        version = labVersion;
+        version = repxVersion;
 
         nativeBuildInputs = [
           pkgs.jq
@@ -295,9 +301,12 @@ let
     {
       lab = pkgs.stdenv.mkDerivation {
         name = "hpc-experiment-lab";
-        version = labVersion;
-        nativeBuildInputs = with artifacts; [
-          labCore
+        version = repxVersion;
+        nativeBuildInputs = [
+          artifacts.labCore
+          pkgs.jq
+          pkgs.coreutils
+          pkgs.findutils
         ];
 
         passthru = {
@@ -307,8 +316,25 @@ let
         buildCommand = ''
           mkdir -p $out $out/lab $out/readme
           cp -r --no-dereference ${artifacts.labCore}/* $out/
-          cp ${artifacts.labManifest} $out/lab/$(basename ${artifacts.labManifest})
           cp ${readme} $out/readme/$(basename ${readme})
+
+          files_json=$(find $out -type f | sort | while read -r filepath; do
+            relpath="''${filepath#$out/}"
+            hash=$(sha256sum "$filepath" | cut -d' ' -f1)
+            printf '{"path":"%s","sha256":"%s"}\n' "$relpath" "$hash"
+          done | jq -s '.')
+
+          labId=$(jq -r '.labId' ${artifacts.labManifest})
+          metadata=$(jq -r '.metadata' ${artifacts.labManifest})
+
+          jq -n \
+            --arg labId "$labId" \
+            --arg lab_version "${lab_version}" \
+            --arg metadata "$metadata" \
+            --argjson files "$files_json" \
+            '{labId: $labId, lab_version: $lab_version, metadata: $metadata, files: $files}' \
+            > $out/lab/$(basename ${artifacts.labManifest})
+
           echo "Lab directory created successfully."
         '';
       };

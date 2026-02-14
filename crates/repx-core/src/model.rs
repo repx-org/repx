@@ -215,7 +215,8 @@ pub struct Run {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Lab {
-    pub schema_version: String,
+    pub repx_version: String,
+    pub lab_version: String,
     #[serde(rename = "gitHash")]
     pub git_hash: String,
     #[serde(default, skip_serializing)]
@@ -241,7 +242,7 @@ pub(crate) struct RootMetadata {
     pub runs: Vec<String>,
     #[serde(rename = "gitHash")]
     pub git_hash: String,
-    pub schema_version: String,
+    pub repx_version: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -254,10 +255,18 @@ pub(crate) struct RunMetadataForLoading {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+pub(crate) struct FileEntry {
+    pub path: String,
+    pub sha256: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
 pub(crate) struct LabManifest {
     #[serde(rename = "labId")]
     pub lab_id: String,
+    pub lab_version: String,
     pub metadata: String,
+    pub files: Vec<FileEntry>,
 }
 
 #[cfg(test)]

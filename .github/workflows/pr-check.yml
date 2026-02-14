@@ -1,0 +1,25 @@
+name: "PR Check"
+
+on:
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  fast-checks:
+    name: Fast Checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@v11
+      - uses: DeterminateSystems/magic-nix-cache-action@v7
+
+      - name: Run Fast Checks
+        run: |
+          nix build -L \
+            .#checks.x86_64-linux.deadnix \
+            .#checks.x86_64-linux.statix \
+            .#checks.x86_64-linux.formatting \
+            .#checks.x86_64-linux.shebang \
+            .#checks.x86_64-linux.shellcheck \
+            .#checks.x86_64-linux.machete \
+            .#checks.x86_64-linux.clippy

@@ -1,10 +1,68 @@
 use crate::{
     errors::ConfigError,
-    model::{Lab, LabManifest, RootMetadata, Run, RunMetadataForLoading},
+    model::{FileEntry, Lab, LabManifest, RootMetadata, Run, RunMetadataForLoading},
 };
+use rayon::prelude::*;
+use sha2::{Digest, Sha256};
 use std::collections::HashMap;
-use std::fs;
+use std::fs::{self, File};
+use std::io::Read;
 use std::path::{Path, PathBuf};
+
+const EXPECTED_REPX_VERSION: &str = env!("CARGO_PKG_VERSION");
+
+fn verify_file_integrity(lab_path: &Path, files: &[FileEntry]) -> Result<(), ConfigError> {
+    tracing::debug!(
+        "Verifying integrity of {} files in parallel...",
+        files.len()
+    );
+
+    let result: Result<(), ConfigError> = files.par_iter().try_for_each(|entry| {
+        let file_path = lab_path.join(&entry.path);
+
+        if !file_path.exists() {
+            return Err(ConfigError::IntegrityFileMissing(entry.path.clone()));
+        }
+
+        let mut file = File::open(&file_path).map_err(|e| {
+            ConfigError::Io(std::io::Error::new(
+                e.kind(),
+                format!("Failed to open file for integrity check: {}", entry.path),
+            ))
+        })?;
+
+        let mut hasher = Sha256::new();
+        let mut buffer = [0u8; 8192];
+        loop {
+            let bytes_read = file.read(&mut buffer).map_err(|e| {
+                ConfigError::Io(std::io::Error::new(
+                    e.kind(),
+                    format!("Failed to read file for integrity check: {}", entry.path),
+                ))
+            })?;
+            if bytes_read == 0 {
+                break;
+            }
+            hasher.update(&buffer[..bytes_read]);
+        }
+
+        let actual_hash = format!("{:x}", hasher.finalize());
+
+        if actual_hash != entry.sha256 {
+            return Err(ConfigError::IntegrityHashMismatch {
+                path: entry.path.clone(),
+                expected: entry.sha256.clone(),
+                actual: actual_hash,
+            });
+        }
+
+        Ok(())
+    });
+
+    result?;
+    tracing::debug!("File integrity verification passed.");
+    Ok(())
+}
 
 fn find_manifest_path(lab_path: &Path) -> Option<PathBuf> {
     let lab_subdir = lab_path.join("lab");
@@ -68,9 +126,13 @@ pub fn load_from_path(initial_path: &Path) -> Result<Lab, ConfigError> {
 
     let manifest_content = fs::read_to_string(&manifest_path)?;
     let manifest: LabManifest = serde_json::from_str(&manifest_content)?;
-    let content_hash = manifest.lab_id;
+    let content_hash = manifest.lab_id.clone();
+    let lab_version = manifest.lab_version.clone();
 
     tracing::debug!("Lab Content Hash (ID): {}", content_hash);
+    tracing::debug!("Lab Version: {}", lab_version);
+
+    verify_file_integrity(&lab_path, &manifest.files)?;
 
     let root_metadata_path = lab_path.join(&manifest.metadata);
     if !root_metadata_path.is_file() {
@@ -89,6 +151,14 @@ pub fn load_from_path(initial_path: &Path) -> Result<Lab, ConfigError> {
     );
     let root_metadata_content = fs::read_to_string(&root_metadata_path)?;
     let root_meta: RootMetadata = serde_json::from_str(&root_metadata_content)?;
+
+    if root_meta.repx_version != EXPECTED_REPX_VERSION {
+        return Err(ConfigError::IncompatibleVersion {
+            expected: EXPECTED_REPX_VERSION.to_string(),
+            found: root_meta.repx_version.clone(),
+        });
+    }
+    tracing::debug!("repx_version check passed: {}", root_meta.repx_version);
 
     let host_tools_root = lab_path.join("host-tools");
     if !host_tools_root.is_dir() {
@@ -126,7 +196,8 @@ pub fn load_from_path(initial_path: &Path) -> Result<Lab, ConfigError> {
     }
 
     let mut lab = Lab {
-        schema_version: root_meta.schema_version,
+        repx_version: root_meta.repx_version,
+        lab_version,
         git_hash: root_meta.git_hash,
         content_hash,
         runs: HashMap::new(),

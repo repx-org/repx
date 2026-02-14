@@ -20,6 +20,12 @@ impl TestHarness {
         }
     }
 
+    pub fn with_execution_type_and_lab(exec_type: &str, lab_env_var: &str) -> Self {
+        Self {
+            context: TestContext::with_execution_type_and_lab(exec_type, lab_env_var),
+        }
+    }
+
     pub fn cmd(&self) -> AssertCommand {
         let mut cmd = AssertCommand::new(env!("CARGO_BIN_EXE_repx-runner"));
         cmd.env("XDG_CONFIG_HOME", &self.context.config_dir);

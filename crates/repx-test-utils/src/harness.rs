@@ -27,6 +27,10 @@ impl Default for TestContext {
 
 impl TestContext {
     pub fn with_execution_type(exec_type: &str) -> Self {
+        Self::with_execution_type_and_lab(exec_type, "REFERENCE_LAB_PATH")
+    }
+
+    pub fn with_execution_type_and_lab(exec_type: &str, lab_env_var: &str) -> Self {
         let temp_dir = tempfile::Builder::new()
             .prefix("repx-test-")
             .tempdir()
@@ -59,11 +63,13 @@ local_concurrency = 2
         fs::write(repx_config_subdir.join("config.toml"), config_content)
             .expect("Failed to write temp config");
 
-        let lab_path =
-            PathBuf::from(env::var("REFERENCE_LAB_PATH").expect("REFERENCE_LAB_PATH must be set"));
+        let lab_path = PathBuf::from(
+            env::var(lab_env_var).unwrap_or_else(|_| panic!("{} must be set", lab_env_var)),
+        );
         assert!(
             lab_path.exists(),
-            "REFERENCE_LAB_PATH path does not exist: {}",
+            "{} path does not exist: {}",
+            lab_env_var,
             lab_path.display()
         );
 
@@ -171,31 +177,6 @@ local_concurrency = 2
                         let rel_path = path.strip_prefix(&dest).unwrap().to_path_buf();
                         image_mapping.insert(rel_path, extract_dir);
                     }
-                }
-            }
-        }
-
-        let revision_dir = dest.join("revision");
-        if revision_dir.exists() {
-            for entry in fs::read_dir(revision_dir).expect("Failed to read revision dir") {
-                let entry = entry.expect("Failed to read entry");
-                let path = entry.path();
-                if path.extension().is_some_and(|e| e == "json") {
-                    let content = fs::read_to_string(&path).expect("Failed to read metadata");
-                    let mut data: Value =
-                        serde_json::from_str(&content).expect("Failed to parse metadata");
-
-                    if let Some(image_val) = data.get_mut("image") {
-                        if let Some(image_str) = image_val.as_str() {
-                            let img_path = PathBuf::from(image_str);
-                            if let Some(new_path) = image_mapping.get(&img_path) {
-                                *image_val = Value::String(new_path.to_string_lossy().to_string());
-                            }
-                        }
-                    }
-
-                    fs::write(&path, serde_json::to_string_pretty(&data).unwrap())
-                        .expect("Failed to write updated metadata");
                 }
             }
         }

@@ -1,6 +1,7 @@
 {
   pkgs,
   gitHash,
+  repxVersion,
   includeImages ? true,
 }:
 let
@@ -58,7 +59,6 @@ let
       );
 
       metadata = {
-        schema_version = "1.0";
         type = "run";
         name = runName;
         inherit gitHash;
@@ -78,7 +78,7 @@ let
     }:
     let
       metadata = {
-        schema_version = "1.0";
+        repx_version = repxVersion;
         type = "root";
         inherit gitHash;
         runs = runMetadataPaths;
