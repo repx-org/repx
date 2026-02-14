@@ -146,7 +146,7 @@ mod tests {
 
     fn test_lab() -> Lab {
         Lab {
-            repx_version: "0.1.3".into(),
+            repx_version: "0.2.0".into(),
             lab_version: "1.0.0".into(),
             git_hash: "test".into(),
             content_hash: "test-hash".to_string(),
