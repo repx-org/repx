@@ -1,6 +1,7 @@
 {
   pkgs,
   referenceLab,
+  referenceLabNative,
   testName,
   cargoTestArgs,
 }:
@@ -41,6 +42,7 @@ pkgs.testers.runNixOSTest {
         ];
         variables = {
           REFERENCE_LAB_PATH = referenceLab;
+          REFERENCE_LAB_NATIVE_PATH = referenceLabNative;
           RUST_BACKTRACE = "1";
         };
       };
