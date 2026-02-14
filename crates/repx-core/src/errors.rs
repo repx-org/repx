@@ -46,6 +46,21 @@ pub enum ConfigError {
 
     #[error("Lab integrity check failed: {0}")]
     IntegrityError(String),
+
+    #[error("Incompatible Lab version. This repx binary expects repx_version '{expected}', but the Lab was generated with version '{found}'. Please rebuild your Lab with a compatible repx-nix version.")]
+    IncompatibleVersion { expected: String, found: String },
+
+    #[error(
+        "Lab integrity check failed: file '{path}' has hash '{actual}', expected '{expected}'."
+    )]
+    IntegrityHashMismatch {
+        path: String,
+        expected: String,
+        actual: String,
+    },
+
+    #[error("Lab integrity check failed: file '{0}' is missing.")]
+    IntegrityFileMissing(String),
 }
 
 #[derive(Error, Debug)]

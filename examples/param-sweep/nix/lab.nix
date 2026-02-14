@@ -6,6 +6,7 @@
 
 repx-lib.mkLab {
   inherit pkgs gitHash repx-lib;
+  lab_version = "1.0.0";
   runs = rec {
     sweep_run = repx-lib.callRun ./run-sweep.nix [ ];
 

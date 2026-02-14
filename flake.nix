@@ -41,7 +41,7 @@
         packages = {
           default = pkgs.repx;
           inherit (pkgs) repx repx-py;
-          inherit (labs) reference-lab;
+          inherit (labs) reference-lab reference-lab-native;
           inherit (docsOutputs) docs logo;
 
           repx-static = pkgs.pkgsStatic.callPackage ./default.nix { };
@@ -63,6 +63,7 @@
 
         devShells.default = pkgs.mkShell {
           REFERENCE_LAB_PATH = labs.reference-lab;
+          REFERENCE_LAB_NATIVE_PATH = labs.reference-lab-native;
           buildInputs = with pkgs; [
             openssl
             pkg-config

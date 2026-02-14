@@ -2,10 +2,11 @@
   pkgs,
   repx-lib,
   gitHash,
+  lab_version,
   runs,
 }:
 let
-  lab-packagers = (import ./lab-packagers.nix) { inherit pkgs gitHash; };
+  lab-packagers = (import ./lab-packagers.nix) { inherit pkgs gitHash lab_version; };
   findRunName =
     runPlaceholder:
     runPlaceholder.name or (

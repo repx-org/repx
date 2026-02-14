@@ -11,6 +11,12 @@
       inherit gitHash;
     }).lab;
 
+  reference-lab-native =
+    (pkgs.callPackage ./reference-lab/lab-native.nix {
+      inherit pkgs repx-lib;
+      inherit gitHash;
+    }).lab;
+
   simple-lab =
     (pkgs.callPackage ../examples/simple/nix/lab.nix {
       inherit pkgs repx-lib;
