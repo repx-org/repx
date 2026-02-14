@@ -57,6 +57,7 @@
           inherit pkgs repx-lib;
           inherit (pkgs) repx;
           referenceLab = labs.reference-lab;
+          referenceLabNative = labs.reference-lab-native;
         };
 
         formatter = import ./nix/formatters.nix { inherit pkgs; };

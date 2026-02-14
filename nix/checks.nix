@@ -2,6 +2,7 @@
   pkgs,
   repx,
   referenceLab,
+  referenceLabNative,
   repx-lib,
 }:
 
@@ -65,37 +66,37 @@ let
   unitChecks = {
     repx-py-tests = import ./checks/unit/repx-py.nix { inherit pkgs referenceLab; };
     rs-client-tests = import ./checks/unit/repx-rs.nix {
-      inherit pkgs referenceLab;
+      inherit pkgs referenceLab referenceLabNative;
       testName = "repx-rs-client-tests";
       cargoTestArgs = "--test wave_scheduler --test data_only_local --test smart_sync_tests";
     };
     rs-unit = import ./checks/unit/repx-rs.nix {
-      inherit pkgs referenceLab;
+      inherit pkgs referenceLab referenceLabNative;
       testName = "repx-rs-unit";
       cargoTestArgs = "--lib --bins";
     };
     rs-bwrap = import ./checks/unit/repx-rs.nix {
-      inherit pkgs referenceLab;
+      inherit pkgs referenceLab referenceLabNative;
       testName = "repx-rs-bwrap";
       cargoTestArgs = "--test bwrap_tests";
     };
     rs-gc = import ./checks/unit/repx-rs.nix {
-      inherit pkgs referenceLab;
+      inherit pkgs referenceLab referenceLabNative;
       testName = "repx-rs-gc";
       cargoTestArgs = "--test gc_tests";
     };
     rs-integration = import ./checks/unit/repx-rs.nix {
-      inherit pkgs referenceLab;
+      inherit pkgs referenceLab referenceLabNative;
       testName = "repx-rs-integration";
       cargoTestArgs = "--test e2e_tests --test component_tests --test regression_tests";
     };
     rs-containers = import ./checks/unit/repx-rs.nix {
-      inherit pkgs referenceLab;
+      inherit pkgs referenceLab referenceLabNative;
       testName = "repx-rs-containers";
       cargoTestArgs = "--test podman_tests --test docker_tests";
     };
     rs-executor = import ./checks/unit/repx-rs.nix {
-      inherit pkgs referenceLab;
+      inherit pkgs referenceLab referenceLabNative;
       testName = "repx-rs-executor";
       cargoTestArgs = "--test executor_tests --test unit_tests";
     };
