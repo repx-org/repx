@@ -1,38 +1,8 @@
-import json
 import subprocess
 import sys
 from pathlib import Path
 
 from repx_py.models import Experiment
-
-
-def test_cli_trace_params(lab_path: Path):
-    """Tests the 'trace-params' CLI command."""
-    command = [
-        sys.executable,
-        "-m",
-        "repx_py.cli.trace_params",
-        str(lab_path),
-    ]
-
-    result = subprocess.run(command, capture_output=True, text=True, check=True)
-
-    assert result.returncode == 0
-
-    params_data = json.loads(result.stdout)
-    assert isinstance(params_data, dict)
-    assert len(params_data) > 0
-
-    expected_substring = "stage-C-consumer"
-    found = any(expected_substring in k for k in params_data)
-
-    if not found:
-        print(
-            f"DEBUG: Expected '{expected_substring}' in keys, but found keys: {list(params_data.keys())}",
-            file=sys.stderr,
-        )
-
-    assert found
 
 
 def test_cli_debug_runner_simple_stage(lab_path: Path, tmp_path: Path):

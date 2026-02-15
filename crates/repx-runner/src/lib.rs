@@ -37,6 +37,7 @@ pub fn run(cli: Cli) -> Result<(), CliError> {
         }
         Commands::List(args) => commands::list::handle_list(args, &cli.lab),
         Commands::Show(args) => commands::show::handle_show(args, &cli.lab),
+        Commands::TraceParams(args) => commands::trace::handle_trace_params(args, &cli.lab),
         Commands::Gc(args) => {
             let config = config::load_config()?;
             let client = Client::new(config.clone(), cli.lab.clone()).map_err(|e| {

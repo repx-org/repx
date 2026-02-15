@@ -56,9 +56,6 @@ enum Commands {
     #[command(about = "Visualize the experiment topology")]
     Viz(VizArgs),
 
-    #[command(about = "Trace effective parameters for a job")]
-    TraceParams(TraceParamsArgs),
-
     #[command(about = "Debug/Run a job locally with interactive shell")]
     DebugRun(DebugRunArgs),
 
@@ -73,12 +70,6 @@ struct VizArgs {
 
     #[arg(long, help = "Output format (png, pdf, svg, etc.)")]
     format: Option<String>,
-}
-
-#[derive(Args)]
-struct TraceParamsArgs {
-    #[arg(help = "Job ID to trace (optional, shows all jobs if omitted)")]
-    job_id: Option<String>,
 }
 
 #[derive(Args)]
@@ -203,14 +194,6 @@ fn main() {
                 eprintln!("{}", format!("[ERROR] {}", e).red());
                 std::process::exit(1);
             }
-        }
-        Commands::TraceParams(args) => {
-            run_python_tool("repx_py.cli.trace_params", |cmd| {
-                cmd.arg(&cli.lab);
-                if let Some(job_id) = &args.job_id {
-                    cmd.arg("--job").arg(job_id);
-                }
-            });
         }
         Commands::DebugRun(args) => {
             run_python_tool("repx_py.cli.debug_runner", |cmd| {

@@ -8,7 +8,6 @@ dependencies = [
 
 [project.scripts]
 debug-runner = "repx_py.cli.debug_runner:main"
-trace-params = "repx_py.cli.trace_params:main"
 
 [build-system]
 requires = ["setuptools>=61.0"]
