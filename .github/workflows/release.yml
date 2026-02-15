@@ -28,7 +28,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: DeterminateSystems/nix-installer-action@v11
-      - uses: DeterminateSystems/magic-nix-cache-action@v7
 
       - name: Build Static Binary
         run: |
@@ -72,7 +71,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: DeterminateSystems/nix-installer-action@v11
-      - uses: DeterminateSystems/magic-nix-cache-action@v7
 
       - name: Build Binary
         run: |

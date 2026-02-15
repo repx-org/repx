@@ -12,7 +12,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: DeterminateSystems/nix-installer-action@v11
-      - uses: DeterminateSystems/magic-nix-cache-action@v7
 
       - name: Run Fast Checks
         run: |
@@ -68,7 +67,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: DeterminateSystems/nix-installer-action@v11
-      - uses: DeterminateSystems/magic-nix-cache-action@v7
 
       - name: Run E2E Check
         run: nix build -L .#checks.x86_64-linux.${{ matrix.check }}
@@ -80,7 +78,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: DeterminateSystems/nix-installer-action@v11
-      - uses: DeterminateSystems/magic-nix-cache-action@v7
 
       - name: Run Example Checks
         run: nix run -L .#check-repx-examples
