@@ -656,6 +656,18 @@ impl BwrapRuntime {
             let source_path = entry.path();
             let target_path = format!("/{}", file_name_str);
 
+            let file_type = entry.file_type();
+            if let Ok(ft) = file_type {
+                if ft.is_symlink() {
+                    if let Ok(link_target) = std::fs::read_link(&source_path) {
+                        cmd.arg("--symlink")
+                            .arg(link_target.to_string_lossy().as_ref())
+                            .arg(&target_path);
+                    }
+                    continue;
+                }
+            }
+
             cmd.arg("--ro-bind").arg(&source_path).arg(&target_path);
         }
 
