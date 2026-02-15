@@ -3,6 +3,87 @@
 mod harness;
 use harness::TestHarness;
 use std::fs;
+
+#[test]
+fn test_bwrap_overlay_fallback_when_disabled() {
+    let harness = TestHarness::with_execution_type("bwrap");
+    harness.stage_lab();
+
+    let base_path = &harness.cache_dir;
+
+    let capabilities_dir = base_path.join("cache").join("capabilities");
+    fs::create_dir_all(&capabilities_dir).expect("Failed to create capabilities dir");
+
+    let cache_content = r#"{
+        "tmp_overlay_supported": false,
+        "checked_at": "2025-01-01T00:00:00Z"
+    }"#;
+    fs::write(capabilities_dir.join("overlay_support.json"), cache_content)
+        .expect("Failed to write overlay cache");
+
+    let mut cmd = harness.cmd();
+    cmd.arg("run").arg("simulation-run");
+
+    let output = cmd.output().expect("Failed to execute command");
+
+    println!("STDOUT: {}", String::from_utf8_lossy(&output.stdout));
+    println!("STDERR: {}", String::from_utf8_lossy(&output.stderr));
+
+    let stage_e_job_id = harness.get_job_id_by_name("stage-E-total-sum");
+    let stage_e_path = harness.get_job_output_path(&stage_e_job_id);
+
+    assert!(
+        stage_e_path.join("repx/SUCCESS").exists(),
+        "Job should succeed with overlay fallback"
+    );
+
+    let total_sum_content = fs::read_to_string(stage_e_path.join("out/total_sum.txt")).unwrap();
+    let val = total_sum_content.trim();
+    assert!(
+        val == "400" || val == "415",
+        "Expected 400 or 415, got {}",
+        val
+    );
+
+    let cache_content_after =
+        fs::read_to_string(capabilities_dir.join("overlay_support.json")).unwrap();
+    assert!(
+        cache_content_after.contains("\"tmp_overlay_supported\": false"),
+        "Cache should still show overlay as unsupported"
+    );
+}
+
+#[test]
+fn test_bwrap_overlay_capability_detection() {
+    let harness = TestHarness::with_execution_type("bwrap");
+    harness.stage_lab();
+
+    let base_path = &harness.cache_dir;
+    let capabilities_dir = base_path.join("cache").join("capabilities");
+
+    let _ = fs::remove_dir_all(&capabilities_dir);
+
+    let mut cmd = harness.cmd();
+    cmd.arg("run").arg("simulation-run");
+    cmd.assert().success();
+
+    let cache_file = capabilities_dir.join("overlay_support.json");
+    assert!(
+        cache_file.exists(),
+        "Overlay capability cache should be created after first run"
+    );
+
+    let cache_content = fs::read_to_string(&cache_file).unwrap();
+    assert!(
+        cache_content.contains("tmp_overlay_supported"),
+        "Cache should contain overlay support status"
+    );
+    assert!(
+        cache_content.contains("checked_at"),
+        "Cache should contain timestamp"
+    );
+}
+
 #[test]
 fn test_full_run_local_bwrap() {
     let harness = TestHarness::with_execution_type("bwrap");

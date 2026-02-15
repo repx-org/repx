@@ -49,6 +49,9 @@ let
     incremental-sync = import ./checks/runtime/incremental-sync-test.nix {
       inherit pkgs repx referenceLab;
     };
+    e2e-bwrap-overlay-fallback = import ./checks/runtime/e2e-bwrap-overlay-fallback.nix {
+      inherit pkgs repx referenceLab;
+    };
   };
 
   libChecks = {
