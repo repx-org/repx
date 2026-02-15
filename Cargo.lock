@@ -1617,6 +1617,7 @@ dependencies = [
 name = "repx-executor"
 version = "0.2.0"
 dependencies = [
+ "chrono",
  "nix",
  "repx-core",
  "serde",

@@ -64,6 +64,7 @@ jobs:
           - e2e-mount-paths-docker
           - incremental-sync
           - large_lab
+          - e2e-bwrap-overlay-fallback
     steps:
       - uses: actions/checkout@v4
       - uses: DeterminateSystems/nix-installer-action@v11

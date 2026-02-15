@@ -2,10 +2,18 @@ use crate::context::RuntimeContext;
 use crate::error::{ExecutorError, Result};
 use crate::ExecutionRequest;
 use nix::fcntl::{Flock, FlockArg};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use tokio::process::Command as TokioCommand;
+
+const EXCLUDED_ROOTFS_DIRS: &[&str] = &["dev", "proc", "tmp"];
+
+#[derive(Debug, Serialize, Deserialize)]
+struct OverlayCapabilityCache {
+    tmp_overlay_supported: bool,
+    checked_at: String,
+}
 
 pub struct BwrapRuntime;
 
@@ -212,7 +220,20 @@ impl BwrapRuntime {
         Ok(union_dir)
     }
 
-    pub async fn check_overlay_support(ctx: &RuntimeContext<'_>, lower_dir: &Path) -> bool {
+    pub async fn check_overlay_support(ctx: &RuntimeContext<'_>, _lower_dir: &Path) -> bool {
+        let cache_dir = ctx.get_capabilities_cache_dir();
+        let cache_file = cache_dir.join("overlay_support.json");
+
+        if let Ok(content) = tokio::fs::read_to_string(&cache_file).await {
+            if let Ok(cached) = serde_json::from_str::<OverlayCapabilityCache>(&content) {
+                return cached.tmp_overlay_supported;
+            }
+        }
+
+        Self::run_overlay_check(ctx).await
+    }
+
+    async fn run_overlay_check(ctx: &RuntimeContext<'_>) -> bool {
         let bwrap_path = match ctx.get_host_tool_path("bwrap") {
             Ok(p) => p,
             Err(_) => return false,
@@ -234,10 +255,12 @@ impl BwrapRuntime {
         let upper = start_path.join("upper");
         let work = start_path.join("work");
         let merged = start_path.join("merged");
+        let lower = start_path.join("lower");
 
         if tokio::fs::create_dir(&upper).await.is_err()
             || tokio::fs::create_dir(&work).await.is_err()
             || tokio::fs::create_dir(&merged).await.is_err()
+            || tokio::fs::create_dir(&lower).await.is_err()
         {
             return false;
         }
@@ -249,7 +272,7 @@ impl BwrapRuntime {
             .arg("/")
             .arg("/")
             .arg("--overlay-src")
-            .arg(lower_dir)
+            .arg(&lower)
             .arg("--overlay")
             .arg(&upper)
             .arg(&work)
@@ -262,6 +285,103 @@ impl BwrapRuntime {
         match cmd.status().await {
             Ok(status) => status.success(),
             Err(_) => false,
+        }
+    }
+
+    pub async fn check_tmp_overlay_support(ctx: &RuntimeContext<'_>, rootfs_path: &Path) -> bool {
+        let cache_dir = ctx.get_capabilities_cache_dir();
+        let cache_file = cache_dir.join("overlay_support.json");
+
+        if let Ok(content) = tokio::fs::read_to_string(&cache_file).await {
+            if let Ok(cached) = serde_json::from_str::<OverlayCapabilityCache>(&content) {
+                tracing::debug!(
+                    "Using cached overlay support result: supported={}",
+                    cached.tmp_overlay_supported
+                );
+                return cached.tmp_overlay_supported;
+            }
+        }
+
+        let supported = Self::run_tmp_overlay_check(ctx, rootfs_path).await;
+
+        if let Err(e) = tokio::fs::create_dir_all(&cache_dir).await {
+            tracing::debug!("Failed to create capabilities cache dir: {}", e);
+        } else {
+            let cache_entry = OverlayCapabilityCache {
+                tmp_overlay_supported: supported,
+                checked_at: chrono::Utc::now().to_rfc3339(),
+            };
+            if let Ok(json) = serde_json::to_string_pretty(&cache_entry) {
+                if let Err(e) = tokio::fs::write(&cache_file, json).await {
+                    tracing::debug!("Failed to write overlay capability cache: {}", e);
+                }
+            }
+        }
+
+        supported
+    }
+
+    async fn run_tmp_overlay_check(ctx: &RuntimeContext<'_>, rootfs_path: &Path) -> bool {
+        let bwrap_path = match ctx.get_host_tool_path("bwrap") {
+            Ok(p) => p,
+            Err(_) => return false,
+        };
+
+        let temp_base = ctx.get_temp_path();
+        let temp_dir = match tempfile::Builder::new()
+            .prefix(".repx-tmp-overlay-check-")
+            .tempdir_in(&temp_base)
+        {
+            Ok(t) => t,
+            Err(e) => {
+                tracing::debug!("Failed to create temp dir for tmp-overlay check: {}", e);
+                return false;
+            }
+        };
+
+        let test_lower = if rootfs_path.join("bin").exists() {
+            rootfs_path.join("bin")
+        } else if rootfs_path.join("etc").exists() {
+            rootfs_path.join("etc")
+        } else {
+            rootfs_path.to_path_buf()
+        };
+
+        let test_mount_point = temp_dir.path().join("test");
+        if tokio::fs::create_dir(&test_mount_point).await.is_err() {
+            return false;
+        }
+
+        let mut cmd = TokioCommand::new(&bwrap_path);
+
+        cmd.arg("--unshare-user")
+            .arg("--dev-bind")
+            .arg("/")
+            .arg("/")
+            .arg("--overlay-src")
+            .arg(&test_lower)
+            .arg("--tmp-overlay")
+            .arg(&test_mount_point)
+            .arg("true");
+
+        ctx.restrict_command_environment(&mut cmd, &[]);
+        cmd.stdout(Stdio::null()).stderr(Stdio::null());
+
+        match cmd.status().await {
+            Ok(status) => {
+                let supported = status.success();
+                if !supported {
+                    tracing::debug!(
+                        "tmp-overlay check failed for {:?} - kernel may not support userxattr overlay",
+                        test_lower
+                    );
+                }
+                supported
+            }
+            Err(e) => {
+                tracing::debug!("tmp-overlay check command failed: {}", e);
+                false
+            }
         }
     }
 
@@ -290,12 +410,25 @@ impl BwrapRuntime {
         } else {
             cmd.arg("--unshare-all")
                 .arg("--hostname")
-                .arg("repx-container")
-                .arg("--overlay-src")
-                .arg(rootfs_path)
-                .arg("--tmp-overlay")
-                .arg("/")
-                .arg("--dev")
+                .arg("repx-container");
+
+            let overlay_supported = Self::check_tmp_overlay_support(ctx, rootfs_path).await;
+
+            if overlay_supported {
+                cmd.arg("--overlay-src")
+                    .arg(rootfs_path)
+                    .arg("--tmp-overlay")
+                    .arg("/");
+            } else {
+                tracing::info!(
+                    "Overlay filesystem not supported on target (kernel may lack userxattr support). \
+                     Using read-only bind mounts for rootfs."
+                );
+
+                Self::configure_readonly_rootfs_mounts(&mut cmd, rootfs_path).await?;
+            }
+
+            cmd.arg("--dev")
                 .arg("/dev")
                 .arg("--proc")
                 .arg("/proc")
@@ -493,6 +626,37 @@ impl BwrapRuntime {
                 cmd.arg("--dir").arg("/nix");
                 cmd.arg("--bind").arg(image_nix).arg("/nix");
             }
+        }
+
+        Ok(())
+    }
+
+    async fn configure_readonly_rootfs_mounts(
+        cmd: &mut TokioCommand,
+        rootfs_path: &Path,
+    ) -> Result<()> {
+        let entries = match std::fs::read_dir(rootfs_path) {
+            Ok(e) => e,
+            Err(e) => {
+                return Err(ExecutorError::Io(std::io::Error::new(
+                    std::io::ErrorKind::NotFound,
+                    format!("Failed to read rootfs directory {:?}: {}", rootfs_path, e),
+                )));
+            }
+        };
+
+        for entry in entries.flatten() {
+            let file_name = entry.file_name();
+            let file_name_str = file_name.to_string_lossy();
+
+            if EXCLUDED_ROOTFS_DIRS.contains(&file_name_str.as_ref()) {
+                continue;
+            }
+
+            let source_path = entry.path();
+            let target_path = format!("/{}", file_name_str);
+
+            cmd.arg("--ro-bind").arg(&source_path).arg(&target_path);
         }
 
         Ok(())

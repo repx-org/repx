@@ -129,6 +129,14 @@ impl<'a> RuntimeContext<'a> {
         }
     }
 
+    pub fn get_capabilities_cache_dir(&self) -> PathBuf {
+        if let Some(local) = &self.request.node_local_path {
+            local.join("repx").join("cache").join("capabilities")
+        } else {
+            self.request.base_path.join("cache").join("capabilities")
+        }
+    }
+
     pub fn calculate_restricted_path(
         &self,
         required_system_binaries: &[&str],
