@@ -64,6 +64,11 @@ pub enum Commands {
 
     #[command(about = "Show detailed information")]
     Show(ShowArgs),
+
+    #[command(
+        about = "Trace effective parameters for a job (includes inherited params from dependencies)"
+    )]
+    TraceParams(TraceParamsArgs),
 }
 
 #[derive(Args)]
@@ -127,6 +132,16 @@ pub struct ListJobsArgs {
 
     #[arg(long, help = "Show output directory paths for each job")]
     pub output_paths: bool,
+
+    #[arg(
+        long,
+        short = 'p',
+        help = "Show effective parameter value(s) for each job. Can be repeated."
+    )]
+    pub param: Vec<String>,
+
+    #[arg(long, short = 'g', help = "Group jobs by stage name")]
+    pub group_by_stage: bool,
 }
 
 #[derive(Args)]
@@ -136,6 +151,12 @@ pub struct GcArgs {
         help = "The target to garbage collect (must be defined in config.toml)"
     )]
     pub target: Option<String>,
+}
+
+#[derive(Args)]
+pub struct TraceParamsArgs {
+    #[arg(help = "Job ID to trace (optional, shows all jobs if omitted)")]
+    pub job_id: Option<String>,
 }
 
 #[derive(Args)]

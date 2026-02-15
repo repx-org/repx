@@ -1,4 +1,5 @@
-use crate::cli::{ListArgs, ListEntity};
+use crate::cli::{ListArgs, ListEntity, ListJobsArgs};
+use crate::commands::trace::compute_all_effective_params;
 use crate::error::CliError;
 use repx_core::{
     config,
@@ -8,6 +9,8 @@ use repx_core::{
     model::{JobId, Lab, RunId},
     resolver,
 };
+use serde_json::Value;
+use std::collections::HashMap;
 use std::path::Path;
 use std::str::FromStr;
 
@@ -16,15 +19,19 @@ pub fn handle_list(args: ListArgs, lab_path: &Path) -> Result<(), CliError> {
 
     match args.entity.unwrap_or(ListEntity::Runs { name: None }) {
         ListEntity::Runs { name } => match name {
-            Some(n) => list_jobs(&lab, Some(&n), None, false),
+            Some(n) => list_jobs(
+                &lab,
+                &ListJobsArgs {
+                    name: Some(n),
+                    stage: None,
+                    output_paths: false,
+                    param: vec![],
+                    group_by_stage: false,
+                },
+            ),
             None => list_runs(&lab, lab_path),
         },
-        ListEntity::Jobs(job_args) => list_jobs(
-            &lab,
-            job_args.name.as_deref(),
-            job_args.stage.as_deref(),
-            job_args.output_paths,
-        ),
+        ListEntity::Jobs(job_args) => list_jobs(&lab, &job_args),
         ListEntity::Dependencies { job_id } => list_dependencies(&lab, &job_id),
     }
 }
@@ -41,13 +48,15 @@ fn list_runs(lab: &Lab, lab_path: &Path) -> Result<(), CliError> {
     Ok(())
 }
 
-fn list_jobs(
-    lab: &Lab,
-    run_id_opt: Option<&str>,
-    stage_filter: Option<&str>,
-    show_output_paths: bool,
-) -> Result<(), CliError> {
-    let store_path = if show_output_paths {
+struct ListJobsContext {
+    store_path: Option<std::path::PathBuf>,
+    effective_params: Option<HashMap<JobId, Value>>,
+    param_keys: Vec<String>,
+    group_by_stage: bool,
+}
+
+fn list_jobs(lab: &Lab, args: &ListJobsArgs) -> Result<(), CliError> {
+    let store_path = if args.output_paths {
         let config = config::load_config()?;
         let target_name = config.submission_target.as_ref().ok_or_else(|| {
             CliError::Config(ConfigError::General(
@@ -65,8 +74,21 @@ fn list_jobs(
         None
     };
 
-    let run_id_str = match run_id_opt {
-        Some(s) => s,
+    let effective_params = if !args.param.is_empty() {
+        Some(compute_all_effective_params(lab))
+    } else {
+        None
+    };
+
+    let ctx = ListJobsContext {
+        store_path,
+        effective_params,
+        param_keys: args.param.clone(),
+        group_by_stage: args.group_by_stage,
+    };
+
+    let run_id_str = match &args.name {
+        Some(s) => s.as_str(),
         None => {
             let mut run_ids: Vec<_> = lab.runs.keys().collect();
             run_ids.sort();
@@ -76,20 +98,8 @@ fn list_jobs(
                 }
                 println!("Jobs in run '{}':", run_id);
                 let run = &lab.runs[*run_id];
-                let mut jobs: Vec<_> = run.jobs.iter().collect();
-                jobs.sort();
-
-                let jobs: Vec<_> = if let Some(stage) = stage_filter {
-                    jobs.into_iter()
-                        .filter(|job_id| job_id.0.contains(stage))
-                        .collect()
-                } else {
-                    jobs
-                };
-
-                for job in jobs {
-                    print_job_line(job, show_output_paths, &store_path);
-                }
+                let jobs: Vec<_> = run.jobs.iter().collect();
+                print_jobs_list(lab, jobs, args.stage.as_deref(), &ctx);
             }
             return Ok(());
         }
@@ -122,27 +132,8 @@ fn list_jobs(
 
     if let Some((id, run)) = matched_run {
         println!("Jobs in run '{}':", id);
-        let mut jobs: Vec<_> = run.jobs.iter().collect();
-        jobs.sort();
-
-        let jobs: Vec<_> = if let Some(stage) = stage_filter {
-            jobs.into_iter()
-                .filter(|job_id| job_id.0.contains(stage))
-                .collect()
-        } else {
-            jobs
-        };
-
-        if jobs.is_empty() && stage_filter.is_some() {
-            println!(
-                "  (no jobs matching stage filter '{}')",
-                stage_filter.unwrap()
-            );
-        }
-
-        for job in jobs {
-            print_job_line(job, show_output_paths, &store_path);
-        }
+        let jobs: Vec<_> = run.jobs.iter().collect();
+        print_jobs_list(lab, jobs, args.stage.as_deref(), &ctx);
         Ok(())
     } else {
         let job_id_query = run_id_str;
@@ -171,7 +162,14 @@ fn list_jobs(
                 }
                 if found_runs.len() == 1 {
                     println!();
-                    return list_jobs(lab, Some(&found_runs[0].0), stage_filter, show_output_paths);
+                    let new_args = ListJobsArgs {
+                        name: Some(found_runs[0].0.clone()),
+                        stage: args.stage.clone(),
+                        output_paths: args.output_paths,
+                        param: args.param.clone(),
+                        group_by_stage: args.group_by_stage,
+                    };
+                    return list_jobs(lab, &new_args);
                 }
                 return Ok(());
             }
@@ -181,24 +179,139 @@ fn list_jobs(
     }
 }
 
-fn print_job_line(
-    job_id: &JobId,
-    show_output_paths: bool,
-    store_path: &Option<std::path::PathBuf>,
-) {
-    if show_output_paths {
-        if let Some(store) = store_path {
-            let output_path = store.join(dirs::OUTPUTS).join(&job_id.0).join(dirs::OUT);
-            if output_path.exists() {
-                println!("  {}  {}", job_id, output_path.display());
-            } else {
-                println!("  {}  (not executed)", job_id);
+fn extract_stage_name(job_id: &JobId) -> String {
+    let s = &job_id.0;
+    if let Some(first_dash) = s.find('-') {
+        let after_hash = &s[first_dash + 1..];
+        if let Some(last_dash) = after_hash.rfind('-') {
+            let potential_version = &after_hash[last_dash + 1..];
+            if potential_version.contains('.')
+                || potential_version.chars().all(|c| c.is_ascii_digit())
+            {
+                return after_hash[..last_dash].to_string();
             }
-        } else {
-            println!("  {}", job_id);
+        }
+        return after_hash.to_string();
+    }
+    s.to_string()
+}
+
+fn print_jobs_list(
+    lab: &Lab,
+    jobs: Vec<&JobId>,
+    stage_filter: Option<&str>,
+    ctx: &ListJobsContext,
+) {
+    let mut jobs: Vec<_> = jobs;
+    jobs.sort();
+
+    let jobs: Vec<_> = if let Some(stage) = stage_filter {
+        jobs.into_iter()
+            .filter(|job_id| job_id.0.contains(stage))
+            .collect()
+    } else {
+        jobs
+    };
+
+    if jobs.is_empty() && stage_filter.is_some() {
+        println!(
+            "  (no jobs matching stage filter '{}')",
+            stage_filter.unwrap()
+        );
+        return;
+    }
+
+    if ctx.group_by_stage {
+        let mut groups: HashMap<String, Vec<&JobId>> = HashMap::new();
+        for job_id in &jobs {
+            let stage = extract_stage_name(job_id);
+            groups.entry(stage).or_default().push(job_id);
+        }
+
+        let mut stage_names: Vec<_> = groups.keys().collect();
+        stage_names.sort();
+
+        for stage_name in stage_names {
+            println!("  [{}]", stage_name);
+            let stage_jobs = &groups[stage_name];
+            for job_id in stage_jobs {
+                print_job_line(lab, job_id, ctx, 4);
+            }
         }
     } else {
-        println!("  {}", job_id);
+        for job_id in jobs {
+            print_job_line(lab, job_id, ctx, 2);
+        }
+    }
+}
+
+fn print_job_line(lab: &Lab, job_id: &JobId, ctx: &ListJobsContext, indent: usize) {
+    let prefix = " ".repeat(indent);
+    let mut line = format!("{}{}", prefix, job_id);
+
+    if !ctx.param_keys.is_empty() {
+        if let Some(ref all_params) = ctx.effective_params {
+            if let Some(params) = all_params.get(job_id) {
+                let mut param_strs = Vec::new();
+                for key in &ctx.param_keys {
+                    let value = get_nested_value(params, key);
+                    param_strs.push(format!("{}={}", key, format_param_value(&value)));
+                }
+                if !param_strs.is_empty() {
+                    line.push_str("  ");
+                    line.push_str(&param_strs.join(" "));
+                }
+            }
+        }
+    }
+
+    if let Some(ref store) = ctx.store_path {
+        let output_path = store.join(dirs::OUTPUTS).join(&job_id.0).join(dirs::OUT);
+        if output_path.exists() {
+            line.push_str(&format!("  {}", output_path.display()));
+        } else {
+            line.push_str("  (not executed)");
+        }
+    }
+
+    println!("{}", line);
+
+    let _ = lab;
+}
+
+fn get_nested_value(value: &Value, key: &str) -> Value {
+    let parts: Vec<&str> = key.split('.').collect();
+    let mut current = value;
+    for part in parts {
+        match current {
+            Value::Object(map) => {
+                if let Some(v) = map.get(part) {
+                    current = v;
+                } else {
+                    return Value::Null;
+                }
+            }
+            _ => return Value::Null,
+        }
+    }
+    current.clone()
+}
+
+fn format_param_value(value: &Value) -> String {
+    match value {
+        Value::Null => "-".to_string(),
+        Value::String(s) => {
+            if s.starts_with("/nix/store/") && s.len() > 40 {
+                if let Some(last_slash) = s.rfind('/') {
+                    return format!("...{}", &s[last_slash..]);
+                }
+            }
+            s.clone()
+        }
+        Value::Number(n) => n.to_string(),
+        Value::Bool(b) => b.to_string(),
+        Value::Array(arr) => format!("[{}]", arr.len()),
+        Value::Object(obj) => format!("{{{}}}", obj.len()),
     }
 }
 

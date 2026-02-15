@@ -8,6 +8,7 @@ pub mod list;
 pub mod run;
 pub mod scatter_gather;
 pub mod show;
+pub mod trace;
 
 pub struct AppContext<'a> {
     pub lab_path: &'a PathBuf,
