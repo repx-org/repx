@@ -2,6 +2,7 @@
 
 mod harness;
 use harness::TestHarness;
+use predicates::prelude::PredicateBooleanExt;
 use std::fs;
 
 #[test]
@@ -169,4 +170,73 @@ fn test_list_commands() {
         )))
         .stdout(predicates::str::contains("simulation-run"))
         .stdout(predicates::str::contains("Jobs in run 'simulation-run'"));
+
+    harness
+        .cmd()
+        .arg("list")
+        .arg("jobs")
+        .arg("simulation-run")
+        .arg("--stage")
+        .arg("stage-A")
+        .assert()
+        .success()
+        .stdout(predicates::str::contains("stage-A-producer"))
+        .stdout(predicates::str::is_match("stage-B").unwrap().not());
+}
+
+#[test]
+fn test_show_commands() {
+    let harness = TestHarness::new();
+
+    harness
+        .cmd()
+        .arg("run")
+        .arg("simulation-run")
+        .assert()
+        .success();
+
+    let job_id = harness.get_job_id_by_name("stage-A-producer");
+    let partial_id = &job_id[0..8];
+
+    harness
+        .cmd()
+        .arg("show")
+        .arg("job")
+        .arg(partial_id)
+        .assert()
+        .success()
+        .stdout(predicates::str::contains(format!("Job: {}", job_id)))
+        .stdout(predicates::str::contains("Status: SUCCESS"))
+        .stdout(predicates::str::contains("Paths:"))
+        .stdout(predicates::str::contains("output:"));
+
+    harness
+        .cmd()
+        .arg("show")
+        .arg("output")
+        .arg(partial_id)
+        .assert()
+        .success()
+        .stdout(predicates::str::contains("Output directory:"));
+
+    harness
+        .cmd()
+        .arg("show")
+        .arg("output")
+        .arg(partial_id)
+        .arg("numbers.txt")
+        .assert()
+        .success();
+
+    harness
+        .cmd()
+        .arg("list")
+        .arg("jobs")
+        .arg("simulation-run")
+        .arg("--stage")
+        .arg("stage-A")
+        .arg("--output-paths")
+        .assert()
+        .success()
+        .stdout(predicates::str::contains("/out"));
 }

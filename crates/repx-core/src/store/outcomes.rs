@@ -37,8 +37,9 @@ pub fn get_job_outcomes(
             continue;
         }
 
-        let success_marker = job_path.join(markers::SUCCESS);
-        let fail_marker = job_path.join(markers::FAIL);
+        let repx_dir = job_path.join(dirs::REPX);
+        let success_marker = repx_dir.join(markers::SUCCESS);
+        let fail_marker = repx_dir.join(markers::FAIL);
 
         if success_marker.exists() {
             outcomes.insert(

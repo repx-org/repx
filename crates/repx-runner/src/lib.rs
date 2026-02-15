@@ -36,6 +36,7 @@ pub fn run(cli: Cli) -> Result<(), CliError> {
             rt.block_on(commands::gc::async_handle_internal_gc(args))
         }
         Commands::List(args) => commands::list::handle_list(args, &cli.lab),
+        Commands::Show(args) => commands::show::handle_show(args, &cli.lab),
         Commands::Gc(args) => {
             let config = config::load_config()?;
             let client = Client::new(config.clone(), cli.lab.clone()).map_err(|e| {
