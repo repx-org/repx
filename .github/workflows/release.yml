@@ -29,6 +29,16 @@ jobs:
       - uses: actions/checkout@v4
       - uses: DeterminateSystems/nix-installer-action@v11
 
+      - name: Get Version
+        id: version
+        run: |
+          VERSION="${{ inputs.version }}"
+          if [[ -z "$VERSION" ]]; then
+            VERSION="${GITHUB_REF#refs/tags/}"
+          fi
+          VERSION="${VERSION#v}"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
       - name: Build Static Binary
         run: |
           nix build -L .#repx-static
@@ -37,7 +47,7 @@ jobs:
           cp result/bin/repx dist/repx
 
           cd dist
-          tar -czf ../repx-${{ matrix.arch }}-linux-static.tar.gz repx
+          tar -czf ../repx-${{ steps.version.outputs.version }}-linux-${{ matrix.arch }}.tar.gz repx
           cd ..
 
       - name: Verify Version
@@ -62,8 +72,8 @@ jobs:
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: repx-${{ matrix.arch }}-linux-static
-          path: repx-${{ matrix.arch }}-linux-static.tar.gz
+          name: linux-${{ matrix.arch }}
+          path: repx-${{ steps.version.outputs.version }}-linux-${{ matrix.arch }}.tar.gz
 
   build-nix-macos:
     name: Build macOS
@@ -71,6 +81,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: DeterminateSystems/nix-installer-action@v11
+
+      - name: Get Version
+        id: version
+        run: |
+          VERSION="${{ inputs.version }}"
+          if [[ -z "$VERSION" ]]; then
+            VERSION="${GITHUB_REF#refs/tags/}"
+          fi
+          VERSION="${VERSION#v}"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Build Binary
         run: |
@@ -80,7 +100,7 @@ jobs:
           cp result/bin/repx dist/repx
 
           cd dist
-          tar -czf ../repx-amd64-darwin.tar.gz repx
+          tar -czf ../repx-${{ steps.version.outputs.version }}-darwin-amd64.tar.gz repx
           cd ..
 
       - name: Verify Version
@@ -97,8 +117,8 @@ jobs:
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: repx-amd64-darwin
-          path: repx-amd64-darwin.tar.gz
+          name: darwin-amd64
+          path: repx-${{ steps.version.outputs.version }}-darwin-amd64.tar.gz
 
   build-packages:
     name: Build Packages (Deb/RPM)
