@@ -318,11 +318,12 @@ let
           cp -r --no-dereference ${artifacts.labCore}/* $out/
           cp ${readme} $out/readme/$(basename ${readme})
 
-          files_json=$(find $out -type f | sort | while read -r filepath; do
+          files_json_file=$(mktemp)
+          find $out -type f | sort | while read -r filepath; do
             relpath="''${filepath#$out/}"
             hash=$(sha256sum "$filepath" | cut -d' ' -f1)
             printf '{"path":"%s","sha256":"%s"}\n' "$relpath" "$hash"
-          done | jq -s '.')
+          done | jq -s '.' > "$files_json_file"
 
           labId=$(jq -r '.labId' ${artifacts.labManifest})
           metadata=$(jq -r '.metadata' ${artifacts.labManifest})
@@ -331,10 +332,11 @@ let
             --arg labId "$labId" \
             --arg lab_version "${lab_version}" \
             --arg metadata "$metadata" \
-            --argjson files "$files_json" \
-            '{labId: $labId, lab_version: $lab_version, metadata: $metadata, files: $files}' \
+            --slurpfile files "$files_json_file" \
+            '{labId: $labId, lab_version: $lab_version, metadata: $metadata, files: $files[0]}' \
             > $out/lab/$(basename ${artifacts.labManifest})
 
+          rm -f "$files_json_file"
           echo "Lab directory created successfully."
         '';
       };

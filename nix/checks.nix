@@ -60,6 +60,7 @@ let
     dynamic_params_validation = pkgs.callPackage ./checks/lib/check-dynamic-params-validation.nix {
       inherit repx-lib;
     };
+    large_lab = pkgs.callPackage ./checks/lib/check-large-lab.nix { };
   }
   // (import ./checks/lib/check-deps.nix { inherit pkgs; });
 
