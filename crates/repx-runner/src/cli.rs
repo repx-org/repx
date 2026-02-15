@@ -61,6 +61,9 @@ pub enum Commands {
 
     #[command(about = "List runs, jobs, or dependencies")]
     List(ListArgs),
+
+    #[command(about = "Show detailed information")]
+    Show(ShowArgs),
 }
 
 #[derive(Args)]
@@ -69,18 +72,61 @@ pub struct ListArgs {
     pub entity: Option<ListEntity>,
 }
 
+#[derive(Args)]
+pub struct ShowArgs {
+    #[command(subcommand)]
+    pub entity: ShowEntity,
+}
+
+#[derive(Subcommand)]
+pub enum ShowEntity {
+    #[command(about = "Show detailed information about a job")]
+    Job(ShowJobArgs),
+    #[command(about = "Show contents of a job's output file")]
+    Output(ShowOutputArgs),
+}
+
+#[derive(Args)]
+pub struct ShowJobArgs {
+    #[arg(help = "Job ID (or prefix) to inspect")]
+    pub job_id: String,
+}
+
+#[derive(Args)]
+pub struct ShowOutputArgs {
+    #[arg(help = "Job ID (or prefix)")]
+    pub job_id: String,
+    #[arg(help = "Path to the output file (relative to job's out/ directory)")]
+    pub path: Option<String>,
+}
+
 #[derive(Subcommand)]
 pub enum ListEntity {
     Runs {
         #[arg(required = false, value_name = "RUN_NAME")]
         name: Option<String>,
     },
-    Jobs {
-        #[arg(required = false, value_name = "RUN_NAME")]
-        name: Option<String>,
-    },
+    Jobs(ListJobsArgs),
     #[command(alias = "deps")]
-    Dependencies { job_id: String },
+    Dependencies {
+        job_id: String,
+    },
+}
+
+#[derive(Args)]
+pub struct ListJobsArgs {
+    #[arg(required = false, value_name = "RUN_NAME")]
+    pub name: Option<String>,
+
+    #[arg(
+        long,
+        short = 's',
+        help = "Filter jobs by stage name (substring match)"
+    )]
+    pub stage: Option<String>,
+
+    #[arg(long, help = "Show output directory paths for each job")]
+    pub output_paths: bool,
 }
 
 #[derive(Args)]

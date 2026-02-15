@@ -13,7 +13,7 @@ logger = logging.getLogger("trace-params")
 def main():
     """Main function to parse arguments and run the parameter tracing."""
     parser = argparse.ArgumentParser(
-        description="Trace effective parameters for all jobs in a lab directory.",
+        description="Trace effective parameters for jobs in a lab directory.",
         formatter_class=argparse.RawTextHelpFormatter,
     )
     parser.add_argument(
@@ -26,6 +26,11 @@ def main():
         "--output",
         type=Path,
         help="Path to the output JSON file. If not provided, prints to standard output.",
+    )
+    parser.add_argument(
+        "--job",
+        type=str,
+        help="Filter by job ID (prefix match supported).",
     )
     args = parser.parse_args()
 
@@ -40,6 +45,16 @@ def main():
     except (FileNotFoundError, KeyError, RecursionError) as e:
         logger.error(f"\nError: {e}")
         sys.exit(1)
+
+    if args.job:
+        filtered = {}
+        for job_id, params in all_params.items():
+            if job_id.startswith(args.job):
+                filtered[job_id] = params
+        if not filtered:
+            logger.error(f"No jobs found matching '{args.job}'")
+            sys.exit(1)
+        all_params = filtered
 
     if args.output:
         with open(args.output, "w") as f:

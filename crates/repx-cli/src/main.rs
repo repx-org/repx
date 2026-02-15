@@ -12,7 +12,10 @@ use which::which;
 #[command(version)]
 struct Cli {
     #[command(subcommand)]
-    command: Commands,
+    command: Option<Commands>,
+
+    #[arg(long, help = "Print help for all commands recursively")]
+    help_all: bool,
 
     #[arg(short, long, global = true, default_value = "./result")]
     pub lab: PathBuf,
@@ -74,8 +77,8 @@ struct VizArgs {
 
 #[derive(Args)]
 struct TraceParamsArgs {
-    #[arg(help = "Job ID to trace")]
-    job_id: String,
+    #[arg(help = "Job ID to trace (optional, shows all jobs if omitted)")]
+    job_id: Option<String>,
 }
 
 #[derive(Args)]
@@ -93,10 +96,60 @@ struct CompletionsArgs {
     shell: Shell,
 }
 
+fn print_help_all() {
+    let cmd = Cli::command();
+    print_command_help(&cmd, 0);
+}
+
+fn print_command_help(cmd: &clap::Command, depth: usize) {
+    let indent = "  ".repeat(depth);
+    let name = cmd.get_name();
+
+    if cmd.is_hide_set() {
+        return;
+    }
+
+    if depth == 0 {
+        println!("{}", "=".repeat(60));
+        println!("REPX - Complete Command Reference");
+        println!("{}", "=".repeat(60));
+        println!();
+    } else {
+        println!();
+        println!("{}{}", indent, "-".repeat(50 - indent.len()));
+        println!("{}Command: {}", indent, name);
+        println!("{}{}", indent, "-".repeat(50 - indent.len()));
+    }
+
+    let mut help_cmd = cmd.clone();
+    let help_text = help_cmd.render_help();
+
+    for line in help_text.to_string().lines() {
+        println!("{}{}", indent, line);
+    }
+
+    for subcmd in cmd.get_subcommands() {
+        print_command_help(subcmd, depth + 1);
+    }
+}
+
 fn main() {
     let cli = Cli::parse();
 
-    match cli.command {
+    if cli.help_all {
+        print_help_all();
+        return;
+    }
+
+    let command = match cli.command {
+        Some(cmd) => cmd,
+        None => {
+            Cli::command().print_help().unwrap();
+            return;
+        }
+    };
+
+    match command {
         Commands::Runner(cmd) => {
             let is_internal = matches!(
                 cmd.as_ref(),
@@ -153,15 +206,17 @@ fn main() {
         }
         Commands::TraceParams(args) => {
             run_python_tool("repx_py.cli.trace_params", |cmd| {
-                cmd.arg(args.job_id);
-                cmd.arg("--lab").arg(cli.lab);
+                cmd.arg(&cli.lab);
+                if let Some(job_id) = &args.job_id {
+                    cmd.arg("--job").arg(job_id);
+                }
             });
         }
         Commands::DebugRun(args) => {
             run_python_tool("repx_py.cli.debug_runner", |cmd| {
-                cmd.arg(args.job_id);
-                cmd.arg("--lab").arg(cli.lab);
-                if let Some(c) = args.command {
+                cmd.arg(&args.job_id);
+                cmd.arg("--lab").arg(&cli.lab);
+                if let Some(c) = &args.command {
                     cmd.arg("--command").arg(c);
                 }
             });

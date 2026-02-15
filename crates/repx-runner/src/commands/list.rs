@@ -1,5 +1,8 @@
 use crate::cli::{ListArgs, ListEntity};
+use crate::error::CliError;
 use repx_core::{
+    config,
+    constants::dirs,
     errors::{ConfigError, DomainError},
     lab,
     model::{JobId, Lab, RunId},
@@ -8,17 +11,20 @@ use repx_core::{
 use std::path::Path;
 use std::str::FromStr;
 
-use crate::error::CliError;
-
 pub fn handle_list(args: ListArgs, lab_path: &Path) -> Result<(), CliError> {
     let lab = lab::load_from_path(lab_path)?;
 
     match args.entity.unwrap_or(ListEntity::Runs { name: None }) {
         ListEntity::Runs { name } => match name {
-            Some(n) => list_jobs(&lab, Some(&n)),
+            Some(n) => list_jobs(&lab, Some(&n), None, false),
             None => list_runs(&lab, lab_path),
         },
-        ListEntity::Jobs { name } => list_jobs(&lab, name.as_deref()),
+        ListEntity::Jobs(job_args) => list_jobs(
+            &lab,
+            job_args.name.as_deref(),
+            job_args.stage.as_deref(),
+            job_args.output_paths,
+        ),
         ListEntity::Dependencies { job_id } => list_dependencies(&lab, &job_id),
     }
 }
@@ -35,7 +41,30 @@ fn list_runs(lab: &Lab, lab_path: &Path) -> Result<(), CliError> {
     Ok(())
 }
 
-fn list_jobs(lab: &Lab, run_id_opt: Option<&str>) -> Result<(), CliError> {
+fn list_jobs(
+    lab: &Lab,
+    run_id_opt: Option<&str>,
+    stage_filter: Option<&str>,
+    show_output_paths: bool,
+) -> Result<(), CliError> {
+    let store_path = if show_output_paths {
+        let config = config::load_config()?;
+        let target_name = config.submission_target.as_ref().ok_or_else(|| {
+            CliError::Config(ConfigError::General(
+                "No submission target configured".to_string(),
+            ))
+        })?;
+        let target = config.targets.get(target_name).ok_or_else(|| {
+            CliError::Config(ConfigError::General(format!(
+                "Target '{}' not found in config",
+                target_name
+            )))
+        })?;
+        Some(target.base_path.clone())
+    } else {
+        None
+    };
+
     let run_id_str = match run_id_opt {
         Some(s) => s,
         None => {
@@ -49,8 +78,17 @@ fn list_jobs(lab: &Lab, run_id_opt: Option<&str>) -> Result<(), CliError> {
                 let run = &lab.runs[*run_id];
                 let mut jobs: Vec<_> = run.jobs.iter().collect();
                 jobs.sort();
+
+                let jobs: Vec<_> = if let Some(stage) = stage_filter {
+                    jobs.into_iter()
+                        .filter(|job_id| job_id.0.contains(stage))
+                        .collect()
+                } else {
+                    jobs
+                };
+
                 for job in jobs {
-                    println!("  {}", job);
+                    print_job_line(job, show_output_paths, &store_path);
                 }
             }
             return Ok(());
@@ -86,8 +124,24 @@ fn list_jobs(lab: &Lab, run_id_opt: Option<&str>) -> Result<(), CliError> {
         println!("Jobs in run '{}':", id);
         let mut jobs: Vec<_> = run.jobs.iter().collect();
         jobs.sort();
+
+        let jobs: Vec<_> = if let Some(stage) = stage_filter {
+            jobs.into_iter()
+                .filter(|job_id| job_id.0.contains(stage))
+                .collect()
+        } else {
+            jobs
+        };
+
+        if jobs.is_empty() && stage_filter.is_some() {
+            println!(
+                "  (no jobs matching stage filter '{}')",
+                stage_filter.unwrap()
+            );
+        }
+
         for job in jobs {
-            println!("  {}", job);
+            print_job_line(job, show_output_paths, &store_path);
         }
         Ok(())
     } else {
@@ -117,13 +171,34 @@ fn list_jobs(lab: &Lab, run_id_opt: Option<&str>) -> Result<(), CliError> {
                 }
                 if found_runs.len() == 1 {
                     println!();
-                    return list_jobs(lab, Some(&found_runs[0].0));
+                    return list_jobs(lab, Some(&found_runs[0].0), stage_filter, show_output_paths);
                 }
                 return Ok(());
             }
         }
 
         Err(CliError::Domain(DomainError::TargetNotFound(run_id.0)))
+    }
+}
+
+fn print_job_line(
+    job_id: &JobId,
+    show_output_paths: bool,
+    store_path: &Option<std::path::PathBuf>,
+) {
+    if show_output_paths {
+        if let Some(store) = store_path {
+            let output_path = store.join(dirs::OUTPUTS).join(&job_id.0).join(dirs::OUT);
+            if output_path.exists() {
+                println!("  {}  {}", job_id, output_path.display());
+            } else {
+                println!("  {}  (not executed)", job_id);
+            }
+        } else {
+            println!("  {}", job_id);
+        }
+    } else {
+        println!("  {}", job_id);
     }
 }
 
