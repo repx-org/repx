@@ -112,7 +112,7 @@ pkgs.testers.runNixOSTest {
         server.succeed("grep -rE '400|415' /home/repxuser/repx-store/outputs/*/out/total_sum.txt")
 
         server.succeed("rm -rf /home/repxuser/repx-store/outputs/*")
-    server.succeed("rm -rf /home/repxuser/repx-store/cache/*")
+        server.succeed("rm -rf /home/repxuser/repx-store/cache/*")
 
     run_remote_test("bwrap")
 
