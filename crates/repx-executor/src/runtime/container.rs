@@ -173,11 +173,17 @@ impl ContainerRuntime {
         let request = ctx.request;
         let mut cmd = TokioCommand::new(binary);
 
+        use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
+        let mut hasher = DefaultHasher::new();
+        request.repx_out_dir.hash(&mut hasher);
+        let unique_id = hasher.finish();
+
         let xdg_runtime_dir = request
             .base_path
             .join("repx")
             .join("runtime")
-            .join(format!("podman-{}", request.job_id));
+            .join(format!("podman-{:x}", unique_id));
 
         if !xdg_runtime_dir.exists() {
             std::fs::create_dir_all(&xdg_runtime_dir).map_err(ExecutorError::Io)?;
