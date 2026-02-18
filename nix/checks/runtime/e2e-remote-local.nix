@@ -87,6 +87,45 @@ pkgs.testers.runNixOSTest {
     server.wait_for_unit("sshd.service")
     client.succeed("ssh repxuser@server 'echo SSH_OK'")
 
+    import json
+    import os
+
+    LAB_PATH = "${referenceLab}"
+
+    def get_subset_jobs():
+        print(f"Searching for jobs in {LAB_PATH}")
+        for root, dirs, files in os.walk(LAB_PATH):
+            for file in files:
+                if file.endswith(".json"):
+                    full_path = os.path.join(root, file)
+                    try:
+                        with open(full_path, 'r') as f:
+                            data = json.load(f)
+                            if data.get("name") == "simulation-run" and "jobs" in data:
+                                jobs = data["jobs"]
+                                for jid, jval in jobs.items():
+                                    if "workload-generator" in jval.get("name", ""):
+                                        print(f"Found workload-generator job: {jid}")
+                                        return [jid]
+
+                                if jobs:
+                                    first_job = list(jobs.keys())[0]
+                                    print(f"Workload generator not found. Selecting first available job: {first_job}")
+                                    return [first_job]
+                    except Exception as e:
+                        print(f"Warning: Failed to read or parse {full_path}: {e}")
+        return []
+
+    subset_jobs = get_subset_jobs()
+    if not subset_jobs:
+        print(f"ERROR: Could not find any jobs for 'simulation-run' in {LAB_PATH}.")
+        print(f"Listing files in {LAB_PATH} for debugging:")
+        os.system(f"find {LAB_PATH} -maxdepth 4")
+        raise Exception("Failed to find subset of jobs. Aborting to prevent running full suite (800+ jobs).")
+
+    run_args = " ".join(subset_jobs)
+    print(f"Running subset of jobs: {run_args}")
+
     def run_remote_test(runtime):
         print(f"--- Testing Remote Local: {runtime} ---")
 
@@ -107,7 +146,7 @@ pkgs.testers.runNixOSTest {
         client.succeed("mkdir -p /root/.config/repx")
         client.succeed(f"cat <<EOF > /root/.config/repx/config.toml\n{config}\nEOF")
 
-        client.succeed("repx run simulation-run --lab ${referenceLab}")
+        client.succeed(f"repx run {run_args} --lab ${referenceLab}")
 
         server.succeed("grep -rE '400|415' /home/repxuser/repx-store/outputs/*/out/total_sum.txt")
 
