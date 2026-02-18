@@ -67,6 +67,7 @@ pub struct SubmitOptions {
     pub resources: Option<Resources>,
     pub num_jobs: Option<usize>,
     pub event_sender: Option<Sender<ClientEvent>>,
+    pub continue_on_failure: bool,
 }
 #[derive(Clone)]
 pub struct Client {
