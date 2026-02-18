@@ -11,7 +11,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: DeterminateSystems/nix-installer-action@v11
+      - uses: DeterminateSystems/nix-installer-action@main
 
       - name: Run Fast Checks
         run: |
@@ -66,7 +66,7 @@ jobs:
           - e2e-bwrap-overlay-fallback
     steps:
       - uses: actions/checkout@v4
-      - uses: DeterminateSystems/nix-installer-action@v11
+      - uses: DeterminateSystems/nix-installer-action@main
 
       - name: Run E2E Check
         run: nix build -L .#checks.x86_64-linux.${{ matrix.check }}
@@ -77,7 +77,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: DeterminateSystems/nix-installer-action@v11
+      - uses: DeterminateSystems/nix-installer-action@main
 
       - name: Run Example Checks
         run: nix run -L .#check-repx-examples
