@@ -27,7 +27,7 @@ jobs:
             arch: arm64
     steps:
       - uses: actions/checkout@v4
-      - uses: DeterminateSystems/nix-installer-action@v11
+      - uses: DeterminateSystems/nix-installer-action@main
 
       - name: Get Version
         id: version
@@ -80,7 +80,7 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: DeterminateSystems/nix-installer-action@v11
+      - uses: DeterminateSystems/nix-installer-action@main
 
       - name: Get Version
         id: version
