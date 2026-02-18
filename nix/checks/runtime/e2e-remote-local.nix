@@ -148,7 +148,14 @@ pkgs.testers.runNixOSTest {
 
         client.succeed(f"repx run {run_args} --lab ${referenceLab}")
 
-        server.succeed("grep -rE '400|415' /home/repxuser/repx-store/outputs/*/out/total_sum.txt")
+        rc, _ = server.execute("find /home/repxuser/repx-store/outputs -name SUCCESS | grep .")
+        if rc != 0:
+            print(f"!!! [{runtime}] TEST FAILED. Dumping debug info:")
+            print("\n>>> OUTPUT DIRECTORY TREE:")
+            print(server.succeed("find /home/repxuser/repx-store/outputs -maxdepth 4"))
+            print("\n>>> STDERR LOGS:")
+            print(server.succeed("find /home/repxuser/repx-store/outputs -name 'stderr.log' -exec echo '--- {} ---' \\; -exec cat {} \\;"))
+            raise Exception(f"Run failed for runtime: {runtime}")
 
         server.succeed("rm -rf /home/repxuser/repx-store/outputs/*")
         server.succeed("rm -rf /home/repxuser/repx-store/cache/*")
