@@ -64,6 +64,7 @@ let
       inherit repx-lib;
     };
     large_lab = pkgs.callPackage ./checks/lib/check-large-lab.nix { };
+    buildcommand_size = pkgs.callPackage ./checks/lib/check-buildcommand-size.nix { };
   }
   // (import ./checks/lib/check-deps.nix { inherit pkgs; });
 
