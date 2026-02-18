@@ -904,6 +904,7 @@ impl App {
                 resources: resources_clone,
                 num_jobs,
                 event_sender: None,
+                continue_on_failure: false,
             };
 
             match client_clone.submit_batch_run(

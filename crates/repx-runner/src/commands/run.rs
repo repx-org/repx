@@ -37,12 +37,14 @@ pub fn handle_run(
     };
 
     let target_name_clone = target_name.to_string();
+    let continue_on_failure = args.continue_on_failure;
     let submission_thread = thread::spawn(move || {
         let options = SubmitOptions {
             execution_type: None,
             resources,
             num_jobs,
             event_sender: Some(tx),
+            continue_on_failure,
         };
         client.submit_batch_run(run_specs, &target_name_clone, scheduler, options)
     });

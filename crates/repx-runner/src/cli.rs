@@ -176,6 +176,12 @@ pub struct RunArgs {
         help = "Set the maximum number of parallel jobs for the local scheduler."
     )]
     pub jobs: Option<usize>,
+
+    #[arg(
+        long,
+        help = "Continue running independent jobs even when some jobs fail. Report all failures at the end."
+    )]
+    pub continue_on_failure: bool,
 }
 
 #[derive(Args)]

@@ -240,3 +240,39 @@ fn test_show_commands() {
         .success()
         .stdout(predicates::str::contains("/out"));
 }
+
+#[test]
+fn test_continue_on_failure_runs_independent_jobs() {
+    let harness = TestHarness::new();
+
+    let stage_a_job_id = harness.get_job_id_by_name("stage-A-producer");
+    harness
+        .cmd()
+        .arg("run")
+        .arg(&stage_a_job_id)
+        .assert()
+        .success();
+
+    let stage_a_path = harness.get_job_output_path(&stage_a_job_id);
+    assert!(stage_a_path.join("repx/SUCCESS").exists());
+
+    fs::remove_file(stage_a_path.join("repx/SUCCESS")).unwrap();
+    fs::write(stage_a_path.join("repx/FAIL"), "simulated failure").unwrap();
+
+    let stage_b_job_id = harness.get_job_id_by_name("stage-B-producer");
+    let stage_b_path = harness.get_job_output_path(&stage_b_job_id);
+
+    let _ = fs::remove_dir_all(&stage_b_path);
+
+    harness
+        .cmd()
+        .arg("run")
+        .arg("--continue-on-failure")
+        .arg(&stage_a_job_id)
+        .arg(&stage_b_job_id)
+        .assert()
+        .success();
+
+    assert!(stage_a_path.join("repx/SUCCESS").exists());
+    assert!(stage_b_path.join("repx/SUCCESS").exists());
+}

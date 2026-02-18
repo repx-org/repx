@@ -58,6 +58,9 @@ pub fn submit_local_batch_run(
     )> = vec![];
     let concurrency = options.num_jobs.unwrap_or_else(num_cpus::get);
 
+    let mut failed_jobs: Vec<(JobId, String)> = vec![];
+    let mut blocked_jobs: HashSet<JobId> = HashSet::new();
+
     loop {
         let mut finished_indices = Vec::new();
         for (i, (_id, handle)) in active_handles.iter().enumerate() {
@@ -74,19 +77,43 @@ pub fn submit_local_batch_run(
                     let output = output_res.map_err(|e| ClientError::Config(ConfigError::Io(e)))?;
 
                     if !output.status.success() {
-                        let stderr = String::from_utf8_lossy(&output.stderr);
-                        return Err(ClientError::Config(ConfigError::General(format!(
-                            "Local run script failed: {}",
-                            stderr
-                        ))));
+                        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+                        if options.continue_on_failure {
+                            failed_jobs.push((job_id.clone(), stderr));
+                            for (candidate_id, candidate_job) in &jobs_in_batch {
+                                if jobs_left.contains(candidate_id) {
+                                    let depends_on_failed =
+                                        candidate_job.executables.values().any(|exe| {
+                                            exe.inputs
+                                                .iter()
+                                                .filter_map(|m| m.job_id.as_ref())
+                                                .any(|dep_id| dep_id == &job_id)
+                                        });
+                                    if depends_on_failed {
+                                        blocked_jobs.insert(candidate_id.clone());
+                                    }
+                                }
+                            }
+                        } else {
+                            return Err(ClientError::Config(ConfigError::General(format!(
+                                "Local run script failed: {}",
+                                stderr
+                            ))));
+                        }
+                    } else {
+                        completed_jobs.insert(job_id.clone());
                     }
-                    completed_jobs.insert(job_id.clone());
                 }
                 Err(e) => {
-                    return Err(ClientError::Config(ConfigError::General(format!(
-                        "Failed to launch local process: {:?}",
-                        e
-                    ))));
+                    if options.continue_on_failure {
+                        failed_jobs
+                            .push((job_id, format!("Failed to launch local process: {:?}", e)));
+                    } else {
+                        return Err(ClientError::Config(ConfigError::General(format!(
+                            "Failed to launch local process: {:?}",
+                            e
+                        ))));
+                    }
                 }
             }
         }
@@ -97,7 +124,14 @@ pub fn submit_local_batch_run(
 
         let slots_available = concurrency.saturating_sub(active_handles.len());
 
+        for blocked_id in &blocked_jobs {
+            jobs_left.remove(blocked_id);
+        }
+        blocked_jobs.clear();
+
         if slots_available > 0 && !jobs_left.is_empty() {
+            let failed_job_ids: HashSet<&JobId> = failed_jobs.iter().map(|(id, _)| id).collect();
+
             let mut ready_candidates: Vec<JobId> = jobs_left
                 .iter()
                 .filter(|job_id| {
@@ -122,7 +156,13 @@ pub fn submit_local_batch_run(
                         .filter_map(|m| m.job_id.as_ref())
                         .all(|dep_id| completed_jobs.contains(dep_id));
 
-                    is_schedulable_type && deps_are_met
+                    let no_failed_deps = entrypoint_exe
+                        .inputs
+                        .iter()
+                        .filter_map(|m| m.job_id.as_ref())
+                        .all(|dep_id| !failed_job_ids.contains(dep_id));
+
+                    is_schedulable_type && deps_are_met && no_failed_deps
                 })
                 .cloned()
                 .collect();
@@ -130,6 +170,9 @@ pub fn submit_local_batch_run(
             ready_candidates.sort();
 
             if ready_candidates.is_empty() && active_handles.is_empty() {
+                if !failed_jobs.is_empty() {
+                    break;
+                }
                 return Err(ClientError::Config(ConfigError::General(
                     "Cycle detected in job dependency graph or missing dependency.".to_string(),
                 )));
@@ -274,6 +317,21 @@ pub fn submit_local_batch_run(
         if !active_handles.is_empty() {
             thread::sleep(Duration::from_millis(50));
         }
+    }
+
+    if !failed_jobs.is_empty() {
+        let num_failed = failed_jobs.len();
+        let num_succeeded = submitted_count - num_failed;
+        let num_skipped = total_to_submit - submitted_count;
+
+        let mut error_msg = format!(
+            "{} job(s) failed, {} succeeded, {} skipped due to failed dependencies:\n",
+            num_failed, num_succeeded, num_skipped
+        );
+        for (job_id, stderr) in &failed_jobs {
+            error_msg.push_str(&format!("\n=== {} ===\n{}\n", job_id, stderr));
+        }
+        return Err(ClientError::Config(ConfigError::General(error_msg)));
     }
 
     Ok(format!(
