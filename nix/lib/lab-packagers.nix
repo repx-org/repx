@@ -154,6 +154,107 @@ let
       };
       rootMetadataFilename = builtins.baseNameOf (toString rootMetadata);
 
+      labCoreBuildScript = ''
+        mkdir -p $out/store $out/revision $out/jobs $out/host-tools/${hostToolsHash}/bin
+
+        ${pkgs.lib.concatMapStringsSep "\n" (
+          toolSpec:
+          let
+            inherit (toolSpec) pkg;
+            pkgHash = builtins.baseNameOf (toString pkg);
+          in
+          if toolSpec.bins == null then
+            ''
+              for bin in ${pkg}/bin/*; do
+                binname=$(basename "$bin")
+                storename="${pkgHash}-$binname"
+                if [ ! -f "$out/store/$storename" ]; then
+                  cp "$bin" "$out/store/$storename"
+                fi
+                ln -sf "../../../store/$storename" "$out/host-tools/${hostToolsHash}/bin/$binname"
+              done
+            ''
+          else
+            pkgs.lib.concatMapStringsSep "\n" (
+              binSpec:
+              let
+                srcName = if builtins.isAttrs binSpec then binSpec.src else binSpec;
+                dstName = if builtins.isAttrs binSpec then binSpec.dst else binSpec;
+                storeName = "${pkgHash}-${srcName}";
+              in
+              ''
+                if [ ! -f "$out/store/${storeName}" ]; then
+                  cp ${pkg}/bin/${srcName} "$out/store/${storeName}"
+                fi
+                ln -sf "../../../store/${storeName}" "$out/host-tools/${hostToolsHash}/bin/${dstName}"
+              ''
+            ) toolSpec.bins
+        ) hostToolBinaries}
+
+        ${pkgs.lib.concatMapStringsSep "\n" (
+          jobDrv:
+          let
+            jobBasename = builtins.baseNameOf (toString jobDrv);
+          in
+          ''
+            cp -rL ${jobDrv} $out/jobs/${jobBasename}
+          ''
+        ) allJobDerivations}
+
+        cp ${rootMetadata} "$out/revision/${rootMetadataFilename}"
+
+        ${pkgs.lib.concatMapStringsSep "\n" (drv: ''
+          cp ${drv} "$out/revision/$(basename ${drv})"
+        '') (pkgs.lib.attrValues metadataDrvs)}
+
+        ${pkgs.lib.optionalString includeImages ''
+          mkdir -p $out/images
+
+          ${pkgs.lib.concatMapStringsSep "\n" (
+            imageDrv:
+            let
+              imageBasename = builtins.baseNameOf (toString imageDrv);
+            in
+            ''
+              image_tarball=$(${pkgs.findutils}/bin/find "${imageDrv}" -name "*.tar.gz" -o -name "*.tar" | head -n 1)
+              if [ -z "$image_tarball" ]; then
+                echo "Error: Could not find container image tarball in ${imageDrv}"; exit 1;
+              fi
+
+              image_dir="$out/images/${imageBasename}"
+              mkdir -p "$image_dir"
+
+              temp_extract=$(mktemp -d)
+              ${pkgs.gnutar}/bin/tar -xf "$image_tarball" -C "$temp_extract"
+
+              cp "$temp_extract/manifest.json" "$image_dir/manifest.json"
+
+              for json_file in "$temp_extract"/*.json; do
+                if [ -f "$json_file" ] && [ "$(basename "$json_file")" != "manifest.json" ]; then
+                  cp "$json_file" "$image_dir/"
+                fi
+              done
+
+              layer_paths=$(${pkgs.jq}/bin/jq -r '.[0].Layers[]' "$image_dir/manifest.json")
+
+              for layer_path in $layer_paths; do
+                layer_hash=$(dirname "$layer_path")
+                layer_store_name="''${layer_hash}-layer.tar"
+
+                if [ ! -f "$out/store/$layer_store_name" ]; then
+                  cp "$temp_extract/$layer_path" "$out/store/$layer_store_name"
+                fi
+
+                mkdir -p "$image_dir/$layer_hash"
+                ln -s "../../../store/$layer_store_name" "$image_dir/$layer_hash/layer.tar"
+              done
+
+              rm -rf "$temp_extract"
+            ''
+          ) imageDerivations}
+        ''}
+      '';
+
       labCore = pkgs.stdenv.mkDerivation {
         name = "hpc-lab-core";
         version = repxVersion;
@@ -162,105 +263,11 @@ let
           pkgs.jq
         ];
 
+        inherit labCoreBuildScript;
+        passAsFile = [ "labCoreBuildScript" ];
+
         buildCommand = ''
-          mkdir -p $out/store $out/revision $out/jobs $out/host-tools/${hostToolsHash}/bin
-
-          ${pkgs.lib.concatMapStringsSep "\n" (
-            toolSpec:
-            let
-              inherit (toolSpec) pkg;
-              pkgHash = builtins.baseNameOf (toString pkg);
-            in
-            if toolSpec.bins == null then
-              ''
-                for bin in ${pkg}/bin/*; do
-                  binname=$(basename "$bin")
-                  storename="${pkgHash}-$binname"
-                  if [ ! -f "$out/store/$storename" ]; then
-                    cp "$bin" "$out/store/$storename"
-                  fi
-                  ln -sf "../../../store/$storename" "$out/host-tools/${hostToolsHash}/bin/$binname"
-                done
-              ''
-            else
-              pkgs.lib.concatMapStringsSep "\n" (
-                binSpec:
-                let
-                  srcName = if builtins.isAttrs binSpec then binSpec.src else binSpec;
-                  dstName = if builtins.isAttrs binSpec then binSpec.dst else binSpec;
-                  storeName = "${pkgHash}-${srcName}";
-                in
-                ''
-                  if [ ! -f "$out/store/${storeName}" ]; then
-                    cp ${pkg}/bin/${srcName} "$out/store/${storeName}"
-                  fi
-                  ln -sf "../../../store/${storeName}" "$out/host-tools/${hostToolsHash}/bin/${dstName}"
-                ''
-              ) toolSpec.bins
-          ) hostToolBinaries}
-
-          ${pkgs.lib.concatMapStringsSep "\n" (
-            jobDrv:
-            let
-              jobBasename = builtins.baseNameOf (toString jobDrv);
-            in
-            ''
-              cp -rL ${jobDrv} $out/jobs/${jobBasename}
-            ''
-          ) allJobDerivations}
-
-          cp ${rootMetadata} "$out/revision/${rootMetadataFilename}"
-
-          ${pkgs.lib.concatMapStringsSep "\n" (drv: ''
-            cp ${drv} "$out/revision/$(basename ${drv})"
-          '') (pkgs.lib.attrValues metadataDrvs)}
-
-          ${pkgs.lib.optionalString includeImages ''
-            mkdir -p $out/images
-
-            ${pkgs.lib.concatMapStringsSep "\n" (
-              imageDrv:
-              let
-                imageBasename = builtins.baseNameOf (toString imageDrv);
-              in
-              ''
-                image_tarball=$(${pkgs.findutils}/bin/find "${imageDrv}" -name "*.tar.gz" -o -name "*.tar" | head -n 1)
-                if [ -z "$image_tarball" ]; then
-                  echo "Error: Could not find container image tarball in ${imageDrv}"; exit 1;
-                fi
-
-                image_dir="$out/images/${imageBasename}"
-                mkdir -p "$image_dir"
-
-                temp_extract=$(mktemp -d)
-                ${pkgs.gnutar}/bin/tar -xf "$image_tarball" -C "$temp_extract"
-
-                cp "$temp_extract/manifest.json" "$image_dir/manifest.json"
-
-                for json_file in "$temp_extract"/*.json; do
-                  if [ -f "$json_file" ] && [ "$(basename "$json_file")" != "manifest.json" ]; then
-                    cp "$json_file" "$image_dir/"
-                  fi
-                done
-
-                layer_paths=$(${pkgs.jq}/bin/jq -r '.[0].Layers[]' "$image_dir/manifest.json")
-
-                for layer_path in $layer_paths; do
-                  layer_hash=$(dirname "$layer_path")
-                  layer_store_name="''${layer_hash}-layer.tar"
-
-                  if [ ! -f "$out/store/$layer_store_name" ]; then
-                    cp "$temp_extract/$layer_path" "$out/store/$layer_store_name"
-                  fi
-
-                  mkdir -p "$image_dir/$layer_hash"
-                  ln -s "../../../store/$layer_store_name" "$image_dir/$layer_hash/layer.tar"
-                done
-
-                rm -rf "$temp_extract"
-              ''
-            ) imageDerivations}
-          ''}
+          source "$labCoreBuildScriptPath"
         '';
       };
 
