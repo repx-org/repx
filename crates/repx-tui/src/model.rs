@@ -76,6 +76,8 @@ pub struct TuiJob {
     pub name: String,
     pub run: String,
     pub params: serde_json::Value,
+    #[serde(default)]
+    pub params_str: String,
     pub status: String,
     pub context_depends_on: String,
     pub context_dependents: String,
@@ -95,6 +97,7 @@ pub struct TuiDisplayRow {
     #[allow(dead_code)]
     pub parent_prefix: String,
     pub is_last_child: bool,
+    pub cached_tree_prefix: Option<String>,
 }
 #[derive(Clone, Debug, PartialEq)]
 pub enum TargetState {
@@ -299,6 +302,7 @@ mod tests {
             name: "Test Job".to_string(),
             run: "run-test".to_string(),
             params: serde_json::json!({"key": "value", "count": 42}),
+            params_str: "count=42,key=value".to_string(),
             status: "pending".to_string(),
             context_depends_on: "job-122".to_string(),
             context_dependents: "job-124, job-125".to_string(),

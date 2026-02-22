@@ -120,6 +120,7 @@ pub struct App {
     pub pending_action: Option<ExternalAction>,
     pub system_logs: Vec<String>,
     system_log_rx: Receiver<String>,
+    pending_context_job_id: Option<JobId>,
 }
 
 impl App {
@@ -253,6 +254,7 @@ impl App {
             resources,
             focused_panel: PanelFocus::Jobs,
             pending_action: None,
+            pending_context_job_id: None,
         };
 
         app.jobs_state.init_from_lab(&app.lab);
@@ -433,13 +435,7 @@ impl App {
             if let Some(last_segment) = row_id.split('/').next_back() {
                 if let Some(job_id_str) = last_segment.strip_prefix("job:") {
                     let job_id = JobId(job_id_str.to_string());
-
-                    let master_index = self
-                        .jobs_state
-                        .jobs
-                        .iter()
-                        .position(|j| j.full_id == job_id);
-                    self.update_context_for_job(master_index);
+                    self.pending_context_job_id = Some(job_id.clone());
                     job_id_to_watch = Some(job_id);
                 }
             }
@@ -448,7 +444,15 @@ impl App {
         if let Some(job_id) = job_id_to_watch {
             self.log_cmd_tx.send(LogPollerCommand::Watch(job_id)).ok();
         } else {
+            self.pending_context_job_id = None;
             self.log_cmd_tx.send(LogPollerCommand::Stop).ok();
+        }
+    }
+
+    pub fn process_pending_context_update(&mut self) {
+        if let Some(job_id) = self.pending_context_job_id.take() {
+            let master_index = self.jobs_state.job_index_map.get(&job_id).copied();
+            self.update_context_for_job(master_index);
         }
     }
 
@@ -1083,18 +1087,13 @@ impl App {
                         .map(|d| d.short_id())
                         .collect::<Vec<_>>()
                         .join(", ");
+
                     let dependents: Vec<_> = self
-                        .lab
-                        .jobs
-                        .iter()
-                        .filter(|(_, j)| {
-                            j.executables
-                                .values()
-                                .flat_map(|e| &e.inputs)
-                                .any(|m| m.job_id.as_ref() == Some(&job.full_id))
-                        })
-                        .map(|(id, _)| id.short_id())
-                        .collect();
+                        .jobs_state
+                        .dependents_cache
+                        .get(&job.full_id)
+                        .map(|deps| deps.iter().map(|id| id.short_id()).collect())
+                        .unwrap_or_default();
                     job.context_dependents = dependents.join(", ");
                 }
             }

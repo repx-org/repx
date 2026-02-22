@@ -715,6 +715,44 @@ fn draw_right_column(f: &mut Frame, area: Rect, app: &mut App) {
         .split(inner_area);
     let table_area = right_chunks[0];
     let scrollbar_area = right_chunks[1];
+
+    let viewport_height = table_area.height.saturating_sub(1) as usize;
+    app.jobs_state.viewport_height = viewport_height;
+
+    let total_rows = app.jobs_state.display_rows.len();
+    let selected_idx = app.jobs_state.table_state.selected().unwrap_or(0);
+
+    let buffer = 5;
+    let start = selected_idx.saturating_sub(viewport_height / 2 + buffer);
+    let end = (start + viewport_height + buffer * 2).min(total_rows);
+    let visible_range = start..end;
+
+    let rows = if app.jobs_state.is_tree_view {
+        build_tree_rows(
+            app,
+            &app.jobs_state.display_rows[visible_range.clone()],
+            &app.jobs_state.selected_jobs,
+            &app.jobs_state.collapsed_nodes,
+            app.lab(),
+            None,
+        )
+    } else {
+        build_flat_rows(
+            app,
+            &app.jobs_state.display_rows[visible_range.clone()],
+            &app.jobs_state.selected_jobs,
+            None,
+        )
+    };
+
+    let adjusted_selected = if selected_idx >= start && selected_idx < end {
+        Some(selected_idx - start)
+    } else {
+        None
+    };
+    let mut virtual_table_state = ratatui::widgets::TableState::default();
+    virtual_table_state.select(adjusted_selected);
+
     let jobs_table = if app.jobs_state.is_tree_view {
         let header = Row::new(vec!["", "jobid:", "Item:", "Parameters:", "Status:"])
             .style(Style::default().add_modifier(Modifier::BOLD));
@@ -725,13 +763,6 @@ fn draw_right_column(f: &mut Frame, area: Rect, app: &mut App) {
             Constraint::Min(20),
             Constraint::Length(10),
         ];
-        let rows = build_tree_rows(
-            app,
-            &app.jobs_state.display_rows,
-            &app.jobs_state.selected_jobs,
-            &app.jobs_state.collapsed_nodes,
-            app.lab(),
-        );
         Table::new(rows, constraints)
             .header(header.height(1))
             .row_highlight_style(if app.focused_panel == PanelFocus::Jobs {
@@ -761,11 +792,6 @@ fn draw_right_column(f: &mut Frame, area: Rect, app: &mut App) {
             Constraint::Min(20),
             Constraint::Length(10),
         ];
-        let rows = build_flat_rows(
-            app,
-            &app.jobs_state.display_rows,
-            &app.jobs_state.selected_jobs,
-        );
         Table::new(rows, constraints)
             .header(header.height(1))
             .row_highlight_style(if app.focused_panel == PanelFocus::Jobs {
@@ -778,10 +804,7 @@ fn draw_right_column(f: &mut Frame, area: Rect, app: &mut App) {
             })
             .highlight_symbol("")
     };
-    f.render_stateful_widget(jobs_table, table_area, &mut app.jobs_state.table_state);
-
-    let viewport_height = table_area.height.saturating_sub(1) as usize;
-    app.jobs_state.viewport_height = viewport_height;
+    f.render_stateful_widget(jobs_table, table_area, &mut virtual_table_state);
 
     let mut scrollbar_state = ScrollbarState::default()
         .content_length(filtered_count)

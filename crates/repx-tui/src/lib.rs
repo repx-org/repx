@@ -299,6 +299,7 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<Stdout>>, app: &mut App) -> 
         app.check_for_log_updates();
         app.check_for_submission_updates();
         app.check_for_system_log_updates();
+        app.process_pending_context_update();
 
         if last_tick.elapsed() >= app.tick_rate {
             app.on_tick();
