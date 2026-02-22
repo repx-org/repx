@@ -625,18 +625,30 @@ impl JobsState {
         if self.viewport_height == 0 || self.display_rows.is_empty() {
             return;
         }
+        let half_page = self.viewport_height / 2;
         let current = self.table_state.selected().unwrap_or(0);
-        let next = (current + self.viewport_height / 2).min(self.display_rows.len() - 1);
+        let max_idx = self.display_rows.len() - 1;
+        let next = (current + half_page).min(max_idx);
         self.table_state.select(Some(next));
+
+        let current_offset = self.table_state.offset();
+        let new_offset = (current_offset + half_page)
+            .min(max_idx.saturating_sub(self.viewport_height.saturating_sub(1)));
+        *self.table_state.offset_mut() = new_offset;
     }
 
     pub fn scroll_up_half(&mut self) {
         if self.viewport_height == 0 || self.display_rows.is_empty() {
             return;
         }
+        let half_page = self.viewport_height / 2;
         let current = self.table_state.selected().unwrap_or(0);
-        let next = current.saturating_sub(self.viewport_height / 2);
+        let next = current.saturating_sub(half_page);
         self.table_state.select(Some(next));
+
+        let current_offset = self.table_state.offset();
+        let new_offset = current_offset.saturating_sub(half_page);
+        *self.table_state.offset_mut() = new_offset;
     }
 
     fn parse_filter_text(&self, text: &str) -> Vec<ParsedFilter> {
