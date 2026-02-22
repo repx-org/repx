@@ -26,6 +26,11 @@ pub fn handle_key_event(key: KeyEvent, app: &mut App) {
         return;
     }
 
+    if app.input_mode == InputMode::ZMenu {
+        handle_z_menu_key_event(key, app);
+        return;
+    }
+
     match key.code {
         KeyCode::Char('q') => app.quit(),
         KeyCode::Char(' ') => {
@@ -34,6 +39,10 @@ pub fn handle_key_event(key: KeyEvent, app: &mut App) {
         }
         KeyCode::Char('g') => {
             app.input_mode = InputMode::GMenu;
+            return;
+        }
+        KeyCode::Char('z') => {
+            app.input_mode = InputMode::ZMenu;
             return;
         }
         KeyCode::Char('2') => {
@@ -174,6 +183,36 @@ fn handle_g_menu_key_event(key: KeyEvent, app: &mut App) {
         _ => {}
     }
 }
+
+fn handle_z_menu_key_event(key: KeyEvent, app: &mut App) {
+    match key.code {
+        KeyCode::Char('a') => {
+            app.toggle_all_folds();
+            app.input_mode = InputMode::Normal;
+        }
+        KeyCode::Char('g') => {
+            app.toggle_all_groups();
+            app.input_mode = InputMode::Normal;
+        }
+        KeyCode::Char('r') => {
+            app.toggle_all_runs();
+            app.input_mode = InputMode::Normal;
+        }
+        KeyCode::Char('o') => {
+            app.expand_all();
+            app.input_mode = InputMode::Normal;
+        }
+        KeyCode::Char('c') => {
+            app.collapse_all();
+            app.input_mode = InputMode::Normal;
+        }
+        KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char(' ') => {
+            app.input_mode = InputMode::Normal;
+        }
+        _ => {}
+    }
+}
+
 fn handle_editing_mode_key_event(key: KeyEvent, app: &mut App) {
     match key.code {
         KeyCode::Char(c) => {

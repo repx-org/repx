@@ -30,6 +30,7 @@ pub enum InputMode {
     Editing,
     SpaceMenu,
     GMenu,
+    ZMenu,
 }
 
 #[derive(Debug, PartialEq, Clone, Copy)]
@@ -569,6 +570,46 @@ impl App {
                 self.jobs_state.rebuild_display_list(&self.lab);
             }
         }
+    }
+
+    pub fn expand_all(&mut self) {
+        if !self.jobs_state.is_tree_view {
+            return;
+        }
+        self.jobs_state.expand_all();
+        self.jobs_state.rebuild_display_list(&self.lab);
+    }
+
+    pub fn collapse_all(&mut self) {
+        if !self.jobs_state.is_tree_view {
+            return;
+        }
+        self.jobs_state.collapse_all(&self.lab);
+        self.jobs_state.rebuild_display_list(&self.lab);
+    }
+
+    pub fn toggle_all_folds(&mut self) {
+        if !self.jobs_state.is_tree_view {
+            return;
+        }
+        self.jobs_state.toggle_all(&self.lab);
+        self.jobs_state.rebuild_display_list(&self.lab);
+    }
+
+    pub fn toggle_all_groups(&mut self) {
+        if !self.jobs_state.is_tree_view {
+            return;
+        }
+        self.jobs_state.toggle_all_groups(&self.lab);
+        self.jobs_state.rebuild_display_list(&self.lab);
+    }
+
+    pub fn toggle_all_runs(&mut self) {
+        if !self.jobs_state.is_tree_view {
+            return;
+        }
+        self.jobs_state.toggle_all_runs(&self.lab);
+        self.jobs_state.rebuild_display_list(&self.lab);
     }
 
     pub fn clear_selection(&mut self) {
