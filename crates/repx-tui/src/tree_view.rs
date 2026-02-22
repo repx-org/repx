@@ -2,7 +2,6 @@ use crate::{
     app::App,
     model::{TuiDisplayRow, TuiRowItem},
     style::{get_style, status_style},
-    widgets::tree_prefix::tree_prefix,
 };
 use ratatui::{
     prelude::*,
@@ -60,24 +59,17 @@ fn selector_cell<'a>(app: &App, is_selected: bool) -> Cell<'a> {
     }
 }
 
-fn expand_marker(is_expanded: bool, has_children: bool) -> &'static str {
-    if has_children {
-        if is_expanded {
-            "[-]"
-        } else {
-            "[+]"
-        }
-    } else {
-        "───"
-    }
-}
-
 pub fn build_flat_rows<'a>(
     app: &App,
     display_rows: &'a [TuiDisplayRow],
     selected_jobs: &HashSet<String>,
+    visible_range: Option<std::ops::Range<usize>>,
 ) -> Vec<Row<'a>> {
-    display_rows
+    let range = visible_range.unwrap_or(0..display_rows.len());
+    let start = range.start.min(display_rows.len());
+    let end = range.end.min(display_rows.len());
+
+    display_rows[start..end]
         .iter()
         .map(|row_data| {
             let (job, is_selected) = if let TuiRowItem::Job { job } = &row_data.item {
@@ -87,16 +79,16 @@ pub fn build_flat_rows<'a>(
             };
 
             let status = Cell::from(Span::styled(
-                job.status.clone(),
+                job.status.as_str(),
                 status_style(app, &job.status),
             ));
 
             Row::new(vec![
                 selector_cell(app, is_selected),
-                Cell::from(job.id.clone()),
-                Cell::from(job.name.clone()),
-                Cell::from(job.run.clone()),
-                Cell::from(format_params_single_line(&job.params)),
+                Cell::from(job.id.as_str()),
+                Cell::from(job.name.as_str()),
+                Cell::from(job.run.as_str()),
+                Cell::from(job.params_str.as_str()),
                 status,
             ])
         })
@@ -107,30 +99,18 @@ pub fn build_tree_rows<'a>(
     app: &App,
     display_rows: &'a [TuiDisplayRow],
     selected_jobs: &HashSet<String>,
-    collapsed_nodes: &HashSet<String>,
-    lab: &Lab,
+    _collapsed_nodes: &HashSet<String>,
+    _lab: &Lab,
+    _visible_range: Option<std::ops::Range<usize>>,
 ) -> Vec<Row<'a>> {
-    let mut rows = Vec::new();
-    let mut ancestor_is_last: Vec<bool> = Vec::new();
+    let mut rows = Vec::with_capacity(display_rows.len());
 
     for row_data in display_rows {
         let is_selected = selected_jobs.contains(&row_data.id);
-
-        while ancestor_is_last.len() > row_data.depth {
-            ancestor_is_last.pop();
-        }
+        let prefix = row_data.cached_tree_prefix.as_deref().unwrap_or("");
 
         match &row_data.item {
             TuiRowItem::Group { name } => {
-                let is_expanded = !collapsed_nodes.contains(&row_data.id);
-                let marker = expand_marker(is_expanded, true);
-                let prefix = tree_prefix(
-                    &ancestor_is_last,
-                    row_data.depth,
-                    row_data.is_last_child,
-                    marker,
-                );
-
                 let group_style = Style::default()
                     .add_modifier(Modifier::BOLD)
                     .add_modifier(Modifier::UNDERLINED);
@@ -139,73 +119,45 @@ pub fn build_tree_rows<'a>(
                     selector_cell(app, is_selected),
                     Cell::from(""),
                     Cell::from(Line::from(vec![
-                        Span::raw(prefix),
+                        Span::raw(prefix.to_string()),
                         Span::styled(format!("@{}", name), group_style),
                     ])),
                     Cell::from(""),
                     Cell::from(""),
                 ]));
-
-                ancestor_is_last.push(row_data.is_last_child);
             }
 
             TuiRowItem::Run { id } => {
-                let run = lab.runs.get(id).unwrap();
-                let has_children = !run.jobs.is_empty();
-                let is_expanded = !collapsed_nodes.contains(&row_data.id);
-                let marker = expand_marker(is_expanded, has_children);
-                let prefix = tree_prefix(
-                    &ancestor_is_last,
-                    row_data.depth,
-                    row_data.is_last_child,
-                    marker,
-                );
-
                 let run_style = Style::default().add_modifier(Modifier::BOLD);
 
                 rows.push(Row::new(vec![
                     selector_cell(app, is_selected),
                     Cell::from(""),
                     Cell::from(Line::from(vec![
-                        Span::raw(prefix),
+                        Span::raw(prefix.to_string()),
                         Span::styled(id.to_string(), run_style),
                     ])),
                     Cell::from(""),
                     Cell::from(""),
                 ]));
-
-                ancestor_is_last.push(row_data.is_last_child);
             }
 
             TuiRowItem::Job { job } => {
-                let lab_job = lab.jobs.get(&job.full_id).unwrap();
-                let has_children = lab_job.executables.values().any(|e| !e.inputs.is_empty());
-                let is_expanded = !collapsed_nodes.contains(&row_data.id);
-                let marker = expand_marker(is_expanded, has_children);
-                let prefix = tree_prefix(
-                    &ancestor_is_last,
-                    row_data.depth,
-                    row_data.is_last_child,
-                    marker,
-                );
-
                 let status = Cell::from(Span::styled(
-                    job.status.clone(),
+                    job.status.as_str(),
                     status_style(app, &job.status),
                 ));
 
                 rows.push(Row::new(vec![
                     selector_cell(app, is_selected),
-                    Cell::from(job.id.clone()),
+                    Cell::from(job.id.as_str()),
                     Cell::from(Line::from(vec![
-                        Span::raw(prefix),
-                        Span::raw(job.name.clone()),
+                        Span::raw(prefix.to_string()),
+                        Span::raw(job.name.as_str()),
                     ])),
-                    Cell::from(format_params_single_line(&job.params)),
+                    Cell::from(job.params_str.as_str()),
                     status,
                 ]));
-
-                ancestor_is_last.push(row_data.is_last_child);
             }
         }
     }

@@ -3,7 +3,7 @@ use crate::model::{TuiDisplayRow, TuiJob, TuiRowItem};
 use ratatui::widgets::TableState;
 use repx_core::engine::{self, JobStatus};
 use repx_core::model::{JobId, Lab};
-use std::collections::{HashSet, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 #[derive(Debug, Clone)]
 enum FilterType {
@@ -32,6 +32,8 @@ pub struct JobsState {
     pub is_reversed: bool,
     pub is_tree_view: bool,
     pub viewport_height: usize,
+    pub job_index_map: HashMap<JobId, usize>,
+    pub dependents_cache: HashMap<JobId, Vec<JobId>>,
 }
 
 impl Default for JobsState {
@@ -54,11 +56,15 @@ impl JobsState {
             is_reversed: false,
             is_tree_view: true,
             viewport_height: 0,
+            job_index_map: HashMap::new(),
+            dependents_cache: HashMap::new(),
         }
     }
 
     pub fn init_from_lab(&mut self, lab: &Lab) {
         let mut all_jobs = Vec::new();
+        let mut job_index_map = HashMap::new();
+
         let mut sorted_runs: Vec<_> = lab.runs.iter().collect();
         sorted_runs.sort_by_key(|(k, _)| (*k).clone());
         for (run_id, run) in sorted_runs {
@@ -77,15 +83,33 @@ impl JobsState {
                     name: name_part.to_string(),
                     run: run_id.to_string(),
                     params: job_def.params.clone(),
+                    params_str: crate::tree_view::format_params_single_line(&job_def.params),
                     status: "Unknown".to_string(),
                     context_depends_on: "-".to_string(),
                     context_dependents: "-".to_string(),
                     logs: vec!["Awaiting update...".to_string()],
                 };
+                job_index_map.insert(job_id.clone(), all_jobs.len());
                 all_jobs.push(tui_job);
             }
         }
         self.jobs = all_jobs;
+        self.job_index_map = job_index_map;
+
+        let mut dependents_cache: HashMap<JobId, Vec<JobId>> = HashMap::new();
+        for (job_id, job_def) in &lab.jobs {
+            for exec in job_def.executables.values() {
+                for input in &exec.inputs {
+                    if let Some(dep_id) = &input.job_id {
+                        dependents_cache
+                            .entry(dep_id.clone())
+                            .or_default()
+                            .push(job_id.clone());
+                    }
+                }
+            }
+        }
+        self.dependents_cache = dependents_cache;
     }
 
     pub fn reset_statuses(&mut self) {
@@ -160,6 +184,7 @@ impl JobsState {
 
         if self.is_tree_view {
             self.build_tree_view(lab, &filters);
+            self.compute_tree_prefixes(lab);
         } else {
             self.build_flat_list(&filters);
         }
@@ -169,6 +194,49 @@ impl JobsState {
         }
 
         self.restore_selection(previously_selected_id);
+    }
+
+    fn compute_tree_prefixes(&mut self, lab: &Lab) {
+        use crate::widgets::tree_prefix::tree_prefix;
+
+        let mut ancestor_is_last: Vec<bool> = Vec::new();
+
+        for row in &mut self.display_rows {
+            while ancestor_is_last.len() > row.depth {
+                ancestor_is_last.pop();
+            }
+
+            let (has_children, is_expanded) = match &row.item {
+                TuiRowItem::Group { .. } => (true, !self.collapsed_nodes.contains(&row.id)),
+                TuiRowItem::Run { id } => {
+                    let run = lab.runs.get(id);
+                    let has = run.map(|r| !r.jobs.is_empty()).unwrap_or(false);
+                    (has, !self.collapsed_nodes.contains(&row.id))
+                }
+                TuiRowItem::Job { job } => {
+                    let lab_job = lab.jobs.get(&job.full_id);
+                    let has = lab_job
+                        .map(|j| j.executables.values().any(|e| !e.inputs.is_empty()))
+                        .unwrap_or(false);
+                    (has, !self.collapsed_nodes.contains(&row.id))
+                }
+            };
+
+            let marker = if has_children {
+                if is_expanded {
+                    "[-]"
+                } else {
+                    "[+]"
+                }
+            } else {
+                "───"
+            };
+
+            let prefix = tree_prefix(&ancestor_is_last, row.depth, row.is_last_child, marker);
+            row.cached_tree_prefix = Some(prefix);
+
+            ancestor_is_last.push(row.is_last_child);
+        }
     }
 
     fn build_flat_list(&mut self, filters: &[ParsedFilter]) {
@@ -190,6 +258,7 @@ impl JobsState {
                 depth: 0,
                 parent_prefix: "".to_string(),
                 is_last_child: false,
+                cached_tree_prefix: None,
             });
         }
     }
@@ -234,6 +303,7 @@ impl JobsState {
                 depth: 0,
                 is_last_child: i == num_runs - 1,
                 parent_prefix: "".to_string(),
+                cached_tree_prefix: None,
             });
             if !self.collapsed_nodes.contains(&run_unique_id) {
                 self.add_run_children(
@@ -313,6 +383,7 @@ impl JobsState {
                 depth: 0,
                 is_last_child: is_last_top,
                 parent_prefix: "".to_string(),
+                cached_tree_prefix: None,
             });
 
             if !self.collapsed_nodes.contains(&group_unique_id) {
@@ -326,6 +397,7 @@ impl JobsState {
                         depth: 1,
                         is_last_child: run_is_last,
                         parent_prefix: "".to_string(),
+                        cached_tree_prefix: None,
                     });
                     if !self.collapsed_nodes.contains(&run_unique_id) {
                         self.add_run_children(
@@ -352,6 +424,7 @@ impl JobsState {
                 depth: 0,
                 is_last_child: is_last_top,
                 parent_prefix: "".to_string(),
+                cached_tree_prefix: None,
             });
             if !self.collapsed_nodes.contains(&run_unique_id) {
                 self.add_run_children(
@@ -477,7 +550,11 @@ impl JobsState {
         parent_path: &str,
     ) {
         let job_instance_id = format!("{}/job:{}", parent_path, job_id);
-        let tui_job = self.jobs.iter().find(|j| &j.full_id == job_id).unwrap();
+        let tui_job = self
+            .job_index_map
+            .get(job_id)
+            .and_then(|&idx| self.jobs.get(idx))
+            .unwrap();
 
         self.display_rows.push(TuiDisplayRow {
             item: TuiRowItem::Job {
@@ -487,6 +564,7 @@ impl JobsState {
             depth,
             is_last_child: is_last,
             parent_prefix: prefix.clone(),
+            cached_tree_prefix: None,
         });
 
         if !self.collapsed_nodes.contains(&job_instance_id) {
