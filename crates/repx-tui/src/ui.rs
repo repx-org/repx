@@ -721,16 +721,16 @@ fn draw_right_column(f: &mut Frame, area: Rect, app: &mut App) {
 
     let total_rows = app.jobs_state.display_rows.len();
     let selected_idx = app.jobs_state.table_state.selected().unwrap_or(0);
+    let current_offset = app.jobs_state.table_state.offset();
 
     let buffer = 5;
-    let start = selected_idx.saturating_sub(viewport_height / 2 + buffer);
-    let end = (start + viewport_height + buffer * 2).min(total_rows);
-    let visible_range = start..end;
+    let start = current_offset.saturating_sub(buffer);
+    let end = (current_offset + viewport_height + buffer * 2).min(total_rows);
 
     let rows = if app.jobs_state.is_tree_view {
         build_tree_rows(
             app,
-            &app.jobs_state.display_rows[visible_range.clone()],
+            &app.jobs_state.display_rows[start..end],
             &app.jobs_state.selected_jobs,
             &app.jobs_state.collapsed_nodes,
             app.lab(),
@@ -739,7 +739,7 @@ fn draw_right_column(f: &mut Frame, area: Rect, app: &mut App) {
     } else {
         build_flat_rows(
             app,
-            &app.jobs_state.display_rows[visible_range.clone()],
+            &app.jobs_state.display_rows[start..end],
             &app.jobs_state.selected_jobs,
             None,
         )
@@ -747,11 +747,16 @@ fn draw_right_column(f: &mut Frame, area: Rect, app: &mut App) {
 
     let adjusted_selected = if selected_idx >= start && selected_idx < end {
         Some(selected_idx - start)
+    } else if selected_idx < start {
+        Some(0)
     } else {
-        None
+        Some(end - start - 1)
     };
-    let mut virtual_table_state = ratatui::widgets::TableState::default();
-    virtual_table_state.select(adjusted_selected);
+    let adjusted_offset = current_offset.saturating_sub(start);
+
+    let mut virtual_table_state = ratatui::widgets::TableState::default()
+        .with_selected(adjusted_selected)
+        .with_offset(adjusted_offset);
 
     let jobs_table = if app.jobs_state.is_tree_view {
         let header = Row::new(vec!["", "jobid:", "Item:", "Parameters:", "Status:"])
@@ -805,6 +810,9 @@ fn draw_right_column(f: &mut Frame, area: Rect, app: &mut App) {
             .highlight_symbol("")
     };
     f.render_stateful_widget(jobs_table, table_area, &mut virtual_table_state);
+
+    let new_offset = start + virtual_table_state.offset();
+    *app.jobs_state.table_state.offset_mut() = new_offset;
 
     let mut scrollbar_state = ScrollbarState::default()
         .content_length(filtered_count)

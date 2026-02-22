@@ -1103,6 +1103,7 @@ impl App {
     pub fn go_to_top(&mut self) {
         if !self.jobs_state.display_rows.is_empty() {
             self.jobs_state.table_state.select(Some(0));
+            *self.jobs_state.table_state.offset_mut() = 0;
             self.on_selection_change();
         }
     }
@@ -1111,6 +1112,9 @@ impl App {
         if !self.jobs_state.display_rows.is_empty() {
             let last_index = self.jobs_state.display_rows.len() - 1;
             self.jobs_state.table_state.select(Some(last_index));
+            let viewport = self.jobs_state.viewport_height;
+            let new_offset = last_index.saturating_sub(viewport.saturating_sub(1));
+            *self.jobs_state.table_state.offset_mut() = new_offset;
             self.on_selection_change();
         }
     }
