@@ -13,6 +13,8 @@ const RANK_SEP: &str = "0.6";
 const NODE_SEP: &str = "0.4";
 const JOB_FONT_SIZE: &str = "12";
 const COLOR_CLUSTER_BORDER: &str = "#334155";
+const COLOR_GROUP_BORDER: &str = "#1e40af";
+const GROUP_FONT_SIZE: &str = "16";
 const PARAM_SHAPE: &str = "note";
 const PARAM_FILL: &str = "#FFFFFF";
 const PARAM_BORDER: &str = "#94a3b8";
@@ -181,86 +183,67 @@ impl<'a> VizGenerator<'a> {
             }
         }
 
-        for (run_name, groups) in grouped_jobs {
-            let clean_run = clean_id(&run_name);
-            dot.push_str(&format!("    subgraph cluster_{} {{\n", clean_run));
-            dot.push_str(&format!("        label=\"Run: {}\";\n", run_name));
-            dot.push_str("        style=\"dashed,rounded\";\n");
-            dot.push_str(&format!("        color=\"{}\";\n", COLOR_CLUSTER_BORDER));
-            dot.push_str("        fontsize=\"14\";\n");
-            dot.push_str("        margin=\"16\";\n");
+        let has_groups = !self.lab.groups.is_empty();
+        let mut runs_in_groups: HashSet<String> = HashSet::new();
 
-            for (group_name, job_ids) in groups {
-                let count = job_ids.len();
-                let job_label = format!("{}\\n(x{})", group_name, count);
-                let fill_color = get_fill_color(&group_name);
-                let clean_group = clean_id(&group_name);
-                let unique_node_id = format!("{}_{}", clean_run, clean_group);
+        let mut node_prefixes: Vec<String> = Vec::new();
 
-                dot.push_str(&format!("        {} [\n", unique_node_id));
-                dot.push_str(&format!("            label=\"{}\",\n", job_label));
-                dot.push_str("            shape=\"box\",\n");
-                dot.push_str("            style=\"filled,rounded\",\n");
-                dot.push_str(&format!("            fontsize=\"{}\",\n", JOB_FONT_SIZE));
-                dot.push_str(&format!("            fillcolor=\"{}\",\n", fill_color));
-                dot.push_str("            penwidth=\"1\"\n");
-                dot.push_str("        ];\n");
+        if has_groups {
+            let mut sorted_groups: Vec<_> = self.lab.groups.iter().collect();
+            sorted_groups.sort_by_key(|(name, _)| *name);
 
-                let varying_params = self.get_varying_params(&job_ids);
-                for (p_key, p_vals) in varying_params {
-                    let clean_key = clean_id(&p_key);
-
-                    let param_node_id = format!("p_{}_{}_{}", clean_run, clean_group, clean_key);
-
-                    let clean_vals: Vec<String> = p_vals
-                        .iter()
-                        .map(|v| smart_truncate(v, PARAM_MAX_WIDTH))
-                        .collect();
-
-                    let mut val_str = clean_vals.join(", ");
-                    if val_str.len() > PARAM_MAX_WIDTH {
-                        let keep = PARAM_MAX_WIDTH.saturating_sub(2);
-                        val_str = format!("{}..", &val_str[..keep]);
-                    }
-
-                    let label = format!("{}:\\n{}", p_key, val_str);
-
-                    dot.push_str(&format!("        {} [\n", param_node_id));
-                    dot.push_str(&format!("            label=\"{}\",\n", label));
-                    dot.push_str(&format!("            shape=\"{}\",\n", PARAM_SHAPE));
-                    dot.push_str("            style=\"filled\",\n");
-                    dot.push_str(&format!("            fillcolor=\"{}\",\n", PARAM_FILL));
-                    dot.push_str(&format!("            color=\"{}\",\n", PARAM_BORDER));
-                    dot.push_str(&format!(
-                        "            fontcolor=\"{}\",\n",
-                        PARAM_FONT_COLOR
-                    ));
-                    dot.push_str(&format!("            fontsize=\"{}\",\n", PARAM_FONT_SIZE));
-                    dot.push_str("            margin=\"0.1,0.05\",\n");
-                    dot.push_str("            penwidth=\"0.8\"\n");
-                    dot.push_str("        ];\n");
-
-                    dot.push_str(&format!(
-                        "        {} -> {} [\n",
-                        param_node_id, unique_node_id
-                    ));
-                    dot.push_str("            style=\"dotted\",\n");
-                    dot.push_str(&format!("            color=\"{}\",\n", PARAM_BORDER));
-                    dot.push_str("            arrowhead=\"dot\",\n");
-                    dot.push_str("            arrowsize=\"0.5\",\n");
-                    dot.push_str("            penwidth=\"1.0\"\n");
-                    dot.push_str("        ];\n");
+            for (group_name, group_run_ids) in sorted_groups {
+                if group_run_ids.is_empty() {
+                    continue;
                 }
+
+                let clean_group = clean_id(group_name);
+                dot.push_str(&format!("    subgraph cluster_group_{} {{\n", clean_group));
+                dot.push_str(&format!("        label=\"@{}\";\n", group_name));
+                dot.push_str("        style=\"solid,rounded\";\n");
+                dot.push_str(&format!("        color=\"{}\";\n", COLOR_GROUP_BORDER));
+                dot.push_str(&format!("        fontsize=\"{}\";\n", GROUP_FONT_SIZE));
+                dot.push_str("        penwidth=\"2\";\n");
+                dot.push_str("        margin=\"20\";\n\n");
+
+                for run_id in group_run_ids {
+                    let run_name = &run_id.0;
+                    runs_in_groups.insert(run_name.clone());
+                    if let Some(jobs) = grouped_jobs.get(run_name) {
+                        let prefix = format!("{}_{}", clean_group, clean_id(run_name));
+                        node_prefixes.push(prefix.clone());
+                        self.render_run_cluster(&mut dot, run_name, &prefix, jobs, "        ");
+                    }
+                }
+
+                dot.push_str("    }\n\n");
             }
-            dot.push_str("    }\n");
         }
 
-        for ((src, dst), cnt) in intra_edges {
-            let width = if cnt > 1 { "2.0" } else { "1.2" };
-            dot.push_str(&format!(
-                "    {} -> {} [penwidth=\"{}\"];\n",
-                src, dst, width
-            ));
+        for (run_name, jobs) in &grouped_jobs {
+            if has_groups && runs_in_groups.contains(run_name) {
+                continue;
+            }
+            let prefix = clean_id(run_name);
+            node_prefixes.push(prefix.clone());
+            self.render_run_cluster(&mut dot, run_name, &prefix, jobs, "    ");
+        }
+
+        for prefix in &node_prefixes {
+            for ((src, dst), cnt) in &intra_edges {
+                let src_job_name = src.split('_').next_back().unwrap_or(src);
+                let dst_job_name = dst.split('_').next_back().unwrap_or(dst);
+                let src_run = src.split('_').next().unwrap_or("");
+                let dst_run = dst.split('_').next().unwrap_or("");
+
+                if prefix.contains(src_run) && prefix.contains(dst_run) {
+                    let width = if *cnt > 1 { "2.0" } else { "1.2" };
+                    dot.push_str(&format!(
+                        "    {}_{} -> {}_{} [penwidth=\"{}\"];\n",
+                        prefix, src_job_name, prefix, dst_job_name, width
+                    ));
+                }
+            }
         }
 
         let mut sorted_inter: Vec<_> = inter_edges.into_iter().collect();
@@ -268,21 +251,129 @@ impl<'a> VizGenerator<'a> {
 
         for (srun, unique_tgt, dtype) in sorted_inter {
             if let Some(anchor_job) = run_anchors.get(&srun) {
+                let tgt_run = unique_tgt.split('_').next().unwrap_or("");
+                let tgt_job = unique_tgt.split('_').next_back().unwrap_or(&unique_tgt);
                 let clean_srun = clean_id(&srun);
-                let clean_anchor = clean_id(anchor_job);
-                let unique_anchor = format!("{}_{}", clean_srun, clean_anchor);
 
-                let style = if dtype == "soft" { "dashed" } else { "solid" };
-                dot.push_str(&format!("    {} -> {} [\n", unique_anchor, unique_tgt));
-                dot.push_str(&format!("        ltail=\"cluster_{}\",\n", clean_srun));
-                dot.push_str(&format!("        style=\"{}\",\n", style));
-                dot.push_str("        color=\"#64748B\"\n");
-                dot.push_str("    ];\n");
+                for src_prefix in &node_prefixes {
+                    if !src_prefix.contains(&clean_srun) {
+                        continue;
+                    }
+                    for tgt_prefix in &node_prefixes {
+                        if !tgt_prefix.contains(tgt_run) {
+                            continue;
+                        }
+                        let clean_anchor = clean_id(anchor_job);
+                        let unique_anchor = format!("{}_{}", src_prefix, clean_anchor);
+                        let prefixed_tgt = format!("{}_{}", tgt_prefix, tgt_job);
+
+                        let style = if dtype == "soft" { "dashed" } else { "solid" };
+                        dot.push_str(&format!("    {} -> {} [\n", unique_anchor, prefixed_tgt));
+                        dot.push_str(&format!("        ltail=\"cluster_{}\",\n", src_prefix));
+                        dot.push_str(&format!("        style=\"{}\",\n", style));
+                        dot.push_str("        color=\"#64748B\"\n");
+                        dot.push_str("    ];\n");
+                    }
+                }
             }
         }
 
         dot.push_str("}\n");
         Ok(dot)
+    }
+
+    fn render_run_cluster(
+        &self,
+        dot: &mut String,
+        run_name: &str,
+        prefix: &str,
+        jobs: &BTreeMap<String, Vec<&JobId>>,
+        indent: &str,
+    ) {
+        dot.push_str(&format!("{}subgraph cluster_{} {{\n", indent, prefix));
+        dot.push_str(&format!("{}    label=\"Run: {}\";\n", indent, run_name));
+        dot.push_str(&format!("{}    style=\"dashed,rounded\";\n", indent));
+        dot.push_str(&format!(
+            "{}    color=\"{}\";\n",
+            indent, COLOR_CLUSTER_BORDER
+        ));
+        dot.push_str(&format!("{}    fontsize=\"14\";\n", indent));
+        dot.push_str(&format!("{}    margin=\"16\";\n", indent));
+
+        for (job_name, job_ids) in jobs {
+            let count = job_ids.len();
+            let job_label = format!("{}\\n(x{})", job_name, count);
+            let fill_color = get_fill_color(job_name);
+            let clean_job = clean_id(job_name);
+            let unique_node_id = format!("{}_{}", prefix, clean_job);
+
+            dot.push_str(&format!("{}    {} [\n", indent, unique_node_id));
+            dot.push_str(&format!("{}        label=\"{}\",\n", indent, job_label));
+            dot.push_str(&format!("{}        shape=\"box\",\n", indent));
+            dot.push_str(&format!("{}        style=\"filled,rounded\",\n", indent));
+            dot.push_str(&format!(
+                "{}        fontsize=\"{}\",\n",
+                indent, JOB_FONT_SIZE
+            ));
+            dot.push_str(&format!(
+                "{}        fillcolor=\"{}\",\n",
+                indent, fill_color
+            ));
+            dot.push_str(&format!("{}        penwidth=\"1\"\n", indent));
+            dot.push_str(&format!("{}    ];\n", indent));
+
+            let varying_params = self.get_varying_params(job_ids);
+            for (p_key, p_vals) in varying_params {
+                let clean_key = clean_id(&p_key);
+                let param_node_id = format!("p_{}_{}_{}", prefix, clean_job, clean_key);
+
+                let clean_vals: Vec<String> = p_vals
+                    .iter()
+                    .map(|v| smart_truncate(v, PARAM_MAX_WIDTH))
+                    .collect();
+
+                let mut val_str = clean_vals.join(", ");
+                if val_str.len() > PARAM_MAX_WIDTH {
+                    let keep = PARAM_MAX_WIDTH.saturating_sub(2);
+                    val_str = format!("{}..", &val_str[..keep]);
+                }
+
+                let label = format!("{}:\\n{}", p_key, val_str);
+
+                dot.push_str(&format!("{}    {} [\n", indent, param_node_id));
+                dot.push_str(&format!("{}        label=\"{}\",\n", indent, label));
+                dot.push_str(&format!("{}        shape=\"{}\",\n", indent, PARAM_SHAPE));
+                dot.push_str(&format!("{}        style=\"filled\",\n", indent));
+                dot.push_str(&format!(
+                    "{}        fillcolor=\"{}\",\n",
+                    indent, PARAM_FILL
+                ));
+                dot.push_str(&format!("{}        color=\"{}\",\n", indent, PARAM_BORDER));
+                dot.push_str(&format!(
+                    "{}        fontcolor=\"{}\",\n",
+                    indent, PARAM_FONT_COLOR
+                ));
+                dot.push_str(&format!(
+                    "{}        fontsize=\"{}\",\n",
+                    indent, PARAM_FONT_SIZE
+                ));
+                dot.push_str(&format!("{}        margin=\"0.1,0.05\",\n", indent));
+                dot.push_str(&format!("{}        penwidth=\"0.8\"\n", indent));
+                dot.push_str(&format!("{}    ];\n", indent));
+
+                dot.push_str(&format!(
+                    "{}    {} -> {} [\n",
+                    indent, param_node_id, unique_node_id
+                ));
+                dot.push_str(&format!("{}        style=\"dotted\",\n", indent));
+                dot.push_str(&format!("{}        color=\"{}\",\n", indent, PARAM_BORDER));
+                dot.push_str(&format!("{}        arrowhead=\"dot\",\n", indent));
+                dot.push_str(&format!("{}        arrowsize=\"0.5\",\n", indent));
+                dot.push_str(&format!("{}        penwidth=\"1.0\"\n", indent));
+                dot.push_str(&format!("{}    ];\n", indent));
+            }
+        }
+        dot.push_str(&format!("{}}}\n", indent));
     }
 
     fn get_job_inputs(job: &'a Job) -> Vec<&'a repx_core::model::InputMapping> {
