@@ -651,6 +651,82 @@ impl JobsState {
         *self.table_state.offset_mut() = new_offset;
     }
 
+    pub fn expand_all(&mut self) {
+        self.collapsed_nodes.clear();
+    }
+
+    pub fn collapse_all(&mut self, lab: &Lab) {
+        for group_name in lab.groups.keys() {
+            self.collapsed_nodes.insert(format!("group:{}", group_name));
+        }
+        for run_id in lab.runs.keys() {
+            self.collapsed_nodes.insert(format!("run:{}", run_id));
+            for group_name in lab.groups.keys() {
+                self.collapsed_nodes
+                    .insert(format!("group:{}/run:{}", group_name, run_id));
+            }
+        }
+        for job_id in lab.jobs.keys() {
+            self.collapsed_nodes.insert(format!("job:{}", job_id));
+        }
+    }
+
+    pub fn toggle_all(&mut self, lab: &Lab) {
+        if self.collapsed_nodes.is_empty() {
+            self.collapse_all(lab);
+        } else {
+            self.expand_all();
+        }
+    }
+
+    pub fn toggle_all_groups(&mut self, lab: &Lab) {
+        let group_ids: Vec<_> = lab
+            .groups
+            .keys()
+            .map(|name| format!("group:{}", name))
+            .collect();
+
+        let any_expanded = group_ids
+            .iter()
+            .any(|id| !self.collapsed_nodes.contains(id));
+
+        if any_expanded {
+            for id in group_ids {
+                self.collapsed_nodes.insert(id);
+            }
+        } else {
+            for id in group_ids {
+                self.collapsed_nodes.remove(&id);
+            }
+        }
+    }
+
+    pub fn toggle_all_runs(&mut self, lab: &Lab) {
+        let mut run_ids: Vec<String> = Vec::new();
+
+        for run_id in lab.runs.keys() {
+            run_ids.push(format!("run:{}", run_id));
+        }
+
+        for (group_name, group_runs) in &lab.groups {
+            for run_id in group_runs {
+                run_ids.push(format!("group:{}/run:{}", group_name, run_id));
+            }
+        }
+
+        let any_expanded = run_ids.iter().any(|id| !self.collapsed_nodes.contains(id));
+
+        if any_expanded {
+            for id in run_ids {
+                self.collapsed_nodes.insert(id);
+            }
+        } else {
+            for id in run_ids {
+                self.collapsed_nodes.remove(&id);
+            }
+        }
+    }
+
     fn parse_filter_text(&self, text: &str) -> Vec<ParsedFilter> {
         if text.trim().is_empty() {
             return Vec::new();

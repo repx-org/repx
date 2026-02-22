@@ -35,6 +35,8 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         draw_space_menu_popup(f, f.area(), app);
     } else if app.input_mode == InputMode::GMenu {
         draw_g_menu_popup(f, f.area(), app);
+    } else if app.input_mode == InputMode::ZMenu {
+        draw_z_menu_popup(f, f.area(), app);
     }
 }
 
@@ -590,7 +592,7 @@ fn draw_right_column(f: &mut Frame, area: Rect, app: &mut App) {
 
             left_title_spans.push(Span::styled(final_text, Style::default()));
         }
-        InputMode::Normal | InputMode::SpaceMenu | InputMode::GMenu => {
+        InputMode::Normal | InputMode::SpaceMenu | InputMode::GMenu | InputMode::ZMenu => {
             if !app.jobs_state.filter_text.is_empty() {
                 let text_to_truncate = &app.jobs_state.filter_text;
                 let truncated_filter_text = if text_to_truncate.len() > max_filter_width as usize {
@@ -830,8 +832,9 @@ fn draw_right_column(f: &mut Frame, area: Rect, app: &mut App) {
     );
 }
 
-fn draw_space_menu_popup(f: &mut Frame, area: Rect, app: &App) {
-    let popup_height = 10;
+fn draw_menu_popup(f: &mut Frame, area: Rect, app: &App, title: &str, shortcuts: &[(&str, &str)]) {
+    let content_rows = shortcuts.len().div_ceil(3);
+    let popup_height = (content_rows * 2 + 2) as u16;
     let horizontal_padding = 2;
     let bottom_padding = 1;
 
@@ -846,20 +849,13 @@ fn draw_space_menu_popup(f: &mut Frame, area: Rect, app: &App) {
     };
 
     let block = Block::default()
-        .title(" Quick Actions ")
+        .title(title)
         .borders(Borders::ALL)
         .border_type(BorderType::Double)
         .border_style(get_style(app, &app.theme.elements.popups.border));
 
     let inner_area = block.inner(popup_area);
-    let shortcuts = [
-        ("r", "Run Selected"),
-        ("c", "Cancel Selected"),
-        ("y", "Yank Path"),
-        ("e", "Explore (Yazi)"),
-        ("l", "Global Logs"),
-        ("ESC", "Close Menu"),
-    ];
+
     let mut rows = vec![];
     for chunk in shortcuts.chunks(3) {
         let mut cells = chunk
@@ -897,70 +893,52 @@ fn draw_space_menu_popup(f: &mut Frame, area: Rect, app: &App) {
     f.render_widget(table, inner_area);
 }
 
-fn draw_g_menu_popup(f: &mut Frame, area: Rect, app: &App) {
-    let popup_height = 6;
-    let horizontal_padding = 2;
-    let bottom_padding = 1;
-
-    let popup_area = Rect {
-        x: area.x + horizontal_padding,
-        y: area
-            .height
-            .saturating_sub(popup_height)
-            .saturating_sub(bottom_padding),
-        width: area.width.saturating_sub(horizontal_padding * 2),
-        height: popup_height,
-    };
-
-    let block = Block::default()
-        .title(" Go To ")
-        .borders(Borders::ALL)
-        .border_type(BorderType::Double)
-        .border_style(get_style(app, &app.theme.elements.popups.border));
-
-    let inner_area = block.inner(popup_area);
-
-    let shortcuts = [
-        ("g", "Go to Top"),
-        ("e", "Go to End"),
-        ("d", "Definition"),
-        ("l", "Logs"),
-        ("ESC", "Close Menu"),
-    ];
-
-    let mut rows = vec![];
-    for chunk in shortcuts.chunks(3) {
-        let mut cells = chunk
-            .iter()
-            .map(|(key, desc)| {
-                Cell::from(Line::from(vec![
-                    Span::styled(
-                        format!(" {} ", key),
-                        get_style(app, &app.theme.elements.popups.key_fg)
-                            .bg(get_color(app, &app.theme.elements.popups.key_bg.color)),
-                    ),
-                    Span::raw(format!(" {}", desc)),
-                ]))
-            })
-            .collect::<Vec<_>>();
-
-        while cells.len() < 3 {
-            cells.push(Cell::from(""));
-        }
-        rows.push(Row::new(cells).height(2));
-    }
-
-    let table = Table::new(
-        rows,
-        [
-            Constraint::Percentage(33),
-            Constraint::Percentage(33),
-            Constraint::Percentage(34),
+fn draw_space_menu_popup(f: &mut Frame, area: Rect, app: &App) {
+    draw_menu_popup(
+        f,
+        area,
+        app,
+        " Quick Actions ",
+        &[
+            ("r", "Run Selected"),
+            ("c", "Cancel Selected"),
+            ("y", "Yank Path"),
+            ("e", "Explore (Yazi)"),
+            ("l", "Global Logs"),
+            ("ESC", "Close Menu"),
         ],
-    )
-    .column_spacing(2);
+    );
+}
 
-    f.render_widget(Clear, popup_area);
-    f.render_widget(block, popup_area);
-    f.render_widget(table, inner_area);
+fn draw_g_menu_popup(f: &mut Frame, area: Rect, app: &App) {
+    draw_menu_popup(
+        f,
+        area,
+        app,
+        " Go To ",
+        &[
+            ("g", "Go to Top"),
+            ("e", "Go to End"),
+            ("d", "Definition"),
+            ("l", "Logs"),
+            ("ESC", "Close Menu"),
+        ],
+    );
+}
+
+fn draw_z_menu_popup(f: &mut Frame, area: Rect, app: &App) {
+    draw_menu_popup(
+        f,
+        area,
+        app,
+        " Fold Actions ",
+        &[
+            ("a", "Toggle All"),
+            ("g", "Toggle Groups"),
+            ("r", "Toggle Runs"),
+            ("o", "Open All"),
+            ("c", "Close All"),
+            ("ESC", "Close Menu"),
+        ],
+    );
 }
