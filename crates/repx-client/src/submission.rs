@@ -38,9 +38,16 @@ pub fn generate_project_id(lab_path: &Path) -> String {
 pub fn resolve_dependency_graph(lab: &Lab, run_specs: &[String]) -> Result<HashSet<JobId>> {
     let mut full_dependency_set = HashSet::new();
 
-    for spec in run_specs {
-        let run_id = RunId(spec.clone());
-        let final_job_ids = repx_core::resolver::resolve_all_final_job_ids(lab, &run_id)?;
+    let expanded_run_ids: Vec<RunId> = run_specs
+        .iter()
+        .map(|spec| repx_core::resolver::resolve_run_spec(lab, spec))
+        .collect::<std::result::Result<Vec<_>, _>>()?
+        .into_iter()
+        .flatten()
+        .collect();
+
+    for run_id in &expanded_run_ids {
+        let final_job_ids = repx_core::resolver::resolve_all_final_job_ids(lab, run_id)?;
         for final_job_id in final_job_ids {
             let graph = engine::build_dependency_graph(lab, final_job_id);
             full_dependency_set.extend(graph);

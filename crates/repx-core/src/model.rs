@@ -223,6 +223,8 @@ pub struct Lab {
     pub content_hash: String,
     pub runs: HashMap<RunId, Run>,
     pub jobs: HashMap<JobId, Job>,
+    #[serde(default)]
+    pub groups: HashMap<String, Vec<RunId>>,
     #[serde(skip)]
     pub host_tools_path: PathBuf,
     #[serde(skip)]
@@ -243,6 +245,8 @@ pub(crate) struct RootMetadata {
     #[serde(rename = "gitHash")]
     pub git_hash: String,
     pub repx_version: String,
+    #[serde(default)]
+    pub groups: HashMap<String, Vec<String>>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -289,5 +293,35 @@ mod tests {
     #[test]
     fn test_runid_from_str_err_pending() {
         assert!(RunId::from_str("pending").is_err());
+    }
+
+    #[test]
+    fn test_root_metadata_deserialize_with_groups() {
+        let json = r#"{
+            "repx_version": "0.2.1",
+            "type": "root",
+            "gitHash": "abc123",
+            "runs": ["revision/meta-run-a.json"],
+            "groups": {
+                "foldability": ["run-a", "run-b"],
+                "spec": ["run-c"]
+            }
+        }"#;
+        let meta: RootMetadata = serde_json::from_str(json).unwrap();
+        assert_eq!(meta.groups.len(), 2);
+        assert_eq!(meta.groups["foldability"], vec!["run-a", "run-b"]);
+        assert_eq!(meta.groups["spec"], vec!["run-c"]);
+    }
+
+    #[test]
+    fn test_root_metadata_deserialize_without_groups() {
+        let json = r#"{
+            "repx_version": "0.2.1",
+            "type": "root",
+            "gitHash": "abc123",
+            "runs": ["revision/meta-run-a.json"]
+        }"#;
+        let meta: RootMetadata = serde_json::from_str(json).unwrap();
+        assert!(meta.groups.is_empty());
     }
 }

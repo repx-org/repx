@@ -116,6 +116,11 @@ pub enum ListEntity {
     Dependencies {
         job_id: String,
     },
+    #[command(about = "List run groups defined in the lab")]
+    Groups {
+        #[arg(required = false, value_name = "GROUP_NAME")]
+        name: Option<String>,
+    },
 }
 
 #[derive(Args)]

@@ -1,6 +1,6 @@
 use crate::{
     errors::ConfigError,
-    model::{FileEntry, Lab, LabManifest, RootMetadata, Run, RunMetadataForLoading},
+    model::{FileEntry, Lab, LabManifest, RootMetadata, Run, RunId, RunMetadataForLoading},
 };
 use rayon::prelude::*;
 use sha2::{Digest, Sha256};
@@ -195,6 +195,15 @@ pub fn load_from_path(initial_path: &Path) -> Result<Lab, ConfigError> {
         referenced_files.push(p.to_path_buf());
     }
 
+    let groups = root_meta
+        .groups
+        .into_iter()
+        .map(|(name, run_names)| {
+            let run_ids = run_names.into_iter().map(RunId).collect();
+            (name, run_ids)
+        })
+        .collect();
+
     let mut lab = Lab {
         repx_version: root_meta.repx_version,
         lab_version,
@@ -202,6 +211,7 @@ pub fn load_from_path(initial_path: &Path) -> Result<Lab, ConfigError> {
         content_hash,
         runs: HashMap::new(),
         jobs: HashMap::new(),
+        groups,
         host_tools_path,
         host_tools_dir_name,
         referenced_files,

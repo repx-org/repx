@@ -610,6 +610,7 @@ impl App {
         self.jobs_state.status_filter = STATUS_FILTERS[prev_index];
         self.jobs_state.rebuild_display_list(&self.lab);
     }
+
     pub fn rebuild_display_list(&mut self) {
         self.jobs_state.rebuild_display_list(&self.lab);
         self.on_selection_change();
@@ -629,7 +630,7 @@ impl App {
 
         let job_id = match &row.item {
             TuiRowItem::Job { job } => &job.full_id,
-            TuiRowItem::Run { .. } => return,
+            TuiRowItem::Run { .. } | TuiRowItem::Group { .. } => return,
         };
 
         let job_def = if let Some(j) = self.lab.jobs.get(job_id) {
@@ -685,7 +686,7 @@ impl App {
 
         let job_id = match &row.item {
             TuiRowItem::Job { job } => &job.full_id,
-            TuiRowItem::Run { .. } => return,
+            TuiRowItem::Run { .. } | TuiRowItem::Group { .. } => return,
         };
 
         let target_name = self.targets_state.get_active_target_name();
@@ -728,22 +729,27 @@ impl App {
     }
 
     fn get_target_ids_for_action(&self) -> Vec<String> {
-        let get_id = |path_id: &str| -> Option<String> {
-            path_id
-                .split('/')
-                .next_back()
-                .and_then(|segment| segment.split_once(':'))
-                .map(|(_, id)| id.to_string())
+        let extract_id = |path_id: &str| -> Option<String> {
+            let last_segment = path_id.split('/').next_back()?;
+            let (kind, id) = last_segment.split_once(':')?;
+            match kind {
+                "group" => Some(format!("@{}", id)),
+                "run" => Some(id.to_string()),
+                "job" => Some(id.to_string()),
+                _ => Some(id.to_string()),
+            }
         };
+
         if !self.jobs_state.selected_jobs.is_empty() {
             self.jobs_state
                 .selected_jobs
                 .iter()
-                .filter_map(|s| get_id(s))
+                .filter_map(|s| extract_id(s))
                 .collect()
         } else if let Some(selected_idx) = self.jobs_state.table_state.selected() {
             if let Some(row) = self.jobs_state.display_rows.get(selected_idx) {
                 let id_str = match &row.item {
+                    TuiRowItem::Group { name } => format!("@{}", name),
                     TuiRowItem::Run { id } => id.to_string(),
                     TuiRowItem::Job { job } => job.full_id.to_string(),
                 };
@@ -763,13 +769,22 @@ impl App {
             return;
         }
 
-        let mut selected_jobs_set = HashSet::new();
+        let mut resolved_run_ids: Vec<repx_core::model::RunId> = Vec::new();
         for id_str in &raw_selected_ids {
-            let run_id = repx_core::model::RunId(id_str.to_string());
-            if let Some(run) = self.lab.runs.get(&run_id) {
+            match repx_core::resolver::resolve_run_spec(&self.lab, id_str) {
+                Ok(run_ids) => resolved_run_ids.extend(run_ids),
+                Err(e) => {
+                    tracing::warn!("Failed to resolve '{}': {}", id_str, e);
+                }
+            }
+        }
+
+        let mut selected_jobs_set = HashSet::new();
+        for run_id in &resolved_run_ids {
+            if let Some(run) = self.lab.runs.get(run_id) {
                 selected_jobs_set.extend(run.jobs.iter().cloned());
             } else if let Ok(resolved_ids) =
-                repx_core::resolver::resolve_all_final_job_ids(&self.lab, &run_id)
+                repx_core::resolver::resolve_all_final_job_ids(&self.lab, run_id)
             {
                 for job_id in resolved_ids {
                     let dep_graph = engine::build_dependency_graph(&self.lab, job_id);
@@ -941,11 +956,28 @@ impl App {
     }
 
     pub fn cancel_selected(&mut self) {
-        let ids_to_cancel = self.get_target_ids_for_action();
-        tracing::info!("'Cancel' action triggered for: {:?}", ids_to_cancel);
+        let raw_ids = self.get_target_ids_for_action();
+        tracing::info!("'Cancel' action triggered for: {:?}", raw_ids);
 
-        for job_id_str in ids_to_cancel {
-            let job_id = JobId(job_id_str);
+        let mut job_ids_to_cancel: Vec<JobId> = Vec::new();
+        for id_str in &raw_ids {
+            match repx_core::resolver::resolve_run_spec(&self.lab, id_str) {
+                Ok(run_ids) => {
+                    for run_id in &run_ids {
+                        if let Some(run) = self.lab.runs.get(run_id) {
+                            job_ids_to_cancel.extend(run.jobs.iter().cloned());
+                        } else {
+                            job_ids_to_cancel.push(JobId(run_id.0.clone()));
+                        }
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!("Failed to resolve '{}': {}", id_str, e);
+                }
+            }
+        }
+
+        for job_id in job_ids_to_cancel {
             tracing::info!("Sending cancel request for job '{}'", job_id);
             let _ = self.client.cancel_job(job_id);
         }
@@ -1033,7 +1065,7 @@ impl App {
                         .join(dirs::OUT),
                 )
             }
-            TuiRowItem::Run { .. } => None,
+            TuiRowItem::Run { .. } | TuiRowItem::Group { .. } => None,
         }
     }
     fn update_context_for_job(&mut self, master_index: Option<usize>) {
