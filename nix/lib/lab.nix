@@ -4,6 +4,7 @@
   gitHash,
   lab_version,
   runs,
+  groups ? { },
 }:
 let
   lab-packagers = (import ./lab-packagers.nix) { inherit pkgs gitHash lab_version; };
@@ -151,6 +152,34 @@ let
   duplicatesMap = pkgs.lib.filterAttrs (_: count: count > 1) frequencyMap;
   duplicateNames = pkgs.lib.attrNames duplicatesMap;
 
+  resolveGroupPlaceholder =
+    groupName: placeholder:
+    if !(builtins.isAttrs placeholder) || (placeholder._repx_type or "") != "run_placeholder" then
+      throw "Error in 'mkLab': group '${groupName}' contains an element that is not a run placeholder created by repx-lib.callRun. Got: ${builtins.typeOf placeholder}"
+    else
+      let
+        runAttrName = findRunName placeholder;
+      in
+      evaluationResults.${runAttrName}.evaluatedRun.name;
+
+  resolvedGroups = pkgs.lib.mapAttrs (
+    groupName: groupValue:
+    if !(pkgs.lib.isList groupValue) then
+      throw "Error in 'mkLab': group '${groupName}' must be a list of run references, got: ${builtins.typeOf groupValue}"
+    else
+      map (resolveGroupPlaceholder groupName) groupValue
+  ) groups;
+
+  runNameSet = pkgs.lib.listToAttrs (
+    map (name: {
+      inherit name;
+      value = true;
+    }) runNames
+  );
+  collidingGroupNames = pkgs.lib.filter (gn: runNameSet ? "${gn}") (
+    pkgs.lib.attrNames resolvedGroups
+  );
+
 in
 if duplicateNames != [ ] then
   throw ''
@@ -159,5 +188,13 @@ if duplicateNames != [ ] then
 
     The following name(s) were used more than once: ${builtins.toJSON duplicateNames}
   ''
+else if collidingGroupNames != [ ] then
+  throw ''
+    Error in 'mkLab': group name(s) collide with run name(s): ${builtins.toJSON collidingGroupNames}.
+    Group names must not match any run name.
+  ''
 else
-  lab-packagers.runs2Lab finalRunDefinitions
+  lab-packagers.runs2Lab {
+    inherit resolvedGroups;
+    runDefinitions = finalRunDefinitions;
+  }

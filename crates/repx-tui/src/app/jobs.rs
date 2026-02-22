@@ -196,6 +196,21 @@ impl JobsState {
 
     fn build_tree_view(&mut self, lab: &Lab, filters: &[ParsedFilter]) {
         let visible_job_ids = self.calculate_visible_job_ids(lab, filters);
+        let has_groups = !lab.groups.is_empty();
+
+        if has_groups {
+            self.build_grouped_tree_view(lab, filters, &visible_job_ids);
+        } else {
+            self.build_ungrouped_tree_view(lab, filters, &visible_job_ids);
+        }
+    }
+
+    fn build_ungrouped_tree_view(
+        &mut self,
+        lab: &Lab,
+        filters: &[ParsedFilter],
+        visible_job_ids: &HashSet<JobId>,
+    ) {
         let mut run_ids: Vec<_> = lab.runs.keys().cloned().collect();
         run_ids.sort();
 
@@ -224,11 +239,131 @@ impl JobsState {
                 self.add_run_children(
                     lab,
                     run_id,
-                    &visible_job_ids,
+                    visible_job_ids,
                     &run_unique_id,
                     i == num_runs - 1,
+                    0,
                 );
             }
+        }
+    }
+
+    fn build_grouped_tree_view(
+        &mut self,
+        lab: &Lab,
+        filters: &[ParsedFilter],
+        visible_job_ids: &HashSet<JobId>,
+    ) {
+        let mut group_names: Vec<_> = lab.groups.keys().cloned().collect();
+        group_names.sort();
+
+        let mut grouped_run_ids: HashSet<_> = HashSet::new();
+        for run_ids in lab.groups.values() {
+            for run_id in run_ids {
+                grouped_run_ids.insert(run_id.clone());
+            }
+        }
+
+        let mut all_run_ids: Vec<_> = lab.runs.keys().cloned().collect();
+        all_run_ids.sort();
+        let ungrouped_runs: Vec<_> = all_run_ids
+            .iter()
+            .filter(|run_id| {
+                !grouped_run_ids.contains(run_id) && {
+                    let run = lab.runs.get(run_id).unwrap();
+                    let name_match = self.run_matches(&run_id.0, filters);
+                    let has_jobs = run.jobs.iter().any(|id| visible_job_ids.contains(id));
+                    name_match || has_jobs
+                }
+            })
+            .cloned()
+            .collect();
+
+        let total_top_level = group_names.len() + ungrouped_runs.len();
+        let mut top_idx = 0;
+
+        for group_name in &group_names {
+            let group_run_ids = &lab.groups[group_name];
+            let visible_group_runs: Vec<_> = group_run_ids
+                .iter()
+                .filter(|run_id| {
+                    if let Some(run) = lab.runs.get(run_id) {
+                        let name_match = self.run_matches(&run_id.0, filters);
+                        let has_jobs = run.jobs.iter().any(|id| visible_job_ids.contains(id));
+                        name_match || has_jobs
+                    } else {
+                        false
+                    }
+                })
+                .cloned()
+                .collect();
+
+            if visible_group_runs.is_empty() && !self.run_matches(group_name, filters) {
+                top_idx += 1;
+                continue;
+            }
+
+            let is_last_top = top_idx == total_top_level - 1;
+            let group_unique_id = format!("group:{}", group_name);
+            self.display_rows.push(TuiDisplayRow {
+                item: TuiRowItem::Group {
+                    name: group_name.clone(),
+                },
+                id: group_unique_id.clone(),
+                depth: 0,
+                is_last_child: is_last_top,
+                parent_prefix: "".to_string(),
+            });
+
+            if !self.collapsed_nodes.contains(&group_unique_id) {
+                let num_group_runs = visible_group_runs.len();
+                for (j, run_id) in visible_group_runs.iter().enumerate() {
+                    let run_unique_id = format!("{}/run:{}", group_unique_id, run_id);
+                    let run_is_last = j == num_group_runs - 1;
+                    self.display_rows.push(TuiDisplayRow {
+                        item: TuiRowItem::Run { id: run_id.clone() },
+                        id: run_unique_id.clone(),
+                        depth: 1,
+                        is_last_child: run_is_last,
+                        parent_prefix: "".to_string(),
+                    });
+                    if !self.collapsed_nodes.contains(&run_unique_id) {
+                        self.add_run_children(
+                            lab,
+                            run_id,
+                            visible_job_ids,
+                            &run_unique_id,
+                            run_is_last,
+                            1,
+                        );
+                    }
+                }
+            }
+            top_idx += 1;
+        }
+
+        let num_ungrouped = ungrouped_runs.len();
+        for (i, run_id) in ungrouped_runs.iter().enumerate() {
+            let is_last_top = top_idx == total_top_level - 1;
+            let run_unique_id = format!("run:{}", run_id);
+            self.display_rows.push(TuiDisplayRow {
+                item: TuiRowItem::Run { id: run_id.clone() },
+                id: run_unique_id.clone(),
+                depth: 0,
+                is_last_child: is_last_top,
+                parent_prefix: "".to_string(),
+            });
+            if !self.collapsed_nodes.contains(&run_unique_id) {
+                self.add_run_children(
+                    lab,
+                    run_id,
+                    visible_job_ids,
+                    &run_unique_id,
+                    i == num_ungrouped - 1,
+                    0,
+                );
+            }
+            top_idx += 1;
         }
     }
 
@@ -282,6 +417,7 @@ impl JobsState {
         visible_job_ids: &HashSet<JobId>,
         parent_path: &str,
         parent_is_last: bool,
+        run_depth: usize,
     ) {
         let run = lab.runs.get(run_id).unwrap();
         let run_jobs_set: HashSet<_> = run.jobs.iter().collect();
@@ -315,12 +451,13 @@ impl JobsState {
 
         let prefix = if parent_is_last { "    " } else { "│   " };
         let count = top_jobs.len();
+        let child_depth = run_depth + 1;
 
         for (j, job_id) in top_jobs.iter().enumerate() {
             self.add_job_recursive(
                 lab,
                 job_id,
-                1,
+                child_depth,
                 j == count - 1,
                 prefix.to_string(),
                 visible_job_ids,

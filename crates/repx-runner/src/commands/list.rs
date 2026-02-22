@@ -33,6 +33,7 @@ pub fn handle_list(args: ListArgs, lab_path: &Path) -> Result<(), CliError> {
         },
         ListEntity::Jobs(job_args) => list_jobs(&lab, &job_args),
         ListEntity::Dependencies { job_id } => list_dependencies(&lab, &job_id),
+        ListEntity::Groups { name } => list_groups(&lab, name.as_deref()),
     }
 }
 
@@ -104,6 +105,44 @@ fn list_jobs(lab: &Lab, args: &ListJobsArgs) -> Result<(), CliError> {
             return Ok(());
         }
     };
+
+    if let Some(group_name) = run_id_str.strip_prefix('@') {
+        if group_name.is_empty() {
+            return Err(CliError::Domain(
+                repx_core::errors::DomainError::EmptyGroupName,
+            ));
+        }
+        match lab.groups.get(group_name) {
+            Some(run_ids) => {
+                let mut sorted_ids: Vec<_> = run_ids.iter().collect();
+                sorted_ids.sort();
+                for (i, run_id) in sorted_ids.iter().enumerate() {
+                    if i > 0 {
+                        println!();
+                    }
+                    if let Some(run) = lab.runs.get(*run_id) {
+                        println!("Jobs in run '{}' (group @{}):", run_id, group_name);
+                        let jobs: Vec<_> = run.jobs.iter().collect();
+                        print_jobs_list(lab, jobs, args.stage.as_deref(), &ctx);
+                    }
+                }
+                return Ok(());
+            }
+            None => {
+                let available: Vec<_> = {
+                    let mut keys: Vec<_> = lab.groups.keys().cloned().collect();
+                    keys.sort();
+                    keys
+                };
+                return Err(CliError::Domain(
+                    repx_core::errors::DomainError::UnknownGroup {
+                        name: group_name.to_string(),
+                        available,
+                    },
+                ));
+            }
+        }
+    }
 
     let run_id = RunId::from_str(run_id_str)
         .map_err(|e| CliError::Config(ConfigError::General(e.to_string())))?;
@@ -313,6 +352,54 @@ fn format_param_value(value: &Value) -> String {
         Value::Array(arr) => format!("[{}]", arr.len()),
         Value::Object(obj) => format!("{{{}}}", obj.len()),
     }
+}
+
+fn list_groups(lab: &Lab, name: Option<&str>) -> Result<(), CliError> {
+    match name {
+        None => {
+            if lab.groups.is_empty() {
+                println!("No groups defined in this lab.");
+                return Ok(());
+            }
+            println!("Available groups:");
+            let mut group_names: Vec<_> = lab.groups.keys().collect();
+            group_names.sort();
+            for group_name in group_names {
+                let run_ids = &lab.groups[group_name];
+                println!("  @{} ({} runs)", group_name, run_ids.len());
+            }
+        }
+        Some(group_name) => match lab.groups.get(group_name) {
+            Some(run_ids) => {
+                println!("Runs in group '@{}':", group_name);
+                let mut sorted_ids: Vec<_> = run_ids.iter().collect();
+                sorted_ids.sort();
+                for run_id in sorted_ids {
+                    println!("  {}", run_id);
+                }
+            }
+            None => {
+                let available: Vec<_> = {
+                    let mut keys: Vec<_> = lab.groups.keys().cloned().collect();
+                    keys.sort();
+                    keys
+                };
+                if available.is_empty() {
+                    eprintln!(
+                        "Unknown group '{}'. No groups are defined in this lab.",
+                        group_name
+                    );
+                } else {
+                    eprintln!(
+                        "Unknown group '{}'. Available groups: {}",
+                        group_name,
+                        available.join(", ")
+                    );
+                }
+            }
+        },
+    }
+    Ok(())
 }
 
 fn list_dependencies(lab: &Lab, job_id_str: &str) -> Result<(), CliError> {

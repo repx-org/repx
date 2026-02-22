@@ -92,4 +92,13 @@ pub enum DomainError {
 
     #[error("Invalid execution target format: {0}. Expected 'local' or 'ssh:user@host'.")]
     InvalidTarget(String),
+
+    #[error("Unknown group '{name}'.\nAvailable groups: {}", available.join(", "))]
+    UnknownGroup {
+        name: String,
+        available: Vec<String>,
+    },
+
+    #[error("Empty group name after '@'.")]
+    EmptyGroupName,
 }

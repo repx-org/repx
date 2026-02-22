@@ -75,6 +75,7 @@ let
   mkRootMetadata =
     {
       runMetadataPaths,
+      groups ? { },
     }:
     let
       metadata = {
@@ -82,7 +83,8 @@ let
         type = "root";
         inherit gitHash;
         runs = runMetadataPaths;
-      };
+      }
+      // (if groups != { } then { inherit groups; } else { });
     in
     pkgs.writeTextFile {
       name = "metadata-top.json";

@@ -3,6 +3,30 @@ use crate::{
     model::{Job, JobId, Lab, RunId},
 };
 use std::collections::HashSet;
+
+pub fn resolve_run_spec(lab: &Lab, spec: &str) -> Result<Vec<RunId>, DomainError> {
+    if let Some(group_name) = spec.strip_prefix('@') {
+        if group_name.is_empty() {
+            return Err(DomainError::EmptyGroupName);
+        }
+        match lab.groups.get(group_name) {
+            Some(run_ids) => Ok(run_ids.clone()),
+            None => {
+                let available: Vec<String> = {
+                    let mut keys: Vec<_> = lab.groups.keys().cloned().collect();
+                    keys.sort();
+                    keys
+                };
+                Err(DomainError::UnknownGroup {
+                    name: group_name.to_string(),
+                    available,
+                })
+            }
+        }
+    } else {
+        Ok(vec![RunId(spec.to_string())])
+    }
+}
 fn get_all_dependencies(job: &Job) -> impl Iterator<Item = &JobId> {
     job.executables
         .values()
@@ -177,6 +201,14 @@ mod tests {
                 (JobId("multi-abc-1".into()), job(&[])),
                 (JobId("multi-def-2".into()), job(&[])),
             ]),
+            groups: HashMap::from([
+                (
+                    "all".to_string(),
+                    vec![RunId("run-a".into()), RunId("run-b-ambiguous".into())],
+                ),
+                ("only-a".to_string(), vec![RunId("run-a".into())]),
+                ("empty".to_string(), vec![]),
+            ]),
             host_tools_path: PathBuf::from("host-tools"),
             host_tools_dir_name: "host-tools".to_string(),
             referenced_files: Vec::new(),
@@ -228,5 +260,49 @@ mod tests {
         let input = RunId("does-not-exist".to_string());
         let result = resolve_target_job_id(&lab, &input);
         assert!(matches!(result, Err(DomainError::TargetNotFound(_))));
+    }
+
+    #[test]
+    fn resolve_run_spec_group_returns_correct_run_ids() {
+        let lab = test_lab();
+        let result = resolve_run_spec(&lab, "@all").unwrap();
+        assert_eq!(result.len(), 2);
+        assert!(result.contains(&RunId("run-a".into())));
+        assert!(result.contains(&RunId("run-b-ambiguous".into())));
+    }
+
+    #[test]
+    fn resolve_run_spec_single_group() {
+        let lab = test_lab();
+        let result = resolve_run_spec(&lab, "@only-a").unwrap();
+        assert_eq!(result, vec![RunId("run-a".into())]);
+    }
+
+    #[test]
+    fn resolve_run_spec_empty_group() {
+        let lab = test_lab();
+        let result = resolve_run_spec(&lab, "@empty").unwrap();
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn resolve_run_spec_unknown_group_returns_error() {
+        let lab = test_lab();
+        let result = resolve_run_spec(&lab, "@nonexistent");
+        assert!(matches!(result, Err(DomainError::UnknownGroup { .. })));
+    }
+
+    #[test]
+    fn resolve_run_spec_empty_name_after_at() {
+        let lab = test_lab();
+        let result = resolve_run_spec(&lab, "@");
+        assert!(matches!(result, Err(DomainError::EmptyGroupName)));
+    }
+
+    #[test]
+    fn resolve_run_spec_plain_run_name_falls_through() {
+        let lab = test_lab();
+        let result = resolve_run_spec(&lab, "run-a").unwrap();
+        assert_eq!(result, vec![RunId("run-a".into())]);
     }
 }

@@ -166,6 +166,7 @@ mod tests {
             content_hash: "123".to_string(),
             runs: HashMap::new(),
             jobs: HashMap::new(),
+            groups: HashMap::new(),
             host_tools_path: std::path::PathBuf::new(),
             host_tools_dir_name: "tools".to_string(),
             referenced_files: vec![],

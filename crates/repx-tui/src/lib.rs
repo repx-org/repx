@@ -2,6 +2,8 @@ pub mod app;
 pub mod error;
 pub mod event;
 pub mod model;
+pub mod style;
+pub mod tree_view;
 pub mod ui;
 pub mod widgets;
 

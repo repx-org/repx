@@ -77,6 +77,7 @@ let
     {
       runs,
       includeImages,
+      resolvedGroups ? { },
     }:
     let
       lib-run-internal = {
@@ -151,6 +152,7 @@ let
           in
           "revision/${filename}"
         ) runs;
+        groups = resolvedGroups;
       };
       rootMetadataFilename = builtins.baseNameOf (toString rootMetadata);
 
@@ -294,10 +296,14 @@ let
         ;
     };
   runs2Lab =
-    runs:
+    {
+      runDefinitions,
+      resolvedGroups ? { },
+    }:
     let
+      runs = runDefinitions;
       artifacts = buildLabCoreAndManifest {
-        inherit runs;
+        inherit runs resolvedGroups;
         includeImages = true;
       };
       readme = pkgs.runCommand "README.md" { } ''

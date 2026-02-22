@@ -83,6 +83,7 @@ pub struct TuiJob {
 }
 #[derive(Clone, Debug)]
 pub enum TuiRowItem {
+    Group { name: String },
     Run { id: repx_core::model::RunId },
     Job { job: Box<TuiJob> },
 }
