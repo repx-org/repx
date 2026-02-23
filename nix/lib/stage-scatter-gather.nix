@@ -80,7 +80,12 @@ else
       mkSubStage =
         subStageDef: subStageArgs:
         (import ./stage-simple.nix) { inherit pkgs; } (
-          subStageDef // subStageArgs // { inherit paramInputs; }
+          subStageDef
+          // subStageArgs
+          // {
+            inherit paramInputs;
+            dependencyDerivations = [ ];
+          }
         );
 
       commonStageDef = pkgs.lib.removeAttrs stageDef [
@@ -178,9 +183,12 @@ else
           outputs = gatherDef.outputs or { };
         };
       };
+
       dependencyDerivations = stageDef.dependencyDerivations or [ ];
       depders = dependencyDerivations;
-      dependencyManifestJson = builtins.toJSON (map toString depders);
+      dependencyPaths = map toString depders;
+      dependencyManifestJson = builtins.toJSON (map builtins.unsafeDiscardStringContext dependencyPaths);
+      dependencyHash = builtins.hashString "sha256" (builtins.concatStringsSep ":" dependencyPaths);
       paramsJson = builtins.toJSON paramInputs;
 
     in
@@ -189,6 +197,7 @@ else
       pname = groupPname;
 
       dontUnpack = true;
+
       nativeBuildInputs = [
         scatterDrv
         workerDrv
@@ -199,9 +208,10 @@ else
         repxStageType = "scatter-gather";
         inherit paramInputs executables;
         outputMetadata = gatherDef.outputs or { };
+        inherit scatterDrv workerDrv gatherDrv;
       };
 
-      inherit paramsJson dependencyManifestJson;
+      inherit paramsJson dependencyManifestJson dependencyHash;
       passAsFile = [
         "paramsJson"
         "dependencyManifestJson"
