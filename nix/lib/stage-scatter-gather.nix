@@ -179,8 +179,9 @@ else
         };
       };
       dependencyDerivations = stageDef.dependencyDerivations or [ ];
-      depders = pkgs.lib.filter pkgs.lib.isDerivation dependencyDerivations;
+      depders = dependencyDerivations;
       dependencyManifestJson = builtins.toJSON (map toString depders);
+      paramsJson = builtins.toJSON paramInputs;
 
     in
     pkgs.stdenv.mkDerivation rec {
@@ -200,6 +201,12 @@ else
         outputMetadata = gatherDef.outputs or { };
       };
 
+      inherit paramsJson dependencyManifestJson;
+      passAsFile = [
+        "paramsJson"
+        "dependencyManifestJson"
+      ];
+
       installPhase = ''
         runHook preInstall
         mkdir -p $out/bin
@@ -208,8 +215,8 @@ else
         cp ${gatherDrv}/bin/* $out/bin/${groupPname}-gather
         chmod +x $out/bin/*
 
-        echo '${builtins.toJSON paramInputs}' > $out/${pname}-params.json
-        echo '${dependencyManifestJson}' > $out/nix-input-dependencies.json
+        cp "$paramsJsonPath" $out/${pname}-params.json
+        cp "$dependencyManifestJsonPath" $out/nix-input-dependencies.json
 
         runHook postInstall
       '';

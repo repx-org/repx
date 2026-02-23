@@ -114,8 +114,9 @@ let
     ${header}
     ${userScript}
   '';
-  depders = pkgs.lib.filter pkgs.lib.isDerivation dependencyDerivations;
+  depders = dependencyDerivations;
   dependencyManifestJson = builtins.toJSON (map toString depders);
+  paramsJson = builtins.toJSON paramsDef;
 
   analyzerScript = ./internal/analyze_deps.py;
 
@@ -173,17 +174,23 @@ pkgs.stdenv.mkDerivation rec {
     stageInputs = stageDef.stageInputs or { };
   };
 
+  inherit paramsJson dependencyManifestJson;
+  passAsFile = [
+    "paramsJson"
+    "dependencyManifestJson"
+  ];
+
   installPhase = ''
     runHook preInstall
     mkdir -p $out/bin
     cp ${fullScript} $out/bin/${pname}
     chmod +x $out/bin/${pname}
-    echo '${builtins.toJSON paramsDef}' > $out/${pname}-params.json
-    echo '${dependencyManifestJson}' > $out/nix-input-dependencies.json
+    cp "$paramsJsonPath" $out/${pname}-params.json
+    cp "$dependencyManifestJsonPath" $out/nix-input-dependencies.json
     runHook postInstall
   '';
 
-  buildInputs = depders ++ runDependencies;
+  buildInputs = runDependencies;
 
   nativeBuildInputs = [
     pkgs.shellcheck

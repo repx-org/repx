@@ -65,6 +65,7 @@ let
     };
     large_lab = pkgs.callPackage ./checks/lib/check-large-lab.nix { };
     buildcommand_size = pkgs.callPackage ./checks/lib/check-buildcommand-size.nix { };
+    stage_env_size = pkgs.callPackage ./checks/lib/check-stage-env-size.nix { };
   }
   // (import ./checks/lib/check-deps.nix { inherit pkgs; });
 
