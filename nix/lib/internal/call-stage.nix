@@ -15,6 +15,7 @@ let
         "version"
         "params"
         "passthru"
+        "resources"
         "override"
         "overrideDerivation"
       ];
@@ -69,6 +70,14 @@ let
   );
   resolvedOutputs = resolveWithParams "outputs" (stageDef.outputs or { });
 
+  resolvedStageResources = resolveWithParams "resources" (stageDef.resources or null);
+
+  runDependencies = stageDef.runDependencies or [ ];
+  allInputDerivations = (pkgs.lib.unique processed.dependencyDerivations) ++ runDependencies;
+  collectedInputResources = common.collectInputResources allInputDerivations;
+
+  finalResources = common.mergeResourceHints collectedInputResources resolvedStageResources;
+
   processed = processDependenciesFn (
     args
     // {
@@ -91,6 +100,7 @@ let
           dependencyDerivations = pkgs.lib.unique processed.dependencyDerivations;
           stageInputs = processed.finalFlatInputs;
           inherit (processed) inputMappings;
+          resources = if finalResources == { } then null else finalResources;
         };
       in
       if stageDefWithDeps ? "scatter" then

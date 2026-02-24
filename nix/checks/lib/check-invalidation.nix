@@ -160,6 +160,31 @@ let
           (noneChanged (hashes labBase "stage-B-producer") (hashes labMod "stage-B-producer"))
         ];
       };
+
+    mod_resources_no_invalidation =
+      let
+        lab = buildLabWithPatches {
+          stagePatches = {
+            "stage-B-producer.nix" = {
+              resources = {
+                mem = "64G";
+                cpus = 32;
+                time = "48:00:00";
+                partition = "gpu";
+              };
+            };
+          };
+        };
+        hashes = pname: getHashes lab.passthru.allJobDerivations pname;
+      in
+      {
+        name = "Modify Resources (No Hash Invalidation)";
+        assertions = [
+          (noneChanged (baselineHashes "stage-B-producer") (hashes "stage-B-producer"))
+          (noneChanged (baselineHashes "stage-C-consumer") (hashes "stage-C-consumer"))
+          (noneChanged (baselineHashes "stage-E-total-sum") (hashes "stage-E-total-sum"))
+        ];
+      };
   };
 
   runScenarios = pkgs.lib.mapAttrsToList (

@@ -95,6 +95,7 @@ pkgs.stdenv.mkDerivation rec {
     outputMetadata = outputsDef;
     stageInputs = stageDef.stageInputs or { };
     inherit scriptDrv;
+    resources = stageDef.resources or null;
   };
 
   inherit paramsJson dependencyManifestJson dependencyHash;

@@ -179,12 +179,14 @@ mod tests {
                 path_in_lab: std::path::PathBuf::new(),
                 stage_type: crate::model::StageType::Simple,
                 executables: HashMap::new(),
+                resource_hints: None,
             };
 
             let mut exe = crate::model::Executable {
                 path: std::path::PathBuf::from("echo"),
                 inputs: vec![],
                 outputs: HashMap::new(),
+                resource_hints: None,
             };
 
             for inp in inputs {

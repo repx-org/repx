@@ -157,6 +157,7 @@ mod tests {
             path: PathBuf::from("bin/executable"),
             inputs,
             outputs: HashMap::new(),
+            resource_hints: None,
         };
 
         Job {
@@ -165,6 +166,7 @@ mod tests {
             path_in_lab: PathBuf::new(),
             stage_type: crate::model::StageType::Simple,
             executables: HashMap::from([("main".to_string(), main_executable)]),
+            resource_hints: None,
         }
     }
 

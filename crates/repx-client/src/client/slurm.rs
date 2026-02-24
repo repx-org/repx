@@ -182,10 +182,23 @@ pub fn submit_slurm_batch_run(
                         .join(" ")
                 }
             );
-            let main_directives =
-                resources::resolve_for_job(job_id, target_name, &options.resources);
-            let worker_directives =
-                resources::resolve_worker_resources(job_id, target_name, &options.resources);
+
+            let orchestrator_hints = job.resource_hints.as_ref();
+            let worker_hints = worker_exe.resource_hints.as_ref();
+
+            let main_directives = resources::resolve_for_job(
+                job_id,
+                target_name,
+                &options.resources,
+                orchestrator_hints,
+            );
+            let worker_directives = resources::resolve_worker_resources(
+                job_id,
+                target_name,
+                &options.resources,
+                orchestrator_hints,
+                worker_hints,
+            );
             let worker_opts_str = worker_directives.to_shell_string();
 
             let command = format!(
@@ -207,7 +220,10 @@ pub fn submit_slurm_batch_run(
                 repx_args,
                 executable_path_on_target.display()
             );
-            let directives = resources::resolve_for_job(job_id, target_name, &options.resources);
+
+            let hints = job.resource_hints.as_ref();
+            let directives =
+                resources::resolve_for_job(job_id, target_name, &options.resources, hints);
             let command = format!("{} internal-execute {}", remote_repx_command, repx_args);
             (command, directives)
         };

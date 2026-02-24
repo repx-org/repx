@@ -11,6 +11,7 @@ let
     "outputs"
     "run"
     "runDependencies"
+    "resources"
   ];
 
   validateSubStage =
@@ -111,10 +112,15 @@ else
       };
 
       externalInputMappings = scatterDrv.passthru.executables.main.inputs;
+      scatterResources = scatterDef.resources or null;
+      workerResources = workerDef.resources or null;
+      gatherResources = gatherDef.resources or null;
+
       executables = {
         scatter = {
           inputs = externalInputMappings;
           outputs = scatterDef.outputs or { };
+          resource_hints = scatterResources;
         };
 
         worker = {
@@ -136,6 +142,7 @@ else
             ];
 
           outputs = workerDef.outputs or { };
+          resource_hints = workerResources;
         };
 
         gather = {
@@ -181,6 +188,7 @@ else
             );
 
           outputs = gatherDef.outputs or { };
+          resource_hints = gatherResources;
         };
       };
 
@@ -209,6 +217,7 @@ else
         inherit paramInputs executables;
         outputMetadata = gatherDef.outputs or { };
         inherit scatterDrv workerDrv gatherDrv;
+        resources = stageDef.resources or null;
       };
 
       inherit paramsJson dependencyManifestJson dependencyHash;

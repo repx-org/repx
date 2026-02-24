@@ -129,6 +129,12 @@ pkgs.testers.runNixOSTest {
                             data = json.load(f)
                             if data.get("name") == "simulation-run" and "jobs" in data:
                                 jobs = data["jobs"]
+
+                                for jid, jval in jobs.items():
+                                    if jval.get("resource_hints"):
+                                        print(f"Found job with resource_hints: {jid} -> {jval.get('resource_hints')}")
+                                        return [jid]
+
                                 for jid, jval in jobs.items():
                                     if "workload-generator" in jval.get("name", ""):
                                         print(f"Found workload-generator job: {jid}")
@@ -136,7 +142,7 @@ pkgs.testers.runNixOSTest {
 
                                 if jobs:
                                     first_job = list(jobs.keys())[0]
-                                    print(f"Workload generator not found. Selecting first available job: {first_job}")
+                                    print(f"No job with resource_hints found. Selecting first available job: {first_job}")
                                     return [first_job]
                     except Exception as e:
                         print(f"Warning: Failed to read or parse {full_path}: {e}")
@@ -152,7 +158,7 @@ pkgs.testers.runNixOSTest {
     run_args = " ".join(subset_jobs)
     print(f"Running subset of jobs: {run_args}")
 
-    def run_slurm_test(runtime):
+    def run_slurm_test(runtime, verify_resources=False):
         print(f"\n>>> Testing Remote Slurm Runtime: {runtime} <<<")
 
         config = f"""
@@ -181,6 +187,28 @@ pkgs.testers.runNixOSTest {
 
         print(f"[{runtime}] Submitting jobs...")
         client.succeed(f"repx run {run_args} --lab ${referenceLab}")
+
+        if verify_resources:
+            print(f"[{runtime}] Verifying resource hints in sbatch scripts...")
+
+            sbatch_check = cluster.succeed("find /home/repxuser/repx-store/submissions -name '*.sbatch' -exec cat {} \\;")
+
+            has_mem = "--mem=" in sbatch_check
+            has_cpus = "--cpus-per-task=" in sbatch_check
+            has_time = "--time=" in sbatch_check
+            has_partition = "--partition=main" in sbatch_check
+
+            print(f"[{runtime}] Resource directives found: mem={has_mem}, cpus={has_cpus}, time={has_time}, partition={has_partition}")
+
+            if not has_partition:
+                print(f"!!! [{runtime}] SBATCH CONTENT:\n{sbatch_check}")
+                raise Exception(f"Missing --partition directive in sbatch script (from resources.toml defaults)")
+
+            if not (has_mem or has_cpus or has_time):
+                print(f"!!! [{runtime}] SBATCH CONTENT:\n{sbatch_check}")
+                print(f"[{runtime}] Warning: No resource hints found in sbatch scripts (job may not have hints)")
+            else:
+                print(f"[{runtime}] Resource hints verification passed!")
 
         print(f"[{runtime}] Waiting for jobs to finish in Slurm queue...")
 
@@ -225,7 +253,7 @@ pkgs.testers.runNixOSTest {
         cluster.succeed("rm -rf /home/repxuser/repx-store/outputs/*")
         cluster.succeed("rm -rf /home/repxuser/repx-store/cache/*")
 
-    run_slurm_test("native")
+    run_slurm_test("native", verify_resources=True)
     run_slurm_test("bwrap")
 
     cluster.wait_for_unit("docker.service")

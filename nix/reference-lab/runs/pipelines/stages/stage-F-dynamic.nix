@@ -6,6 +6,14 @@ _: {
     multiplier = 1;
   };
 
+  resources =
+    { params }:
+    {
+      mem = if params.mode == "slow" then "4G" else "1G";
+      cpus = if params.multiplier > 5 then 4 else 1;
+      time = if params.mode == "slow" then "01:00:00" else "00:10:00";
+    };
+
   inputs =
     { params }:
     {

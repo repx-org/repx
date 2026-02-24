@@ -6,6 +6,12 @@ _: {
     config_file = "";
   };
 
+  resources = {
+    mem = "512M";
+    cpus = 1;
+    time = "00:05:00";
+  };
+
   outputs = {
     "raw_output" = "$out/numbers.txt";
   };

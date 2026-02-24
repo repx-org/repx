@@ -5,28 +5,40 @@
   includeImages ? true,
 }:
 let
+  removeNulls = attrs: pkgs.lib.filterAttrs (_: v: v != null) attrs;
+
   mkJobMetadata =
     jobDrv: stageType: pname: jobNameWithHash:
     let
       addPathToExecutables = pkgs.lib.mapAttrs (
         exeName: exeDef:
-        exeDef
-        // {
-          path =
-            if stageType == "scatter-gather" then
-              "jobs/${jobNameWithHash}/bin/${pname}-${exeName}"
+        let
+          baseDef = exeDef // {
+            path =
+              if stageType == "scatter-gather" then
+                "jobs/${jobNameWithHash}/bin/${pname}-${exeName}"
+              else
+                "jobs/${jobNameWithHash}/bin/${pname}";
+          };
+          withResources =
+            if baseDef ? resource_hints && baseDef.resource_hints != null then
+              baseDef
             else
-              "jobs/${jobNameWithHash}/bin/${pname}";
-        }
+              removeAttrs baseDef [ "resource_hints" ];
+        in
+        withResources
       );
+
+      jobResourceHints = jobDrv.passthru.resources or null;
     in
     {
       name = jobNameWithHash;
-      value = {
+      value = removeNulls {
         params = jobDrv.passthru.paramInputs or { };
         name = jobDrv.name or null;
         stage_type = stageType;
         executables = addPathToExecutables (jobDrv.passthru.executables or { });
+        resource_hints = jobResourceHints;
       };
     };
 

@@ -26,38 +26,39 @@ repx-tui = { path = "crates/repx-tui" }
 repx-viz = { path = "crates/repx-viz" }
 repx-test-utils = { path = "crates/repx-test-utils" }
 
-fs-err = "3.2"
+fs-err = "3.3"
 async-trait = "0.1.89"
-chrono = "0.4.42"
-clap = { version = "4.5.53", features = ["derive"] }
-colored = "3.0"
+chrono = "0.4.44"
+clap = { version = "4.5.60", features = ["derive"] }
+colored = "3.1"
 comfy-table = "7.2"
 crossterm = "0.29.0"
-futures = "0.3.31"
+futures = "0.3.32"
 indicatif = "0.18"
-log = "0.4.28"
+log = "0.4.29"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "std"] }
 num_cpus = "1.17.0"
 once_cell = "1.21.3"
-regex = "1.12.2"
+regex = "1.12.3"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-tempfile = "3.23.0"
+tempfile = "3.26.0"
 thiserror = "2.0"
-tokio = { version = "1.48.0", features = ["full"] }
+tokio = { version = "1.49.0", features = ["full"] }
 walkdir = "2.5"
 xdg = "3.0.0"
 sha2 = "0.10.9"
-rayon = "1.10"
-toml = "0.9.8"
-ctrlc = "3.5.1"
-rand = "0.9.2"
-whoami = "1.6.1"
-nix = { version = "0.30.1", features = ["signal", "fs"] }
-shellexpand = "3.1.1"
+rayon = "1.11"
+toml = "1.0.3"
+ctrlc = "3.5.2"
+rand = "0.10.0"
+whoami = "2.1.1"
+nix = { version = "0.29.0", features = ["signal", "fs"] }
+shellexpand = "3.1.2"
 anyhow = "1.0"
-uuid = { version = "1.9.1", features = ["v4", "fast-rng", "macro-diagnostics"] }
+uuid = { version = "1.21.0", features = ["v4", "fast-rng", "macro-diagnostics"] }
+sysinfo = "0.32"
 
 [profile.release]
 lto = "thin"

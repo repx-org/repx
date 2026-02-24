@@ -145,7 +145,7 @@ pub trait SlurmOps: CommandRunner {
         let user = if self.config().address.is_some() {
             self.run_command("whoami", &[])?.trim().to_string()
         } else {
-            whoami::username()
+            whoami::username().unwrap_or_else(|_| "unknown".to_string())
         };
 
         let squeue_command = format!("squeue -h -o '%i %j %t' -u '{}'", user);

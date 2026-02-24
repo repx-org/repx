@@ -70,6 +70,50 @@ fn handle_show_job(args: ShowJobArgs, lab_path: &Path) -> Result<(), CliError> {
         print_json_indented(&job.params, 2);
     }
 
+    if let Some(hints) = &job.resource_hints {
+        println!();
+        println!("Resource Hints (from Nix):");
+        if let Some(mem) = &hints.mem {
+            println!("  mem: {}", mem);
+        }
+        if let Some(cpus) = hints.cpus {
+            println!("  cpus: {}", cpus);
+        }
+        if let Some(time) = &hints.time {
+            println!("  time: {}", time);
+        }
+        if let Some(partition) = &hints.partition {
+            println!("  partition: {}", partition);
+        }
+        if !hints.sbatch_opts.is_empty() {
+            println!("  sbatch_opts: {}", hints.sbatch_opts.join(", "));
+        }
+    }
+
+    if job.stage_type == repx_core::model::StageType::ScatterGather {
+        let mut has_sub_hints = false;
+        for (exe_name, exe) in &job.executables {
+            if let Some(hints) = &exe.resource_hints {
+                if !has_sub_hints {
+                    println!();
+                    println!("Sub-stage Resource Hints:");
+                    has_sub_hints = true;
+                }
+                let parts: Vec<String> = [
+                    hints.mem.as_ref().map(|m| format!("mem={}", m)),
+                    hints.cpus.map(|c| format!("cpus={}", c)),
+                    hints.time.as_ref().map(|t| format!("time={}", t)),
+                ]
+                .into_iter()
+                .flatten()
+                .collect();
+                if !parts.is_empty() {
+                    println!("  {}: {}", exe_name, parts.join(", "));
+                }
+            }
+        }
+    }
+
     println!();
     println!("Inputs:");
     let mut inputs_found = false;

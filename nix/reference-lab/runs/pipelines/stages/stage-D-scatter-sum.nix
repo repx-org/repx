@@ -2,6 +2,12 @@
 {
   pname = "stage-D-partial-sums";
 
+  resources = {
+    mem = "256M";
+    cpus = 1;
+    time = "00:02:00";
+  };
+
   scatter = {
     pname = "scatter";
     inputs = {
@@ -40,6 +46,11 @@
       jq
       gawk
     ];
+    resources = {
+      mem = "2G";
+      cpus = 2;
+      time = "00:30:00";
+    };
     run =
       { inputs, outputs, ... }:
       ''
@@ -63,6 +74,11 @@
       coreutils
       jq
     ];
+    resources = {
+      mem = "1G";
+      cpus = 1;
+      time = "00:10:00";
+    };
     run =
       { inputs, outputs, ... }:
       ''

@@ -19,6 +19,7 @@ sha2 = { workspace = true }
 toml = { workspace = true }
 num_cpus.workspace = true
 comfy-table = { workspace = true }
+sysinfo = { workspace = true }
 
 [dev-dependencies]
 repx-core = { workspace = true }
