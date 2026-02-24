@@ -183,10 +183,32 @@ Define resource requirements at the stage level for SLURM scheduling:
 
 Resources are automatically **merged from upstream dependencies**: if your stage depends on a stage that requires 16G memory and your stage requires 32G, the final resource hint is 32G (the maximum). For `partition` and `sbatch_opts`, the stage's own value takes precedence.
 
-For scatter-gather stages, each sub-stage can define its own resource hints:
+For scatter-gather stages, each sub-stage and each step can define its own resource hints:
 
 ```nix
 { pkgs }:
+let
+  compute = {
+    pname = "compute";
+    inputs = { worker__item = ""; data = ""; };
+    outputs = { result = "$out/result.csv"; };
+    deps = [];
+    resources = { mem = "16G"; cpus = 4; time = "02:00:00"; partition = "compute"; };
+    run = { inputs, outputs, ... }: ''
+      # heavy computation
+    '';
+  };
+  summarize = {
+    pname = "summarize";
+    inputs = { result = ""; };
+    outputs = { summary = "$out/summary.json"; };
+    deps = [ compute ];
+    resources = { mem = "2G"; cpus = 1; time = "00:10:00"; };
+    run = { inputs, outputs, ... }: ''
+      # lightweight post-processing
+    '';
+  };
+in
 {
   pname = "parallel-processing";
 
@@ -195,10 +217,7 @@ For scatter-gather stages, each sub-stage can define its own resource hints:
     # ...
   };
 
-  worker = {
-    resources = { mem = "16G"; cpus = 4; time = "02:00:00"; partition = "compute"; };
-    # ...
-  };
+  steps = { inherit compute summarize; };
 
   gather = {
     resources = { mem = "8G"; cpus = 2; time = "00:30:00"; };

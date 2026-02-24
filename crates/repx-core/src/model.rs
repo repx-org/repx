@@ -211,6 +211,8 @@ pub struct Executable {
     pub outputs: HashMap<String, serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub resource_hints: Option<ResourceHints>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub deps: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

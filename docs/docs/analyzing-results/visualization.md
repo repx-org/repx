@@ -31,7 +31,11 @@ repx viz --lab ./result -o my-graph.svg --format svg
 *   **Clusters**: Jobs are grouped by their **Run Name** (e.g., `simulation`, `analysis`).
 *   **Shapes**:
     *   *Box*: Simple Stage.
-    *   *Double Box / Cluster*: Scatter-Gather groups.
+    *   *Subgraph Cluster*: Scatter-Gather groups. These render as a cluster containing:
+        *   *Trapezium*: Scatter phase node.
+        *   *Box (indigo)*: Step nodes, connected according to the step DAG dependencies.
+        *   *Inverted Trapezium*: Gather phase node.
+        *   Internal edges show the step DAG flow: scatter → root steps → ... → sink step → gather.
 
 ## Requirements
 

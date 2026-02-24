@@ -51,7 +51,7 @@ pkgs.testers.runNixOSTest {
 
         machine.succeed("repx run simulation-run --lab ${referenceLab}")
 
-        machine.succeed("grep -rE '400|415' /var/lib/repx-store/outputs/*/out/total_sum.txt")
+        machine.succeed("grep -rE '540|595' /var/lib/repx-store/outputs/*/out/total_sum.txt")
 
         machine.succeed("rm -rf /var/lib/repx-store/outputs/*")
         machine.succeed("rm -rf /var/lib/repx-store/cache/*")
@@ -62,6 +62,6 @@ pkgs.testers.runNixOSTest {
 
         machine.succeed("repx run simulation-run --lab ${referenceLab}")
 
-        machine.succeed("grep -rE '400|415' /var/lib/repx-store/outputs/*/out/total_sum.txt")
+        machine.succeed("grep -rE '540|595' /var/lib/repx-store/outputs/*/out/total_sum.txt")
   '';
 }

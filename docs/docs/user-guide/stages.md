@@ -72,18 +72,46 @@ RepX runs your script in a tightly controlled environment:
 
 ## Scatter-Gather Stage
 
-A scatter-gather stage automatically scales tasks across your compute resources. It consists of three sub-stages:
+A scatter-gather stage automatically scales tasks across your compute resources. It consists of three parts:
 1.  **Scatter**: Generates a list of work items.
-2.  **Worker**: Executes for each work item in parallel.
-3.  **Gather**: Aggregates the results.
+2.  **Steps**: A mini-DAG of steps that executes per work item in parallel. Each step has per-step caching — if step 3 of 5 fails, only step 3 reruns on retry.
+3.  **Gather**: Aggregates the results from all branches.
 
 ### Schema
 
 ```nix
 { pkgs }:
+let
+  # Define steps as let-bindings so they can reference each other in deps
+  extract = {
+    pname = "extract";
+    inputs = {
+      # Root steps receive worker__item from scatter
+      "worker__item" = "";
+      "data" = "";  # External input (from upstream pipeline stage)
+    };
+    outputs = { "parsed" = "$out/parsed.json"; };
+    deps = [];  # Root step — no dependencies on other steps
+    run = { inputs, outputs, ... }: ''
+      jq -r '.index' "${inputs.worker__item}" > "${outputs.parsed}"
+    '';
+  };
+
+  process = {
+    pname = "process";
+    inputs = {
+      "parsed" = "";  # Wired automatically from extract (implicit name match)
+    };
+    outputs = { "result" = "$out/result.csv"; };
+    deps = [ extract ];  # Depends on extract step
+    run = { inputs, outputs, ... }: ''
+      echo "Processing $(cat "${inputs.parsed}")" > "${outputs.result}"
+    '';
+  };
+in
 {
   pname = "parameter-sweep";
-  
+
   # Parameters applicable to the whole group
   params = { chunks = 10; };
 
@@ -103,40 +131,89 @@ A scatter-gather stage automatically scales tasks across your compute resources.
     '';
   };
 
-  # --- 2. Worker ---
-  worker = {
-    inputs = {
-      # MANDATORY: Receives one item from the scatter list
-      "worker__item" = ""; 
-    };
-    outputs = {
-      "result" = "$out/partial.csv";
-    };
-    run = { inputs, outputs, ... }: ''
-      # worker__item is a JSON file containing the single item object
-      idx=$(jq -r .index < "${inputs.worker__item}")
-      echo "Processing $idx" > "${outputs.result}"
-    '';
+  # --- 2. Steps (mini-DAG per branch) ---
+  steps = {
+    inherit extract process;
   };
 
   # --- 3. Gather ---
   gather = {
     inputs = {
-      # MANDATORY: Receives a JSON list of all worker output paths
+      # MANDATORY: Receives a JSON list of all sink step output paths
       "worker__outs" = "[]";
     };
     outputs = {
       "final" = "$out/final.csv";
     };
     run = { inputs, outputs, ... }: ''
-      # worker__outs is a JSON list of objects. Each object has keys matching worker outputs.
-      # e.g. [{"result": "/path/to/worker1/partial.csv"}, ...]
-      
-      cat "${inputs.worker__outs}" | jq -r '.[].result' | xargs cat > "${outputs.final}"
+      # worker__outs is a JSON list of objects. Each object has keys matching
+      # the sink step's outputs.
+      # e.g. [{"result": "/path/to/branch-0/step-process/out/result.csv"}, ...]
+
+      jq -r '.[].result' "${inputs.worker__outs}" | xargs cat > "${outputs.final}"
     '';
   };
 }
 ```
+
+### Step Dependencies
+
+Steps form a directed acyclic graph (DAG) within each branch. The `deps` attribute specifies which other steps a step depends on:
+
+- **`deps = []`**: Root step. At least one root step must declare a `worker__item` input to receive the work item from scatter.
+- **`deps = [ other_step ]`**: Depends on `other_step`. Inputs are wired automatically by matching output/input names (implicit mapping).
+- **Explicit mapping**: Use `[ other_step "source_output" "target_input" ]` when names don't match.
+
+There must be exactly **one sink step** — a step that no other step depends on. The sink step's outputs are what the gather phase receives.
+
+### Diamond DAG Example
+
+Steps can form diamond dependency patterns:
+
+```nix
+let
+  trace_gen = {
+    inputs = { worker__item = ""; workload = ""; };
+    outputs = { trace = "$out/trace.bin"; };
+    deps = [];
+    # ...
+  };
+  trace_align = {
+    inputs = { trace = ""; };
+    outputs = { aligned = "$out/aligned.bin"; };
+    deps = [ trace_gen ];
+    # ...
+  };
+  trace_analyze = {
+    inputs = { trace = ""; };
+    outputs = { analysis = "$out/analysis.json"; };
+    deps = [ trace_gen ];
+    # ...
+  };
+  # Sink step: depends on BOTH trace_align and trace_analyze
+  foldability = {
+    inputs = { aligned = ""; analysis = ""; };
+    outputs = { result = "$out/result.json"; };
+    deps = [ trace_align trace_analyze ];
+    # ...
+  };
+in
+{
+  # ...
+  steps = { inherit trace_gen trace_align trace_analyze foldability; };
+  # ...
+}
+```
+
+This produces the DAG: `trace_gen → trace_align / trace_analyze → foldability`.
+
+### Per-Step Caching
+
+Each step within a branch gets its own SUCCESS/FAIL marker. On re-run:
+- Steps that already succeeded are **skipped** (the expensive work is preserved).
+- Only failed or pending steps re-execute.
+
+This is critical for long-running workflows: if a 2-hour QEMU trace generation succeeds but a downstream analysis step fails, only the analysis step reruns.
 
 ## Resource Hints
 
@@ -161,7 +238,7 @@ Stages can declare resource requirements for SLURM scheduling. These are optiona
 
 Resource hints are automatically **merged from upstream dependencies**: `mem`, `cpus`, and `time` take the maximum across all inputs. The stage's own `partition` and `sbatch_opts` take precedence.
 
-For scatter-gather stages, each sub-stage (`scatter`, `worker`, `gather`) can have its own `resources` attribute.
+For scatter-gather stages, each sub-stage (`scatter`, `gather`) and each individual step can have its own `resources` attribute.
 
 See the [Nix Functions Reference](../reference/nix-functions.md#resource-hints) for full details.
 

@@ -54,6 +54,117 @@ fn get_job_cpus(job: &Job, resources_config: &Option<repx_core::config::Resource
     directives.cpus_per_task.unwrap_or(DEFAULT_JOB_CPUS)
 }
 
+pub(crate) fn build_steps_json(
+    job: &Job,
+    artifacts_base: &std::path::Path,
+) -> std::result::Result<(String, String), String> {
+    use serde_json::json;
+    use std::collections::HashSet;
+
+    let step_entries: Vec<(&String, &repx_core::model::Executable)> = job
+        .executables
+        .iter()
+        .filter(|(k, _)| k.starts_with("step-"))
+        .collect();
+
+    if step_entries.is_empty() {
+        return Err(
+            "Scatter-gather job has no step executables (expected step-<name> keys)".into(),
+        );
+    }
+
+    let mut steps = serde_json::Map::new();
+    let mut all_step_names: Vec<String> = Vec::new();
+
+    for (key, exe) in &step_entries {
+        let step_name = key.strip_prefix("step-").unwrap().to_string();
+        all_step_names.push(step_name.clone());
+
+        let exe_path = artifacts_base.join(&exe.path);
+
+        let outputs: serde_json::Map<String, serde_json::Value> = exe
+            .outputs
+            .iter()
+            .filter_map(|(name, val)| {
+                val.as_str()
+                    .map(|s| (name.clone(), serde_json::Value::String(s.to_string())))
+            })
+            .collect();
+
+        let inputs: Vec<serde_json::Value> = exe
+            .inputs
+            .iter()
+            .map(|m| {
+                let mut obj = serde_json::Map::new();
+                if let Some(ref source) = m.source {
+                    obj.insert("source".into(), json!(source));
+                }
+                if let Some(ref source_output) = m.source_output {
+                    obj.insert("source_output".into(), json!(source_output));
+                }
+                obj.insert("target_input".into(), json!(m.target_input));
+                if let Some(ref job_id) = m.job_id {
+                    obj.insert("job_id".into(), json!(job_id.0));
+                }
+                if let Some(ref mapping_type) = m.mapping_type {
+                    obj.insert("type".into(), json!(mapping_type));
+                }
+                serde_json::Value::Object(obj)
+            })
+            .collect();
+
+        let mut step_obj = serde_json::Map::new();
+        step_obj.insert(
+            "exe_path".into(),
+            json!(exe_path.to_string_lossy().to_string()),
+        );
+        step_obj.insert("deps".into(), json!(exe.deps));
+        step_obj.insert("outputs".into(), serde_json::Value::Object(outputs));
+        step_obj.insert("inputs".into(), serde_json::Value::Array(inputs));
+
+        if let Some(ref hints) = exe.resource_hints {
+            step_obj.insert(
+                "resource_hints".into(),
+                serde_json::to_value(hints).unwrap(),
+            );
+        }
+
+        steps.insert(step_name, serde_json::Value::Object(step_obj));
+    }
+
+    let all_deps: HashSet<String> = step_entries
+        .iter()
+        .flat_map(|(_, exe)| exe.deps.iter().cloned())
+        .collect();
+    let sink_candidates: Vec<&String> = all_step_names
+        .iter()
+        .filter(|name| !all_deps.contains(*name))
+        .collect();
+
+    if sink_candidates.len() != 1 {
+        return Err(format!(
+            "Expected exactly one sink step but found {}: {:?}",
+            sink_candidates.len(),
+            sink_candidates
+        ));
+    }
+    let sink_step = sink_candidates[0].clone();
+
+    let sink_key = format!("step-{}", sink_step);
+    let sink_exe = job.executables.get(&sink_key).unwrap();
+    let last_step_outputs_json = serde_json::to_string(&sink_exe.outputs)
+        .map_err(|e| format!("Failed to serialize sink step outputs: {}", e))?;
+
+    let steps_metadata = json!({
+        "steps": steps,
+        "sink_step": sink_step
+    });
+    let steps_json = serde_json::to_string(&steps_metadata)
+        .map_err(|e| format!("Failed to serialize steps metadata: {}", e))?;
+
+    Ok((steps_json, last_step_outputs_json))
+}
+
 struct ResourceTracker {
     total_mem_bytes: u64,
     total_cpus: usize,
@@ -400,18 +511,17 @@ pub fn submit_local_batch_run(
 
                 if job.stage_type == repx_core::model::StageType::ScatterGather {
                     let scatter_exe = job.executables.get("scatter").unwrap();
-                    let worker_exe = job.executables.get("worker").unwrap();
                     let gather_exe = job.executables.get("gather").unwrap();
 
                     let artifacts_base = target.artifacts_base_path();
                     let job_package_path_on_target =
                         artifacts_base.join(format!("jobs/{}", job_id));
                     let scatter_exe_path = artifacts_base.join(&scatter_exe.path);
-                    let worker_exe_path = artifacts_base.join(&worker_exe.path);
                     let gather_exe_path = artifacts_base.join(&gather_exe.path);
 
-                    let worker_outputs_json = serde_json::to_string(&worker_exe.outputs)
-                        .map_err(|e| ClientError::Config(ConfigError::Json(e)))?;
+                    let (steps_json, last_step_outputs_json) =
+                        build_steps_json(job, &artifacts_base)
+                            .map_err(|e| ClientError::Config(ConfigError::General(e)))?;
 
                     args.push("--job-package-path".to_string());
                     args.push(job_package_path_on_target.to_string_lossy().to_string());
@@ -419,19 +529,19 @@ pub fn submit_local_batch_run(
                     args.push("--scatter-exe-path".to_string());
                     args.push(scatter_exe_path.to_string_lossy().to_string());
 
-                    args.push("--worker-exe-path".to_string());
-                    args.push(worker_exe_path.to_string_lossy().to_string());
-
                     args.push("--gather-exe-path".to_string());
                     args.push(gather_exe_path.to_string_lossy().to_string());
 
-                    args.push("--worker-outputs-json".to_string());
-                    args.push(worker_outputs_json);
+                    args.push("--steps-json".to_string());
+                    args.push(steps_json);
+
+                    args.push("--last-step-outputs-json".to_string());
+                    args.push(last_step_outputs_json);
 
                     args.push("--scheduler".to_string());
                     args.push("local".to_string());
 
-                    args.push("--worker-sbatch-opts".to_string());
+                    args.push("--step-sbatch-opts".to_string());
                     args.push("".to_string());
                 } else {
                     let main_exe = job.executables.get("main").unwrap();

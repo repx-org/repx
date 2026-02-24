@@ -57,7 +57,7 @@ pkgs.testers.runNixOSTest {
         if success_count == 0:
             raise Exception("No SUCCESS markers found! Impure mode test failed.")
 
-        machine.succeed(f"grep -rE '400|415' {base_path}/outputs/*/out/total_sum.txt")
+        machine.succeed(f"grep -rE '540|595' {base_path}/outputs/*/out/total_sum.txt")
 
     print("\n" + "=" * 60)
     print("E2E IMPURE TEST COMPLETED")

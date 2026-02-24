@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use regex::Regex;
-use repx_core::model::{Job, JobId, Lab};
+use repx_core::model::{Job, JobId, Lab, StageType};
 use serde_json::Value;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
@@ -21,6 +21,16 @@ const PARAM_BORDER: &str = "#94a3b8";
 const PARAM_FONT_COLOR: &str = "#475569";
 const PARAM_FONT_SIZE: &str = "9";
 const PARAM_MAX_WIDTH: usize = 20;
+
+const SG_CLUSTER_BORDER: &str = "#6366f1";
+const SG_CLUSTER_BG: &str = "#EEF2FF";
+const SG_SCATTER_FILL: &str = "#C7D2FE";
+const SG_GATHER_FILL: &str = "#C7D2FE";
+const SG_STEP_FILL: &str = "#E0E7FF";
+const SG_STEP_BORDER: &str = "#818CF8";
+const SG_INTERNAL_EDGE_COLOR: &str = "#6366f1";
+const SG_PHASE_FONT_SIZE: &str = "10";
+const SG_STEP_FONT_SIZE: &str = "9";
 
 lazy_static::lazy_static! {
     static ref PALETTE: HashMap<&'static str, &'static str> = {
@@ -238,10 +248,35 @@ impl<'a> VizGenerator<'a> {
 
                 if prefix.contains(src_run) && prefix.contains(dst_run) {
                     let width = if *cnt > 1 { "2.0" } else { "1.2" };
+
+                    let src_node = format!("{}_{}", prefix, src_job_name);
+                    let dst_node = format!("{}_{}", prefix, dst_job_name);
+
+                    let src_is_sg = self.is_scatter_gather_stage_by_clean_name(src_job_name);
+                    let dst_is_sg = self.is_scatter_gather_stage_by_clean_name(dst_job_name);
+
+                    let actual_src = if src_is_sg {
+                        format!("{}_sg_gather", src_node)
+                    } else {
+                        src_node.clone()
+                    };
+                    let actual_dst = if dst_is_sg {
+                        format!("{}_sg_scatter", dst_node)
+                    } else {
+                        dst_node.clone()
+                    };
+
                     dot.push_str(&format!(
-                        "    {}_{} -> {}_{} [penwidth=\"{}\"];\n",
-                        prefix, src_job_name, prefix, dst_job_name, width
+                        "    {} -> {} [penwidth=\"{}\"",
+                        actual_src, actual_dst, width
                     ));
+                    if src_is_sg {
+                        dot.push_str(&format!(", ltail=\"cluster_{}_sg\"", src_node));
+                    }
+                    if dst_is_sg {
+                        dot.push_str(&format!(", lhead=\"cluster_{}_sg\"", dst_node));
+                    }
+                    dot.push_str("];\n");
                 }
             }
         }
@@ -282,6 +317,13 @@ impl<'a> VizGenerator<'a> {
         Ok(dot)
     }
 
+    fn is_scatter_gather_stage_by_clean_name(&self, clean_name: &str) -> bool {
+        self.lab.jobs.values().any(|job| {
+            let name = job.name.clone().unwrap_or_default();
+            clean_id(&name) == clean_name && job.stage_type == StageType::ScatterGather
+        })
+    }
+
     fn render_run_cluster(
         &self,
         dot: &mut String,
@@ -302,25 +344,42 @@ impl<'a> VizGenerator<'a> {
 
         for (job_name, job_ids) in jobs {
             let count = job_ids.len();
-            let job_label = format!("{}\\n(x{})", job_name, count);
-            let fill_color = get_fill_color(job_name);
+            let first_job = job_ids.first().and_then(|jid| self.lab.jobs.get(jid));
+            let is_sg = first_job
+                .map(|j| j.stage_type == StageType::ScatterGather)
+                .unwrap_or(false);
+
             let clean_job = clean_id(job_name);
             let unique_node_id = format!("{}_{}", prefix, clean_job);
 
-            dot.push_str(&format!("{}    {} [\n", indent, unique_node_id));
-            dot.push_str(&format!("{}        label=\"{}\",\n", indent, job_label));
-            dot.push_str(&format!("{}        shape=\"box\",\n", indent));
-            dot.push_str(&format!("{}        style=\"filled,rounded\",\n", indent));
-            dot.push_str(&format!(
-                "{}        fontsize=\"{}\",\n",
-                indent, JOB_FONT_SIZE
-            ));
-            dot.push_str(&format!(
-                "{}        fillcolor=\"{}\",\n",
-                indent, fill_color
-            ));
-            dot.push_str(&format!("{}        penwidth=\"1\"\n", indent));
-            dot.push_str(&format!("{}    ];\n", indent));
+            if is_sg {
+                self.render_scatter_gather_subgraph(
+                    dot,
+                    job_name,
+                    &unique_node_id,
+                    count,
+                    first_job.unwrap(),
+                    &format!("{}    ", indent),
+                );
+            } else {
+                let job_label = format!("{}\\n(x{})", job_name, count);
+                let fill_color = get_fill_color(job_name);
+
+                dot.push_str(&format!("{}    {} [\n", indent, unique_node_id));
+                dot.push_str(&format!("{}        label=\"{}\",\n", indent, job_label));
+                dot.push_str(&format!("{}        shape=\"box\",\n", indent));
+                dot.push_str(&format!("{}        style=\"filled,rounded\",\n", indent));
+                dot.push_str(&format!(
+                    "{}        fontsize=\"{}\",\n",
+                    indent, JOB_FONT_SIZE
+                ));
+                dot.push_str(&format!(
+                    "{}        fillcolor=\"{}\",\n",
+                    indent, fill_color
+                ));
+                dot.push_str(&format!("{}        penwidth=\"1\"\n", indent));
+                dot.push_str(&format!("{}    ];\n", indent));
+            }
 
             let varying_params = self.get_varying_params(job_ids);
             for (p_key, p_vals) in varying_params {
@@ -361,9 +420,15 @@ impl<'a> VizGenerator<'a> {
                 dot.push_str(&format!("{}        penwidth=\"0.8\"\n", indent));
                 dot.push_str(&format!("{}    ];\n", indent));
 
+                let target_node = if is_sg {
+                    format!("{}_sg_scatter", unique_node_id)
+                } else {
+                    unique_node_id.clone()
+                };
+
                 dot.push_str(&format!(
                     "{}    {} -> {} [\n",
-                    indent, param_node_id, unique_node_id
+                    indent, param_node_id, target_node
                 ));
                 dot.push_str(&format!("{}        style=\"dotted\",\n", indent));
                 dot.push_str(&format!("{}        color=\"{}\",\n", indent, PARAM_BORDER));
@@ -376,14 +441,166 @@ impl<'a> VizGenerator<'a> {
         dot.push_str(&format!("{}}}\n", indent));
     }
 
+    fn render_scatter_gather_subgraph(
+        &self,
+        dot: &mut String,
+        job_name: &str,
+        unique_node_id: &str,
+        count: usize,
+        representative_job: &Job,
+        indent: &str,
+    ) {
+        let cluster_id = format!("{}_sg", unique_node_id);
+        let scatter_id = format!("{}_sg_scatter", unique_node_id);
+        let gather_id = format!("{}_sg_gather", unique_node_id);
+
+        let mut step_names: Vec<String> = representative_job
+            .executables
+            .keys()
+            .filter(|k| k.starts_with("step-"))
+            .map(|k| k.strip_prefix("step-").unwrap().to_string())
+            .collect();
+        step_names.sort();
+
+        dot.push_str(&format!("{}subgraph cluster_{} {{\n", indent, cluster_id));
+        dot.push_str(&format!(
+            "{}    label=\"{}\\n(x{})\";\n",
+            indent, job_name, count
+        ));
+        dot.push_str(&format!("{}    style=\"filled,rounded,bold\";\n", indent));
+        dot.push_str(&format!("{}    color=\"{}\";\n", indent, SG_CLUSTER_BORDER));
+        dot.push_str(&format!("{}    fillcolor=\"{}\";\n", indent, SG_CLUSTER_BG));
+        dot.push_str(&format!("{}    fontsize=\"{}\";\n", indent, JOB_FONT_SIZE));
+        dot.push_str(&format!("{}    penwidth=\"1.5\";\n", indent));
+        dot.push_str(&format!("{}    margin=\"12\";\n\n", indent));
+
+        dot.push_str(&format!("{}    {} [\n", indent, scatter_id));
+        dot.push_str(&format!("{}        label=\"scatter\",\n", indent));
+        dot.push_str(&format!("{}        shape=\"trapezium\",\n", indent));
+        dot.push_str(&format!("{}        style=\"filled\",\n", indent));
+        dot.push_str(&format!(
+            "{}        fillcolor=\"{}\",\n",
+            indent, SG_SCATTER_FILL
+        ));
+        dot.push_str(&format!(
+            "{}        color=\"{}\",\n",
+            indent, SG_CLUSTER_BORDER
+        ));
+        dot.push_str(&format!(
+            "{}        fontsize=\"{}\",\n",
+            indent, SG_PHASE_FONT_SIZE
+        ));
+        dot.push_str(&format!("{}        penwidth=\"1\"\n", indent));
+        dot.push_str(&format!("{}    ];\n", indent));
+
+        for step_name in &step_names {
+            let step_id = format!("{}_sg_step_{}", unique_node_id, clean_id(step_name));
+            dot.push_str(&format!("{}    {} [\n", indent, step_id));
+            dot.push_str(&format!("{}        label=\"{}\",\n", indent, step_name));
+            dot.push_str(&format!("{}        shape=\"box\",\n", indent));
+            dot.push_str(&format!("{}        style=\"filled,rounded\",\n", indent));
+            dot.push_str(&format!(
+                "{}        fillcolor=\"{}\",\n",
+                indent, SG_STEP_FILL
+            ));
+            dot.push_str(&format!(
+                "{}        color=\"{}\",\n",
+                indent, SG_STEP_BORDER
+            ));
+            dot.push_str(&format!(
+                "{}        fontsize=\"{}\",\n",
+                indent, SG_STEP_FONT_SIZE
+            ));
+            dot.push_str(&format!("{}        penwidth=\"1\"\n", indent));
+            dot.push_str(&format!("{}    ];\n", indent));
+        }
+
+        dot.push_str(&format!("{}    {} [\n", indent, gather_id));
+        dot.push_str(&format!("{}        label=\"gather\",\n", indent));
+        dot.push_str(&format!("{}        shape=\"invtrapezium\",\n", indent));
+        dot.push_str(&format!("{}        style=\"filled\",\n", indent));
+        dot.push_str(&format!(
+            "{}        fillcolor=\"{}\",\n",
+            indent, SG_GATHER_FILL
+        ));
+        dot.push_str(&format!(
+            "{}        color=\"{}\",\n",
+            indent, SG_CLUSTER_BORDER
+        ));
+        dot.push_str(&format!(
+            "{}        fontsize=\"{}\",\n",
+            indent, SG_PHASE_FONT_SIZE
+        ));
+        dot.push_str(&format!("{}        penwidth=\"1\"\n", indent));
+        dot.push_str(&format!("{}    ];\n\n", indent));
+
+        let all_deps: HashSet<String> = step_names
+            .iter()
+            .filter_map(|name| {
+                let exe_key = format!("step-{}", name);
+                representative_job.executables.get(&exe_key)
+            })
+            .flat_map(|exe| exe.deps.iter().cloned())
+            .collect();
+
+        let root_steps: Vec<&String> = step_names
+            .iter()
+            .filter(|name| {
+                let exe_key = format!("step-{}", name);
+                representative_job
+                    .executables
+                    .get(&exe_key)
+                    .map(|e| e.deps.is_empty())
+                    .unwrap_or(true)
+            })
+            .collect();
+
+        let sink_steps: Vec<&String> = step_names
+            .iter()
+            .filter(|name| !all_deps.contains(*name))
+            .collect();
+
+        for root in &root_steps {
+            let step_id = format!("{}_sg_step_{}", unique_node_id, clean_id(root));
+            dot.push_str(&format!(
+                "{}    {} -> {} [color=\"{}\", penwidth=\"1.0\", arrowsize=\"0.6\"];\n",
+                indent, scatter_id, step_id, SG_INTERNAL_EDGE_COLOR
+            ));
+        }
+
+        for step_name in &step_names {
+            let exe_key = format!("step-{}", step_name);
+            if let Some(exe) = representative_job.executables.get(&exe_key) {
+                let step_id = format!("{}_sg_step_{}", unique_node_id, clean_id(step_name));
+                for dep_name in &exe.deps {
+                    let dep_id = format!("{}_sg_step_{}", unique_node_id, clean_id(dep_name));
+                    dot.push_str(&format!(
+                        "{}    {} -> {} [color=\"{}\", penwidth=\"1.0\", arrowsize=\"0.6\"];\n",
+                        indent, dep_id, step_id, SG_INTERNAL_EDGE_COLOR
+                    ));
+                }
+            }
+        }
+
+        for sink in &sink_steps {
+            let step_id = format!("{}_sg_step_{}", unique_node_id, clean_id(sink));
+            dot.push_str(&format!(
+                "{}    {} -> {} [color=\"{}\", penwidth=\"1.0\", arrowsize=\"0.6\"];\n",
+                indent, step_id, gather_id, SG_INTERNAL_EDGE_COLOR
+            ));
+        }
+
+        dot.push_str(&format!("{}}}\n", indent));
+    }
+
     fn get_job_inputs(job: &'a Job) -> Vec<&'a repx_core::model::InputMapping> {
         match job.stage_type {
-            repx_core::model::StageType::Simple => job
+            StageType::Simple => job
                 .executables
                 .get("main")
                 .map(|e| e.inputs.iter().collect())
                 .unwrap_or_default(),
-            repx_core::model::StageType::ScatterGather => job
+            StageType::ScatterGather => job
                 .executables
                 .get("scatter")
                 .map(|e| e.inputs.iter().collect())

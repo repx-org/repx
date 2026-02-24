@@ -98,13 +98,21 @@ resources = { params }: {
 };
 ```
 
-**Scatter-gather sub-stage resources:**
+**Scatter-gather sub-stage and step resources:**
 ```nix
 resources = { mem = "256M"; cpus = 1; };  # orchestrator-level
 
-worker = {
-  resources = { mem = "2G"; cpus = 2; time = "00:30:00"; };
-  # ...
+# Steps can each declare their own resources
+steps = {
+  compute = {
+    resources = { mem = "2G"; cpus = 2; time = "00:30:00"; };
+    # ...
+  };
+  analyze = {
+    resources = { mem = "4G"; cpus = 4; time = "01:00:00"; };
+    deps = [ compute ];
+    # ...
+  };
 };
 
 gather = {
@@ -153,8 +161,8 @@ cpus-per-task = 16
 job_id_glob = "*-scatter*"
 mem = "500M"
 
-# Override resources specifically for scatter-gather workers
-[rules.worker_resources]
+# Override resources specifically for scatter-gather steps
+[rules.step_resources]
 mem = "16G"
 cpus-per-task = 4
 ```
@@ -172,17 +180,17 @@ Rules are evaluated in order. The **last matching rule** takes precedence.
 | `sbatch_opts` | array | Additional `sbatch` arguments |
 | `job_id_glob` | pattern | Glob pattern for job ID matching |
 | `target` | string | Restrict rule to specific target |
-| `worker_resources` | table | Nested resource overrides for scatter-gather workers |
+| `step_resources` | table | Nested resource overrides for scatter-gather steps |
 
-### Worker Resource Resolution
+### Step Resource Resolution
 
-For scatter-gather stages, worker resources are resolved separately:
+For scatter-gather stages, step resources are resolved separately per step:
 
 1. Start with the **orchestrator's resolved resources** (the three-tier merge above)
-2. Apply **Nix worker `resource_hints`** (from the `worker.resources` attribute in the stage definition)
-3. Apply **`resources.toml` `[rules.worker_resources]`** (if a matching rule has this nested table)
+2. Apply **Nix step `resource_hints`** (from the step's `resources` attribute in the stage definition)
+3. Apply **`resources.toml` `[rules.step_resources]`** (if a matching rule has this nested table)
 
-If no worker-specific overrides exist, workers inherit the orchestrator's resources.
+If no step-specific overrides exist, steps inherit the orchestrator's resources. Each step in the DAG can have its own resource requirements, allowing fine-grained control (e.g., a trace generation step needing 32G while a lightweight analysis step needs only 1G).
 
 ### Effect on Local Execution
 
@@ -206,8 +214,8 @@ Jobs are classified by their execution semantics:
 |------|-------------|
 | `simple` | Standard single-execution job |
 | `scatter-gather` | Parallel fan-out orchestration |
-| `worker` | Individual scatter partition |
-| `gather` | Aggregation of worker outputs |
+| `step` | Individual step within a scatter-gather branch DAG |
+| `gather` | Aggregation of step outputs |
 
 ## Logging Configuration
 
