@@ -6,67 +6,16 @@ RepX is currently in **Active Development**. APIs may change between minor versi
 
 ## Prerequisites
 
-To use RepX effectively, you need:
-
 1.  **[Nix](https://nixos.org/download.html)**: The foundation of RepX's reproducibility.
     *   *Requirement:* Flakes must be enabled.
-2.  **Rust** (Optional): Only if building the CLI from source.
-3.  **Python 3.10+** (Optional): For analyzing results with `repx-py`.
-
----
-
-## Installing the CLI
-
-Nix is the recommended way to install RepX. It guarantees that your environment matches the experiment definition exactly.
-
-### Method 1: Nix Profile (Recommended)
-
-To install the `repx` CLI globally on your system using Nix profiles:
-
-```bash
-nix profile install github:repx-org/repx
-```
-
-Verify the installation:
-```bash
-repx --version
-```
-
-### Method 2: NixOS / Home Manager
-
-You can add RepX to your system configuration declaratively.
-
-**flake.nix:**
-```nix
-{
-  inputs.repx.url = "github:repx-org/repx";
-  # ...
-}
-```
-
-**configuration.nix** or **home.nix**:
-```nix
-environment.systemPackages = [
-  inputs.repx.packages.${pkgs.system}.default
-];
-```
-
-### Method 3: Cargo (Rust)
-
-If you prefer using Rust's package manager, you can install the CLI directly from source.
-
-```bash
-# Install from Git
-cargo install --git https://github.com/repx-org/repx.git repx-cli
-```
+2.  **Python 3.10+** (Optional): For analyzing results with `repx-py`.
 
 ---
 
 ## Setting up a Project
 
-To use RepX in a project, you need to add it as an input to your `flake.nix`. This allows you to use the **RepX Library** (`repx.lib`) to define your experiments.
+RepX is used as a **flake input** in your project's `flake.nix`. This is the standard way to use RepX -- it gives you access to the Nix library (`repx.lib`) for defining experiments, the overlay for the CLI and Python client, and ensures everything is version-locked together.
 
-**flake.nix:**
 ```nix
 {
   description = "My RepX Experiment";
@@ -76,49 +25,73 @@ To use RepX in a project, you need to add it as an input to your `flake.nix`. Th
     repx.url = "github:repx-org/repx";
   };
 
-  outputs = { self, nixpkgs, repx }: {
-    # 1. Define your Lab (Experiments)
-    # See 'User Guide > Defining Experiments' for details.
-    
-    # 2. (Optional) Create a development shell with the CLI and Python client
-    devShells.${nixpkgs.system}.default = nixpkgs.legacyPackages.${nixpkgs.system}.mkShell {
-      buildInputs = [
-        repx.packages.${nixpkgs.system}.default  # The CLI
-        repx.packages.${nixpkgs.system}.repx-py  # The Python Client
-      ];
+  outputs = { self, nixpkgs, repx, ... }:
+    let
+      system = "x86_64-linux";
+      pkgs = import nixpkgs {
+        inherit system;
+        overlays = [ repx.overlays.default ];
+      };
+      repx-lib = repx.lib;
+
+      labOutputs = (import ./nix/lab.nix) {
+        inherit pkgs repx-lib;
+        gitHash = self.rev or self.dirtyRev or "unknown";
+      };
+    in {
+      packages.${system} = {
+        inherit (labOutputs) lab;
+        default = labOutputs.lab;
+      };
+
+      devShells.${system}.default = pkgs.mkShell {
+        buildInputs = [
+          pkgs.repx       # The CLI
+          pkgs.repx-py    # The Python client
+        ];
+      };
     };
-  };
 }
 ```
 
-## Installing the Python Client (`repx-py`)
+The `devShell` gives you both the `repx` CLI and `repx-py` in your development environment. Enter it with `nix develop` or use [direnv](https://direnv.net/) with an `.envrc` containing `use flake`.
 
-The Python client allows you to query experiment results and load data into Pandas.
-
-### Inside a Nix Shell (Best Practice)
-
-The best way to use `repx-py` is to include it in your experiment's `devShell` (as shown above). This ensures the library version matches your experiment and CLI.
-
-### Manual Install (pip)
-
-If you are working outside of Nix (e.g., in a global Conda environment or Jupyter Notebook), you can install `repx-py` directly from GitHub:
-
-```bash
-pip install "git+https://github.com/repx-org/repx.git#subdirectory=python/src"
-```
+See the [examples/](https://github.com/repx-org/repx/tree/main/examples) directory for complete working projects.
 
 ---
 
 ## Upgrading
 
-To upgrade RepX to the latest version:
+To upgrade RepX to the latest version, update the flake lock:
 
-**Nix Flake:**
 ```bash
 nix flake update repx
 ```
 
-**Nix Profile:**
+---
+
+## Alternative Installation Methods
+
+:::caution
+The methods below install individual components outside of the flake workflow. They are **not officially supported** and may result in version mismatches between the CLI, Nix library, and Python client. Use the flake input approach above for production work.
+:::
+
+### Nix Profile (CLI only)
+
 ```bash
-nix profile upgrade repx
+nix profile install github:repx-org/repx
+```
+
+This installs the CLI binary but does **not** provide `repx.lib` or the overlay -- you still need the flake input to define experiments.
+
+### Cargo (CLI only, from source)
+
+```bash
+cargo install --git https://github.com/repx-org/repx.git repx-cli
+```
+
+### pip (Python client only)
+
+```bash
+pip install "git+https://github.com/repx-org/repx.git#subdirectory=python/src"
 ```
