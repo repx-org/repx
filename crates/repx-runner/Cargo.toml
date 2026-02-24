@@ -13,6 +13,7 @@ repx-client = { workspace = true }
 clap = { workspace = true }
 indicatif = { workspace = true }
 colored = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 tracing = { workspace = true }
 repx-executor = { workspace = true }

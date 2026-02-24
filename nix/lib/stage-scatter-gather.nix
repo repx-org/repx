@@ -12,226 +12,378 @@ let
     "run"
     "runDependencies"
     "resources"
+    "deps"
+  ];
+
+  scatterGatherSubKeys = [
+    "pname"
+    "inputs"
+    "outputs"
+    "run"
+    "runDependencies"
+    "resources"
   ];
 
   validateSubStage =
-    name: args:
+    name: validKeys: args:
     common.validateArgs {
       inherit pkgs args;
       name = stageDef.pname;
-      validKeys = subStageKeys;
+      inherit validKeys;
       contextStr = "in '${name}' definition of scatter-gather stage";
     };
 
-  scatterDef = validateSubStage "scatter" stageDef.scatter;
-  workerDef = validateSubStage "worker" stageDef.worker;
-  gatherDef = validateSubStage "gather" stageDef.gather;
+  scatterDef = validateSubStage "scatter" scatterGatherSubKeys stageDef.scatter;
+  gatherDef = validateSubStage "gather" scatterGatherSubKeys stageDef.gather;
+
+  stepsAttrs = stageDef.steps;
+  stepNames = builtins.attrNames stepsAttrs;
+  stepsDefs = pkgs.lib.mapAttrs (
+    name: def: validateSubStage "step '${name}'" subStageKeys def
+  ) stepsAttrs;
 
   paramInputs = stageDef.paramInputs or { };
 
+  allStepDeps = pkgs.lib.mapAttrs (_: def: def.deps or [ ]) stepsDefs;
+
+  getDepName =
+    dep:
+    if pkgs.lib.isList dep then
+      let
+        depRef = pkgs.lib.head dep;
+      in
+      pkgs.lib.findFirst (
+        name: stepsAttrs.${name} == depRef
+      ) (throw "Step dep list references an unknown step") stepNames
+    else
+      pkgs.lib.findFirst (
+        name: stepsAttrs.${name} == dep
+      ) (throw "Step dep references an unknown step") stepNames;
+
+  stepDepNames = pkgs.lib.mapAttrs (_: deps: map getDepName deps) allStepDeps;
+
+  dependedUpon = pkgs.lib.unique (pkgs.lib.concatLists (builtins.attrValues stepDepNames));
+
+  rootStepNames = builtins.filter (name: stepDepNames.${name} == [ ]) stepNames;
+
+  sinkStepNames = pkgs.lib.subtractLists dependedUpon stepNames;
+
 in
-if !(scatterDef.outputs ? "worker__arg") then
+if stepNames == [ ] then
+  throw ''
+    Scatter-gather stage "${groupPname}" is invalid.
+    The 'steps' attrset must contain at least one step definition.
+  ''
+else if !(scatterDef.outputs ? "worker__arg") then
   throw ''
     Scatter-gather stage "${groupPname}" is invalid.
     The 'scatter' section MUST define a special output named "worker__arg".
-    This attrset defines the schema of inputs that will be generated for each worker.
     Example: outputs.worker__arg = { startIndex = 0; };
   ''
 else if !(scatterDef.outputs ? "work__items") then
   throw ''
     Scatter-gather stage "${groupPname}" is invalid.
     The 'scatter' section MUST define an output named "work__items".
-    This output specifies the file where the JSON list of work items will be written.
-    Example: outputs.work_items = "$out/work_items.json";
+    Example: outputs.work__items = "$out/work_items.json";
   ''
 else if !(gatherDef.inputs ? "worker__outs") then
   throw ''
     Scatter-gather stage "${groupPname}" is invalid.
     The 'gather' section MUST define an input named "worker__outs".
-    This special input receives the manifest of all worker output paths from the runner.
     Example: inputs.worker__outs = "[]";
   ''
-else if !(workerDef.inputs ? "worker__item") then
+else if rootStepNames == [ ] then
   throw ''
     Scatter-gather stage "${groupPname}" is invalid.
-    The 'worker' section MUST define a special input named "worker__item".
-    This input receives the single JSON file containing the task for the worker.
-    Example: inputs.worker__item = "";
+    No root steps found (every step has deps). There must be a cycle.
+  ''
+else if builtins.length sinkStepNames != 1 then
+  throw ''
+    Scatter-gather stage "${groupPname}" is invalid.
+    There must be exactly one sink step (a step that no other step depends on).
+    Found ${toString (builtins.length sinkStepNames)} sink steps: ${builtins.toJSON sinkStepNames}
+    The sink step's outputs are what the gather receives.
   ''
 else
   let
-    workerDeclaredInputs = builtins.attrNames (
-      pkgs.lib.removeAttrs (workerDef.inputs or { }) [ "worker__item" ]
-    );
-    stagePassthroughInputs = builtins.attrNames (stageDef.stageInputs or { });
-    missingWorkerInputs = pkgs.lib.subtractLists workerDeclaredInputs stagePassthroughInputs;
-  in
-  if missingWorkerInputs != [ ] then
-    throw ''
-      Scatter-gather stage "${groupPname}" is invalid.
-      The 'worker' stage declares direct file-path inputs that cannot be satisfied.
-      These inputs must be provided as dependencies to the overall scatter-gather stage.
+    sinkStepName = builtins.head sinkStepNames;
+    sinkStepDef = stepsDefs.${sinkStepName};
 
-      Missing inputs for worker: ${builtins.toJSON missingWorkerInputs}
+    rootStepsWithWorkerItem = builtins.filter (
+      name: stepsDefs.${name}.inputs ? "worker__item"
+    ) rootStepNames;
 
-      Available inputs passed through to the stage: ${builtins.toJSON stagePassthroughInputs}
-    ''
-  else
-    let
-      mkSubStage =
-        subStageDef: subStageArgs:
-        (import ./stage-simple.nix) { inherit pkgs; } (
-          subStageDef
-          // subStageArgs
-          // {
-            inherit paramInputs;
-            dependencyDerivations = [ ];
-          }
-        );
-
-      commonStageDef = pkgs.lib.removeAttrs stageDef [
-        "inputs"
-        "outputs"
-        "pname"
-        "scatter"
-        "worker"
-        "gather"
-      ];
-
-      scatterDrv = mkSubStage scatterDef (
-        commonStageDef
+    mkSubStage =
+      subStageDef: subStageArgs:
+      (import ./stage-simple.nix) { inherit pkgs; } (
+        (pkgs.lib.removeAttrs subStageDef [ "deps" ])
+        // subStageArgs
         // {
-          pname = "${groupPname}-scatter";
+          inherit paramInputs;
+          dependencyDerivations = [ ];
         }
       );
-      workerDrv = mkSubStage workerDef {
-        pname = "${groupPname}-worker";
-      };
-      gatherDrv = mkSubStage gatherDef {
-        pname = "${groupPname}-gather";
-      };
 
-      externalInputMappings = scatterDrv.passthru.executables.main.inputs;
-      scatterResources = scatterDef.resources or null;
-      workerResources = workerDef.resources or null;
-      gatherResources = gatherDef.resources or null;
+    commonStageDef = pkgs.lib.removeAttrs stageDef [
+      "inputs"
+      "outputs"
+      "pname"
+      "scatter"
+      "steps"
+      "gather"
+    ];
 
-      executables = {
-        scatter = {
-          inputs = externalInputMappings;
-          outputs = scatterDef.outputs or { };
-          resource_hints = scatterResources;
-        };
+    scatterDrv = mkSubStage scatterDef (
+      commonStageDef
+      // {
+        pname = "${groupPname}-scatter";
+      }
+    );
 
-        worker = {
-          inputs =
-            (pkgs.lib.filter (x: x != null) (
-              pkgs.lib.mapAttrsToList (
-                targetInput: _:
-                let
-                  mapping = pkgs.lib.findFirst (m: m.target_input == targetInput) null externalInputMappings;
-                in
-                if mapping == null then null else mapping
-              ) (pkgs.lib.removeAttrs (workerDef.inputs or { }) [ "worker__item" ])
-            ))
-            ++ [
+    stepDrvs = pkgs.lib.mapAttrs (
+      name: def:
+      mkSubStage def {
+        pname = "${groupPname}-step-${name}";
+      }
+    ) stepsDefs;
+
+    gatherDrv = mkSubStage gatherDef {
+      pname = "${groupPname}-gather";
+    };
+
+    externalInputMappings = scatterDrv.passthru.executables.main.inputs;
+
+    scatterResources = scatterDef.resources or null;
+    gatherResources = gatherDef.resources or null;
+
+    resolveStepInputMappings =
+      stepName: stepDef:
+      let
+        deps = stepDef.deps or [ ];
+        consumerInputs = stepDef.inputs or { };
+
+        resolvedDeps = map (
+          dep:
+          if pkgs.lib.isList dep then
+            let
+              strings = pkgs.lib.tail dep;
+              depName = getDepName dep;
+              sourceName = pkgs.lib.elemAt strings 0;
+              targetName = if pkgs.lib.length strings >= 2 then pkgs.lib.elemAt strings 1 else sourceName;
+              producerOutputs = stepsDefs.${depName}.outputs or { };
+            in
+            if !(builtins.hasAttr sourceName producerOutputs) then
+              throw ''
+                Scatter-gather stage "${groupPname}", step "${stepName}":
+                Dependency step "${depName}" does not have output "${sourceName}".
+                Available outputs: ${builtins.toJSON (builtins.attrNames producerOutputs)}
+              ''
+            else if !(builtins.hasAttr targetName consumerInputs) then
+              throw ''
+                Scatter-gather stage "${groupPname}", step "${stepName}":
+                Explicit mapping targets input "${targetName}", but step does not declare it.
+                Available inputs: ${builtins.toJSON (builtins.attrNames consumerInputs)}
+              ''
+            else
+              [
+                {
+                  source = "step:${depName}";
+                  source_output = sourceName;
+                  target_input = targetName;
+                }
+              ]
+          else
+            let
+              depName = getDepName dep;
+              producerOutputs = stepsDefs.${depName}.outputs or { };
+              matchingNames = pkgs.lib.intersectLists (builtins.attrNames producerOutputs) (
+                builtins.attrNames consumerInputs
+              );
+            in
+            if matchingNames == [ ] then
+              throw ''
+                Scatter-gather stage "${groupPname}", step "${stepName}":
+                Implicit dependency on step "${depName}" found no matching input/output names.
+                Step "${depName}" outputs: ${builtins.toJSON (builtins.attrNames producerOutputs)}
+                Step "${stepName}" inputs: ${builtins.toJSON (builtins.attrNames consumerInputs)}
+                Use explicit mapping: [ ${depName} "source_output" "target_input" ]
+              ''
+            else
+              map (name: {
+                source = "step:${depName}";
+                source_output = name;
+                target_input = name;
+              }) matchingNames
+        ) deps;
+
+        stepInputMappings = pkgs.lib.concatLists resolvedDeps;
+
+        satisfiedBySteps = map (m: m.target_input) stepInputMappings;
+
+        remainingInputNames = pkgs.lib.subtractLists satisfiedBySteps (builtins.attrNames consumerInputs);
+
+        externalMappings = pkgs.lib.concatMap (
+          inputName:
+          if inputName == "worker__item" then
+            [
               {
                 source = "scatter:work_item";
                 target_input = "worker__item";
               }
-            ];
+            ]
+          else
+            let
+              mapping = pkgs.lib.findFirst (m: m.target_input == inputName) null externalInputMappings;
+            in
+            if mapping != null then [ mapping ] else [ ]
+        ) remainingInputNames;
 
-          outputs = workerDef.outputs or { };
-          resource_hints = workerResources;
-        };
+        allMappings = stepInputMappings ++ externalMappings;
 
-        gather = {
-          inputs =
-            (
-              if (gatherDef.inputs ? "worker__outs") then
-                let
-                  workerOutputNames = builtins.attrNames (workerDef.outputs or { });
-                  workerOutputName =
-                    if pkgs.lib.length workerOutputNames == 1 then
-                      pkgs.lib.head workerOutputNames
-                    else
-                      throw "A worker stage must define exactly one output. Found: ${toString workerOutputNames}";
-                in
-                [
-                  {
-                    source = "runner:worker_outputs";
-                    source_key = workerOutputName;
-                    target_input = "worker__outs";
-                  }
-                ]
-              else
-                [ ]
-            )
-            ++ (
+        satisfiedInputs = map (m: m.target_input) allMappings;
+        unsatisfiedInputs = pkgs.lib.subtractLists satisfiedInputs (builtins.attrNames consumerInputs);
+      in
+      if unsatisfiedInputs != [ ] then
+        throw ''
+          Scatter-gather stage "${groupPname}", step "${stepName}":
+          The following inputs are not satisfied by any step dependency or external input:
+          ${builtins.toJSON unsatisfiedInputs}
+
+          Satisfied inputs: ${builtins.toJSON satisfiedInputs}
+          Declared inputs: ${builtins.toJSON (builtins.attrNames consumerInputs)}
+        ''
+      else
+        allMappings;
+
+    stepExecutables = pkgs.lib.mapAttrs' (stepName: stepDef: {
+      name = "step-${stepName}";
+      value = {
+        inputs = resolveStepInputMappings stepName stepDef;
+        outputs = stepDef.outputs or { };
+        resource_hints = stepDef.resources or null;
+        deps = stepDepNames.${stepName};
+      };
+    }) stepsDefs;
+
+    executables = {
+      scatter = {
+        inputs = externalInputMappings;
+        outputs = scatterDef.outputs or { };
+        resource_hints = scatterResources;
+      };
+    }
+    // stepExecutables
+    // {
+      gather = {
+        inputs =
+          (
+            if (gatherDef.inputs ? "worker__outs") then
               let
-                scatterRegularOutputs = builtins.attrNames (
-                  pkgs.lib.removeAttrs (scatterDef.outputs or { }) [
-                    "worker__arg"
-                    "work__items"
-                  ]
-                );
-                gatherRegularInputs = builtins.attrNames (
-                  pkgs.lib.removeAttrs (gatherDef.inputs or { }) [ "worker__outs" ]
-                );
-                scatterInputsForGather = pkgs.lib.intersectLists scatterRegularOutputs gatherRegularInputs;
+                sinkOutputNames = builtins.attrNames (sinkStepDef.outputs or { });
+                sinkOutputName =
+                  if pkgs.lib.length sinkOutputNames == 1 then
+                    pkgs.lib.head sinkOutputNames
+                  else
+                    throw ''
+                      Scatter-gather stage "${groupPname}":
+                      The sink step "${sinkStepName}" must define exactly one output for gather.
+                      Found: ${builtins.toJSON sinkOutputNames}
+                    '';
               in
-              map (inputName: {
-                job_id = "self";
-                source_output = inputName;
-                target_input = inputName;
-              }) scatterInputsForGather
-            );
+              [
+                {
+                  source = "runner:worker_outputs";
+                  source_key = sinkOutputName;
+                  target_input = "worker__outs";
+                }
+              ]
+            else
+              [ ]
+          )
+          ++ (
+            let
+              scatterRegularOutputs = builtins.attrNames (
+                pkgs.lib.removeAttrs (scatterDef.outputs or { }) [
+                  "worker__arg"
+                  "work__items"
+                ]
+              );
+              gatherRegularInputs = builtins.attrNames (
+                pkgs.lib.removeAttrs (gatherDef.inputs or { }) [ "worker__outs" ]
+              );
+              scatterInputsForGather = pkgs.lib.intersectLists scatterRegularOutputs gatherRegularInputs;
+            in
+            map (inputName: {
+              job_id = "self";
+              source_output = inputName;
+              target_input = inputName;
+            }) scatterInputsForGather
+          );
 
-          outputs = gatherDef.outputs or { };
-          resource_hints = gatherResources;
-        };
+        outputs = gatherDef.outputs or { };
+        resource_hints = gatherResources;
       };
+    };
 
-      dependencyDerivations = stageDef.dependencyDerivations or [ ];
-      depders = dependencyDerivations;
-      dependencyPaths = map toString depders;
-      dependencyManifestJson = builtins.toJSON (map builtins.unsafeDiscardStringContext dependencyPaths);
-      dependencyHash = builtins.hashString "sha256" (builtins.concatStringsSep ":" dependencyPaths);
-      paramsJson = builtins.toJSON paramInputs;
+    dependencyDerivations = stageDef.dependencyDerivations or [ ];
+    depders = dependencyDerivations;
+    dependencyPaths = map toString depders;
+    dependencyManifestJson = builtins.toJSON (map builtins.unsafeDiscardStringContext dependencyPaths);
+    dependencyHash = builtins.hashString "sha256" (builtins.concatStringsSep ":" dependencyPaths);
+    paramsJson = builtins.toJSON paramInputs;
 
-    in
-    pkgs.stdenv.mkDerivation rec {
-      inherit version;
-      pname = groupPname;
+    stepDrvsList = builtins.attrValues stepDrvs;
 
-      dontUnpack = true;
+  in
+  assert
+    rootStepsWithWorkerItem != [ ]
+    || throw ''
+      Scatter-gather stage "${groupPname}" is invalid.
+      At least one root step (a step with no deps) must declare a "worker__item" input
+      to receive the work item from the scatter phase.
+      Root steps: ${builtins.toJSON rootStepNames}
+    '';
+  pkgs.stdenv.mkDerivation rec {
+    inherit version;
+    pname = groupPname;
 
-      nativeBuildInputs = [
-        scatterDrv
-        workerDrv
-        gatherDrv
-      ];
+    dontUnpack = true;
 
-      passthru = {
-        repxStageType = "scatter-gather";
-        inherit paramInputs executables;
-        outputMetadata = gatherDef.outputs or { };
-        inherit scatterDrv workerDrv gatherDrv;
-        resources = stageDef.resources or null;
-      };
+    nativeBuildInputs = [
+      scatterDrv
+    ]
+    ++ stepDrvsList
+    ++ [
+      gatherDrv
+    ];
 
-      inherit paramsJson dependencyManifestJson dependencyHash;
-      passAsFile = [
-        "paramsJson"
-        "dependencyManifestJson"
-      ];
+    passthru = {
+      repxStageType = "scatter-gather";
+      inherit paramInputs executables;
+      outputMetadata = gatherDef.outputs or { };
+      inherit scatterDrv gatherDrv stepDrvs;
+      resources = stageDef.resources or null;
+    };
 
-      installPhase = ''
+    inherit paramsJson dependencyManifestJson dependencyHash;
+    passAsFile = [
+      "paramsJson"
+      "dependencyManifestJson"
+    ];
+
+    installPhase =
+      let
+        stepCopyCommands = pkgs.lib.concatStrings (
+          pkgs.lib.mapAttrsToList (
+            name: drv: "cp ${drv}/bin/* $out/bin/${groupPname}-step-${name}\n"
+          ) stepDrvs
+        );
+      in
+      ''
         runHook preInstall
         mkdir -p $out/bin
         cp ${scatterDrv}/bin/* $out/bin/${groupPname}-scatter
-        cp ${workerDrv}/bin/* $out/bin/${groupPname}-worker
-        cp ${gatherDrv}/bin/* $out/bin/${groupPname}-gather
+        ${stepCopyCommands}cp ${gatherDrv}/bin/* $out/bin/${groupPname}-gather
         chmod +x $out/bin/*
 
         cp "$paramsJsonPath" $out/${pname}-params.json
@@ -239,4 +391,4 @@ else
 
         runHook postInstall
       '';
-    }
+  }

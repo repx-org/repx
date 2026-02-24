@@ -54,12 +54,18 @@ pub(crate) fn find_local_runner_binary() -> Result<PathBuf> {
         }
     }
 
-    let runner_exe_path = exe_dir.join("repx");
+    let runner_exe_path = exe_dir.join("repx-runner");
 
     if !runner_exe_path.exists() {
+        let cli_exe_path = exe_dir.join("repx");
+        if cli_exe_path.exists() {
+            return Ok(cli_exe_path);
+        }
+
         return Err(ClientError::Config(ConfigError::General(format!(
-            "Could not determine local repx binary path: {}",
-            runner_exe_path.display()
+            "Could not find repx runner binary. Searched for:\n  {}\n  {}",
+            runner_exe_path.display(),
+            cli_exe_path.display()
         ))));
     }
     Ok(runner_exe_path)

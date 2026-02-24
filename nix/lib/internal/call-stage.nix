@@ -27,7 +27,7 @@ let
       ];
       scatterGatherStageKeys = baseKeys ++ [
         "scatter"
-        "worker"
+        "steps"
         "gather"
         "inputs"
         "runDependencies"

@@ -123,9 +123,9 @@ RepX employs strongly-typed enumerations to enforce valid configurations:
 
 **StageType**: Classifies job execution semantics
 - `Simple`: Standard single-execution job
-- `ScatterGather`: Parallel fan-out pattern
-- `Worker`: Individual scatter partition
-- `Gather`: Aggregation of worker outputs
+- `ScatterGather`: Parallel fan-out pattern with a mini-DAG of steps per branch
+- `Step`: Individual step within a scatter-gather branch DAG
+- `Gather`: Aggregation of step outputs
 
 **SchedulerType**: Execution backend selection
 - `Local`: Direct execution on target host

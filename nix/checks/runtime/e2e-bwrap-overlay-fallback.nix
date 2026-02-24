@@ -69,7 +69,7 @@ pkgs.testers.runNixOSTest {
 
         machine.succeed("repx run simulation-run --lab ${referenceLab}")
 
-        machine.succeed("grep -rE '400|415' /var/lib/repx-store/outputs/*/out/total_sum.txt")
+        machine.succeed("grep -rE '540|595' /var/lib/repx-store/outputs/*/out/total_sum.txt")
 
         cache_content = machine.succeed("cat /var/lib/repx-store/cache/capabilities/overlay_support.json")
         print(f"Capability cache content: {cache_content}")
@@ -85,7 +85,7 @@ pkgs.testers.runNixOSTest {
 
         machine.succeed("repx run simulation-run --lab ${referenceLab}")
 
-        machine.succeed("grep -rE '400|415' /var/lib/repx-store/outputs/*/out/total_sum.txt")
+        machine.succeed("grep -rE '540|595' /var/lib/repx-store/outputs/*/out/total_sum.txt")
 
         print("✓ SUCCESS: Cached overlay capability result was reused")
 

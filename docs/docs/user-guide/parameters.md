@@ -54,7 +54,7 @@ RepX automatically generates the **Cartesian Product** of all parameter lists. I
 
 ## 3. Dynamic Parameters (Advanced)
 
-Sometimes you need to set parameters based on the output of a previous stage (e.g., hyperparameter optimization). This is handled via **Scatter-Gather** stages where the `scatter` step generates the dynamic configuration for the `worker` steps.
+Sometimes you need to set parameters based on the output of a previous stage (e.g., hyperparameter optimization). This is handled via **Scatter-Gather** stages where the `scatter` phase generates the dynamic configuration for the per-branch `steps` DAG.
 
 See the [Scatter-Gather documentation](./stages.md#scatter-gather-stage) for details.
 

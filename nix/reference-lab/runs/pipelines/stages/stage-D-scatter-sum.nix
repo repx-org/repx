@@ -1,4 +1,118 @@
 { pkgs }:
+let
+  extract = {
+    pname = "extract";
+    inputs = {
+      worker__item = "";
+      number_list_file = "";
+    };
+    outputs = {
+      extracted_number = "$out/number.txt";
+    };
+    deps = [ ];
+    runDependencies = with pkgs; [
+      coreutils
+      jq
+      gawk
+    ];
+    resources = {
+      mem = "512M";
+      cpus = 1;
+      time = "00:05:00";
+    };
+    run =
+      { inputs, outputs, ... }:
+      ''
+        START_INDEX=$(jq -r '.startIndex' "${inputs.worker__item}")
+        NUMBER=$(tail -n +$((START_INDEX + 1)) "${inputs.number_list_file}" | head -1)
+        echo "$NUMBER" > "${outputs.extracted_number}"
+      '';
+  };
+
+  square = {
+    pname = "square";
+    inputs = {
+      extracted_number = "";
+    };
+    outputs = {
+      squared = "$out/squared.txt";
+    };
+    deps = [ extract ];
+    runDependencies = with pkgs; [
+      coreutils
+      gawk
+    ];
+    resources = {
+      mem = "512M";
+      cpus = 1;
+      time = "00:05:00";
+    };
+    run =
+      { inputs, outputs, ... }:
+      ''
+        N=$(cat "${inputs.extracted_number}")
+        echo "$N * $N" | awk '{printf "%d\n", $1 * $3}' > "${outputs.squared}"
+      '';
+  };
+
+  double = {
+    pname = "double";
+    inputs = {
+      extracted_number = "";
+    };
+    outputs = {
+      doubled = "$out/doubled.txt";
+    };
+    deps = [ extract ];
+    runDependencies = with pkgs; [
+      coreutils
+      gawk
+    ];
+    resources = {
+      mem = "512M";
+      cpus = 1;
+      time = "00:05:00";
+    };
+    run =
+      { inputs, outputs, ... }:
+      ''
+        N=$(cat "${inputs.extracted_number}")
+        echo "$((N * 2))" > "${outputs.doubled}"
+      '';
+  };
+
+  combine = {
+    pname = "combine";
+    inputs = {
+      squared = "";
+      doubled = "";
+    };
+    outputs = {
+      partial_sum = "$out/worker-result.txt";
+    };
+    deps = [
+      square
+      double
+    ];
+    runDependencies = with pkgs; [
+      coreutils
+      gawk
+    ];
+    resources = {
+      mem = "512M";
+      cpus = 1;
+      time = "00:05:00";
+    };
+    run =
+      { inputs, outputs, ... }:
+      ''
+        SQ=$(cat "${inputs.squared}")
+        DB=$(cat "${inputs.doubled}")
+        echo "$((SQ + DB))" > "${outputs.partial_sum}"
+      '';
+  };
+
+in
 {
   pname = "stage-D-partial-sums";
 
@@ -32,34 +146,13 @@
       '';
   };
 
-  worker = {
-    pname = "worker";
-    inputs = {
-      worker__item = "";
-      number_list_file = "";
-    };
-    outputs = {
-      "partial_sum" = "$out/worker-result.txt";
-    };
-    runDependencies = with pkgs; [
-      coreutils
-      jq
-      gawk
-    ];
-    resources = {
-      mem = "2G";
-      cpus = 2;
-      time = "00:30:00";
-    };
-    run =
-      { inputs, outputs, ... }:
-      ''
-        WORK_ITEM_FILE="${inputs.worker__item}"
-        START_INDEX=$(jq -r '.startIndex' "$WORK_ITEM_FILE")
-        LIST_FILE="${inputs.number_list_file}"
-        PARTIAL_SUM=$(tail -n +$((START_INDEX + 1)) "$LIST_FILE" | awk '{s+=$1} END {print s}')
-        echo "$PARTIAL_SUM" > "${outputs.partial_sum}"
-      '';
+  steps = {
+    inherit
+      extract
+      square
+      double
+      combine
+      ;
   };
 
   gather = {

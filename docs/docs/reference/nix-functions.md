@@ -253,9 +253,34 @@ In addition to common attributes:
 | Attribute | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `scatter` | Attribute Set | Yes | The scatter phase definition (has `inputs`, `outputs`, `run`, and optionally `resources`). |
-| `worker` | Attribute Set | Yes | The worker phase definition (has `inputs`, `outputs`, `run`, and optionally `resources`). |
+| `steps` | Attribute Set | Yes | A set of step definitions forming a mini-DAG per branch. Each step has `pname`, `inputs`, `outputs`, `run`, `deps`, and optionally `resources` and `runDependencies`. See [Step Dependencies](#step-dependencies). |
 | `gather` | Attribute Set | Yes | The gather phase definition (has `inputs`, `outputs`, `run`, and optionally `resources`). |
 | `inputs` | Attribute Set | No | Shared inputs for the scatter phase. |
+
+#### Step Dependencies
+
+Each step in the `steps` attrset is an attribute set with these fields:
+
+| Attribute | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `pname` | String | Yes | | Step name (must match the attrset key). |
+| `inputs` | Attribute Set | Yes | | Map of input identifiers to default values. Root steps should declare `worker__item` to receive the scatter work item. |
+| `outputs` | Attribute Set | Yes | | Map of output identifiers to `$out/...` path templates. |
+| `deps` | List | Yes | | List of step references this step depends on. Empty list (`[]`) = root step. |
+| `run` | Function | Yes | | Execution script, same contract as simple stages. |
+| `resources` | Attribute Set | No | `null` | Per-step resource hints for SLURM scheduling. |
+| `runDependencies` | List | No | `[]` | Additional Nix packages for this step's `$PATH`. |
+
+**Dependency wiring** uses the same syntax as `repx.callStage` dependencies:
+
+- **Bare reference** (`[ other_step ]`): Implicit name mapping — output names of the dependency are matched to input names of this step.
+- **Explicit mapping** (`[ other_step "source_output" "target_input" ]`): Maps a specific output of the dependency to a specific input of this step.
+
+**Constraints:**
+
+- There must be exactly **one sink step** (a step no other step depends on). The sink step's outputs become the gather phase's inputs.
+- At least one root step (`deps = []`) must declare a `worker__item` input.
+- The step DAG must be acyclic.
 
 ### Dynamic Attribute Resolution
 
@@ -324,7 +349,7 @@ resources = {
 - `mem`, `cpus`, `time`: The **maximum** across all inputs and the stage's own declaration is used.
 - `partition`, `sbatch_opts`: The stage's own value takes precedence (**last-writer-wins**). If unset, the first dependency's value is used.
 
-For scatter-gather stages, each sub-stage (`scatter`, `worker`, `gather`) can have its own `resources` attribute.
+For scatter-gather stages, each sub-stage (`scatter`, `gather`) and each individual step can have its own `resources` attribute.
 
 ---
 

@@ -187,6 +187,7 @@ mod tests {
                 inputs: vec![],
                 outputs: HashMap::new(),
                 resource_hints: None,
+                deps: vec![],
             };
 
             for inp in inputs {

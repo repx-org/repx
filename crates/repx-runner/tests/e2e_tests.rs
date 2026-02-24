@@ -20,16 +20,16 @@ fn test_full_run_local_native() {
     let total_sum_content = fs::read_to_string(stage_e_path.join("out/total_sum.txt")).unwrap();
     let val = total_sum_content.trim();
     assert!(
-        val == "400" || val == "415",
-        "Expected 400 or 415, got {}",
+        val == "540" || val == "595",
+        "Expected 540 or 595, got {}",
         val
     );
 
     let stage_d_job_id = harness.get_job_id_by_name("stage-D-partial-sums");
     let stage_d_path = harness.get_job_output_path(&stage_d_job_id);
     assert!(stage_d_path.join("repx/SUCCESS").exists());
-    assert!(stage_d_path.join("worker-0").exists());
-    assert!(stage_d_path.join("worker-9").exists());
+    assert!(stage_d_path.join("branch-0").exists());
+    assert!(stage_d_path.join("branch-9").exists());
 }
 
 #[test]

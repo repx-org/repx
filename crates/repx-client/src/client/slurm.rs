@@ -144,11 +144,6 @@ pub fn submit_slurm_batch_run(
                     "Scatter-gather job missing 'scatter' executable".into(),
                 ))
             })?;
-            let worker_exe = job.executables.get("worker").ok_or_else(|| {
-                ClientError::Config(ConfigError::General(
-                    "Scatter-gather job missing 'worker' executable".into(),
-                ))
-            })?;
             let gather_exe = job.executables.get("gather").ok_or_else(|| {
                 ClientError::Config(ConfigError::General(
                     "Scatter-gather job missing 'gather' executable".into(),
@@ -157,19 +152,46 @@ pub fn submit_slurm_batch_run(
 
             let artifacts_base = target.artifacts_base_path();
             let scatter_exe_path = artifacts_base.join(&scatter_exe.path);
-            let worker_exe_path = artifacts_base.join(&worker_exe.path);
             let gather_exe_path = artifacts_base.join(&gather_exe.path);
 
-            let worker_outputs_json = serde_json::to_string(&worker_exe.outputs)
-                .map_err(|e| ClientError::Config(ConfigError::Json(e)))?;
+            let (steps_json, last_step_outputs_json) =
+                super::local::build_steps_json(job, &artifacts_base)
+                    .map_err(|e| ClientError::Config(ConfigError::General(e)))?;
+
+            let sink_step_key = {
+                let all_deps: HashSet<String> = job
+                    .executables
+                    .iter()
+                    .filter(|(k, _)| k.starts_with("step-"))
+                    .flat_map(|(_, exe)| exe.deps.iter().cloned())
+                    .collect();
+                let sink_candidates: Vec<&String> = job
+                    .executables
+                    .keys()
+                    .filter(|k| k.starts_with("step-"))
+                    .filter(|k| {
+                        let name = k.strip_prefix("step-").unwrap();
+                        !all_deps.contains(name)
+                    })
+                    .collect();
+                sink_candidates
+                    .first()
+                    .cloned()
+                    .cloned()
+                    .unwrap_or_default()
+            };
+            let sink_step_hints = job
+                .executables
+                .get(&sink_step_key)
+                .and_then(|e| e.resource_hints.as_ref());
 
             let scatter_gather_args = format!(
-                "--job-package-path {} --scatter-exe-path {} --worker-exe-path {} --gather-exe-path {} --worker-outputs-json '{}' {}",
+                "--job-package-path {} --scatter-exe-path {} --gather-exe-path {} --steps-json '{}' --last-step-outputs-json '{}' {}",
                 target.artifacts_base_path().join(format!("jobs/{}", job_id)).display(),
                 scatter_exe_path.display(),
-                worker_exe_path.display(),
                 gather_exe_path.display(),
-                worker_outputs_json,
+                steps_json.replace('\'', "'\\''"),
+                last_step_outputs_json.replace('\'', "'\\''"),
                 if target.config().mount_host_paths {
                     "--mount-host-paths".to_string()
                 } else {
@@ -184,7 +206,6 @@ pub fn submit_slurm_batch_run(
             );
 
             let orchestrator_hints = job.resource_hints.as_ref();
-            let worker_hints = worker_exe.resource_hints.as_ref();
 
             let main_directives = resources::resolve_for_job(
                 job_id,
@@ -192,18 +213,18 @@ pub fn submit_slurm_batch_run(
                 &options.resources,
                 orchestrator_hints,
             );
-            let worker_directives = resources::resolve_worker_resources(
+            let step_directives = resources::resolve_worker_resources(
                 job_id,
                 target_name,
                 &options.resources,
                 orchestrator_hints,
-                worker_hints,
+                sink_step_hints,
             );
-            let worker_opts_str = worker_directives.to_shell_string();
+            let step_opts_str = step_directives.to_shell_string();
 
             let command = format!(
-                "{} internal-scatter-gather {} {} --worker-sbatch-opts='{}' --scheduler slurm --anchor-id $REPX_ANCHOR_ID",
-                remote_repx_command, repx_args, scatter_gather_args, worker_opts_str
+                "{} internal-scatter-gather {} {} --step-sbatch-opts='{}' --scheduler slurm --anchor-id $REPX_ANCHOR_ID",
+                remote_repx_command, repx_args, scatter_gather_args, step_opts_str
             );
             (command, main_directives)
         } else {

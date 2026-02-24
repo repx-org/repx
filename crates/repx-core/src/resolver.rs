@@ -158,6 +158,7 @@ mod tests {
             inputs,
             outputs: HashMap::new(),
             resource_hints: None,
+            deps: vec![],
         };
 
         Job {

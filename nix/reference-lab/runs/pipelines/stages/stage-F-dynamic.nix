@@ -9,7 +9,7 @@ _: {
   resources =
     { params }:
     {
-      mem = if params.mode == "slow" then "4G" else "1G";
+      mem = if params.mode == "slow" then "1G" else "512M";
       cpus = if params.multiplier > 5 then 4 else 1;
       time = if params.mode == "slow" then "01:00:00" else "00:10:00";
     };

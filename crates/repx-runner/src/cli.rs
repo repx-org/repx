@@ -236,17 +236,17 @@ pub struct InternalScatterGatherArgs {
     #[arg(long)]
     pub scheduler: String,
     #[arg(long, allow_hyphen_values = true)]
-    pub worker_sbatch_opts: String,
+    pub step_sbatch_opts: String,
     #[arg(long)]
     pub job_package_path: PathBuf,
     #[arg(long)]
     pub scatter_exe_path: PathBuf,
     #[arg(long)]
-    pub worker_exe_path: PathBuf,
-    #[arg(long)]
     pub gather_exe_path: PathBuf,
     #[arg(long)]
-    pub worker_outputs_json: String,
+    pub steps_json: String,
+    #[arg(long)]
+    pub last_step_outputs_json: String,
 
     #[arg(long)]
     pub anchor_id: Option<u32>,
