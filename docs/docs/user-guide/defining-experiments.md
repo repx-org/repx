@@ -36,19 +36,54 @@ The top-level object in RepX is the **Lab**. The Lab is a collection of all your
 **nix/lab.nix**:
 ```nix
 { pkgs, repx-lib, ... }:
+let
+  simulation = repx-lib.callRun ./runs/simulation.nix [];
+  analysis   = repx-lib.callRun ./runs/analysis.nix [ simulation ];
+in
 repx-lib.mkLab {
-  inherit pkgs;
-  
-  # specific attributes...
+  inherit pkgs repx-lib;
+  gitHash = self.rev or self.dirtyRev or "unknown";
+  lab_version = "1.0.0";
+
   runs = {
-    simulation = import ./runs/simulation.nix;
-    analysis   = import ./runs/analysis.nix;
+    inherit simulation analysis;
   };
 }
 ```
+
+The `mkLab` function requires:
+- **`gitHash`**: Git commit hash for provenance tracking.
+- **`lab_version`**: A version string for your experiment.
+- **`runs`**: A set of run placeholders created by `callRun`.
+
+Runs are connected using `callRun`, which accepts a path to a run definition file and a list of dependencies. See the [Nix Functions Reference](../reference/nix-functions.md#repx-libcallrun) for full details.
+
+## Run Groups
+
+For large experiments, you can organize runs into named groups:
+
+```nix
+repx-lib.mkLab {
+  inherit pkgs repx-lib;
+  gitHash = self.rev or self.dirtyRev or "unknown";
+  lab_version = "1.0.0";
+
+  runs = {
+    inherit preprocess training evaluation visualization;
+  };
+
+  groups = {
+    ml-pipeline = [ preprocess training evaluation ];
+    reporting = [ visualization ];
+  };
+}
+```
+
+Groups are organizational only -- they don't affect execution. Use `repx list groups` to inspect them.
 
 ## Next Steps
 
 *   **[Stages](./stages.md)**: Learn how to define individual computational steps.
 *   **[Pipelines](./pipelines.md)**: Learn how to connect stages into a workflow.
 *   **[Parameters](./parameters.md)**: Learn how to inject and sweep parameters.
+*   **[Advanced Patterns](../examples/advanced-patterns.md)**: Run groups, resource hints, directory scanning, and more.

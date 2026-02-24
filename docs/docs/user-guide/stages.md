@@ -138,8 +138,79 @@ A scatter-gather stage automatically scales tasks across your compute resources.
 }
 ```
 
+## Resource Hints
+
+Stages can declare resource requirements for SLURM scheduling. These are optional and have no effect on local execution.
+
+```nix
+{ pkgs }:
+{
+  pname = "gpu-training";
+  
+  resources = {
+    mem = "32G";           # Memory (K, M, G, T suffixes)
+    cpus = 8;              # CPU count
+    time = "12:00:00";     # Wall time (HH:MM:SS)
+    partition = "gpu";     # SLURM partition
+    sbatch_opts = [ "--gres=gpu:1" ];  # Extra sbatch flags
+  };
+
+  # ...
+}
+```
+
+Resource hints are automatically **merged from upstream dependencies**: `mem`, `cpus`, and `time` take the maximum across all inputs. The stage's own `partition` and `sbatch_opts` take precedence.
+
+For scatter-gather stages, each sub-stage (`scatter`, `worker`, `gather`) can have its own `resources` attribute.
+
+See the [Nix Functions Reference](../reference/nix-functions.md#resource-hints) for full details.
+
+## Dynamic Attributes
+
+The `pname`, `inputs`, `outputs`, and `resources` attributes can be **functions** that accept `{ params }` for dynamic resolution:
+
+```nix
+{ pkgs }:
+{
+  pname = { params }: "process-${params.model}";
+  
+  outputs = { params }: {
+    "result" = "$out/result-${params.model}.csv";
+  };
+
+  resources = { params }: {
+    mem = if params.dataset_size > 10000 then "64G" else "8G";
+  };
+
+  # ...
+}
+```
+
+This allows stages to adapt their name, I/O structure, and resource requirements based on parameter values. See [Advanced Patterns](../examples/advanced-patterns.md#dynamic-stages) for more examples.
+
+## Script Validation
+
+RepX automatically validates stage scripts at **build time**:
+
+1.  **ShellCheck** lints the script for common Bash issues.
+2.  **OSH** (Oils for Unix) parses the script into an AST.
+3.  **Dependency analysis** extracts all external command invocations and verifies each command exists in `$PATH` (populated by `runDependencies`).
+
+If your script calls a command not provided by `runDependencies`, the Nix build fails with an error listing the missing commands. This catches dependency issues early.
+
+## Script Execution Contract
+
+When RepX executes your stage script at runtime:
+
+1.  **Shell settings**: `set -euxo pipefail` -- the script fails on any error, undefined variable, or pipe failure.
+2.  **Input readiness**: RepX polls for all input files with a 30-second timeout (handling async filesystem syncs on networked storage).
+3.  **Output cleanup**: `$out` is cleared before each run (preserving `slurm-*.out` files).
+4.  **Working directory**: Set to `$out`.
+
 ## Best Practices
 
 1.  **Use absolute paths in `$out`**: Always define outputs as `$out/filename`.
 2.  **Quote paths**: Input paths may contain spaces. Always use `"${inputs[name]}"`.
 3.  **Sanitize Parameters**: When injecting parameters into Bash, use `toString` or proper escaping if they contain special characters.
+4.  **Declare all dependencies**: List every external command your script uses in `runDependencies`. The build-time validator will catch omissions.
+5.  **Use resource hints**: When targeting SLURM, declare resource requirements so the scheduler can allocate resources efficiently.

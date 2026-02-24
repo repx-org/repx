@@ -51,15 +51,87 @@ RepX supports two scheduler backends:
 | `local` | Direct process execution with configurable concurrency |
 | `slurm` | SLURM workload manager integration via `sbatch` |
 
-## Resources Configuration
+## Resource System
 
-The `resources.toml` file maps jobs to scheduler resources. Rules are evaluated sequentially; the last matching rule takes precedence.
+RepX has a three-tier resource system that lets scientists declare expected resource requirements in Nix while allowing cluster admins to override them per-cluster via TOML configuration.
 
-### Resolution Order
+### How Resources Flow
 
-1. CLI flag: `--resources <PATH>`
+Resources can be defined in two places:
+
+1. **In Nix stage files** -- baked into the Lab metadata at build time
+2. **In `resources.toml`** -- applied at runtime, per-cluster
+
+At runtime, these are merged with a clear priority order:
+
+```
+resources.toml [defaults]     (lowest priority)
+        ↓
+Nix resource_hints             (overrides defaults)
+        ↓
+resources.toml [[rules]]      (highest priority -- overrides Nix hints)
+```
+
+This means:
+- `resources.toml` **defaults** provide a baseline for all jobs
+- **Nix hints** override defaults with per-stage requirements defined by the experiment author
+- `resources.toml` **rules** (matched by glob pattern) override everything, letting the cluster admin tune resources for specific jobs or hardware
+
+### Nix-Defined Resources
+
+Resources are declared in stage `.nix` files using the `resources` attribute. See the [Nix Functions Reference](../reference/nix-functions.md#resource-hints) for full details.
+
+**Static resources:**
+```nix
+resources = {
+  mem = "256M";
+  cpus = 1;
+  time = "00:02:00";
+};
+```
+
+**Dynamic resources** (varying per parameter combination):
+```nix
+resources = { params }: {
+  mem = if params.mode == "slow" then "4G" else "1G";
+  cpus = if params.multiplier > 5 then 4 else 1;
+};
+```
+
+**Scatter-gather sub-stage resources:**
+```nix
+resources = { mem = "256M"; cpus = 1; };  # orchestrator-level
+
+worker = {
+  resources = { mem = "2G"; cpus = 2; time = "00:30:00"; };
+  # ...
+};
+
+gather = {
+  resources = { mem = "1G"; cpus = 1; time = "00:10:00"; };
+  # ...
+};
+```
+
+#### Propagation Through Dependencies
+
+When a stage depends on upstream stages, `callStage` automatically collects resource hints from all upstream `passthru.resources` and merges them using **max semantics** -- the largest `mem`, `cpus`, and `time` across all inputs is used as the baseline. The stage's own `resources` then override on top.
+
+This means a heavy upstream stage's resource profile propagates to downstream stages unless the downstream stage declares larger requirements.
+
+#### Resources Are Metadata-Only
+
+Changing resource hints does **not** affect Nix derivation hashes. You can adjust resources without triggering a rebuild of the Lab.
+
+### `resources.toml` Configuration
+
+The `resources.toml` file provides runtime resource overrides. Multiple files are deep-merged in this order:
+
+1. Global config: `~/.config/repx/resources.toml`
 2. Working directory: `./resources.toml`
-3. Global config: `~/.config/repx/resources.toml`
+3. CLI flag: `--resources <PATH>`
+
+Later sources override earlier ones.
 
 ### Schema
 
@@ -73,15 +145,21 @@ sbatch_opts = []
 
 [[rules]]
 job_id_glob = "*-heavy-*"
-target = "cluster"          # Optional: target-specific rule
+target = "cluster"          # Optional: only apply on this target
 mem = "128G"
 cpus-per-task = 16
 
-# Scatter-gather worker overrides
+[[rules]]
+job_id_glob = "*-scatter*"
+mem = "500M"
+
+# Override resources specifically for scatter-gather workers
 [rules.worker_resources]
-mem = "64G"
+mem = "16G"
 cpus-per-task = 4
 ```
+
+Rules are evaluated in order. The **last matching rule** takes precedence.
 
 ### Resource Parameters
 
@@ -94,6 +172,31 @@ cpus-per-task = 4
 | `sbatch_opts` | array | Additional `sbatch` arguments |
 | `job_id_glob` | pattern | Glob pattern for job ID matching |
 | `target` | string | Restrict rule to specific target |
+| `worker_resources` | table | Nested resource overrides for scatter-gather workers |
+
+### Worker Resource Resolution
+
+For scatter-gather stages, worker resources are resolved separately:
+
+1. Start with the **orchestrator's resolved resources** (the three-tier merge above)
+2. Apply **Nix worker `resource_hints`** (from the `worker.resources` attribute in the stage definition)
+3. Apply **`resources.toml` `[rules.worker_resources]`** (if a matching rule has this nested table)
+
+If no worker-specific overrides exist, workers inherit the orchestrator's resources.
+
+### Effect on Local Execution
+
+Even without SLURM, resources affect local execution. The local scheduler uses resolved `mem` and `cpus` values for **admission control** -- it tracks total available RAM and CPUs on the machine and prevents over-subscription by queuing jobs that don't fit.
+
+### Inspecting Resources
+
+Use `repx show job <JOB_ID>` to see the Nix-defined resource hints for any job:
+
+```bash
+repx show job abc123def456
+# Shows "Resource Hints (from Nix)" section with mem, cpus, time, partition
+# For scatter-gather stages, shows per-sub-stage resource hints
+```
 
 ## Stage Types
 
