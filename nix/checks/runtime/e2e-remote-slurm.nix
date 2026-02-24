@@ -202,7 +202,7 @@ pkgs.testers.runNixOSTest {
 
             if not has_partition:
                 print(f"!!! [{runtime}] SBATCH CONTENT:\n{sbatch_check}")
-                raise Exception(f"Missing --partition directive in sbatch script (from resources.toml defaults)")
+                raise Exception("Missing --partition directive in sbatch script (from resources.toml defaults)")
 
             if not (has_mem or has_cpus or has_time):
                 print(f"!!! [{runtime}] SBATCH CONTENT:\n{sbatch_check}")

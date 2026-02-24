@@ -2,6 +2,8 @@
   pkgs,
   labs,
   repx,
+  docsVersion ? "latest",
+  docsBaseUrl ? null,
 }:
 
 let
@@ -10,7 +12,7 @@ let
     inherit (labs) simple-lab sweep-lab;
   };
 
-  docBaseDir = "";
+  baseUrl = if docsBaseUrl != null then docsBaseUrl else "/";
 in
 {
   inherit doc-assets;
@@ -21,7 +23,7 @@ in
   '';
 
   docs = pkgs.buildNpmPackage {
-    name = "repx-docs";
+    name = "repx-docs-${docsVersion}";
     src = ../../docs;
     npmDepsHash = "sha256-QXh5kwQKVcXDJ4R1gXrau+6GI5YfssvkDQ8QusxGYLo=";
 
@@ -30,6 +32,9 @@ in
       find ${doc-assets} -type f -exec cp {} static/images/ \;
     '';
 
+    DOCS_VERSION = docsVersion;
+    DOCS_BASE_URL = baseUrl;
+
     buildPhase = ''
       runHook preBuild
 
@@ -37,8 +42,8 @@ in
       runHook postBuild
     '';
     installPhase = ''
-      mkdir -p $out/${docBaseDir}
-      mv build/* $out/${docBaseDir}/
+      mkdir -p $out
+      mv build/* $out/
     '';
   };
 }

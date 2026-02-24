@@ -20,12 +20,27 @@ repx run simulation --lab ./result -j 4
 
 ## Execution Modes
 
-| Mode | Flag | Description |
-|------|------|-------------|
-| Native | `--native` | Direct process execution |
-| Bwrap | `--bwrap` | Bubblewrap sandboxed execution |
-| Docker | `--docker` | Docker container runtime |
-| Podman | `--podman` | Podman container runtime |
+The execution runtime is selected based on Lab configuration and target settings. RepX supports:
+
+| Mode | Description |
+|------|-------------|
+| Native | Direct process execution on the host |
+| Bwrap | Bubblewrap sandboxed execution |
+| Docker | Docker container runtime |
+| Podman | Podman container runtime |
+
+The runtime is configured via the `--scheduler` flag or target configuration in `config.toml`. Labs built with `containerized = false` only support native execution.
+
+## Failure Handling
+
+By default, RepX stops execution when any job fails. Use `--continue-on-failure` to keep running independent jobs:
+
+```bash
+# Continue running unblocked jobs even when some fail
+repx run simulation --continue-on-failure
+```
+
+All failures are collected and reported at the end. This is useful for large sweeps where you want to maximize completed jobs before debugging failures.
 
 ## Output Structure
 
@@ -65,12 +80,20 @@ repx run simulation --lab ./result
 repx run simulation --lab ./result --force
 ```
 
-## Runtime Selection
+## Specifying Runs and Jobs
 
-The execution runtime is selected based on Lab configuration and CLI flags:
+`repx run` accepts multiple run names or individual job IDs:
 
-1. CLI flags take precedence (`--native`, `--bwrap`, etc.)
-2. Target configuration specifies `execution_types` preference
-3. Lab metadata indicates native-only vs. container-capable
+```bash
+# Run everything
+repx run
 
-Native-only Labs (no container images) will fail if container execution is requested. Use `--native` explicitly for such Labs.
+# Run specific runs
+repx run simulation validation
+
+# Run a specific job by ID
+repx run abc123def456
+
+# Mix runs and jobs
+repx run simulation abc123def456
+```

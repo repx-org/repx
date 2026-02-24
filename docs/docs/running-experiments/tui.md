@@ -65,6 +65,13 @@ When the targets panel is focused:
 *   `d`: Open job **Definition**
 *   `l`: Open job **Logs**
 
+**Z Menu (Fold Controls)**
+*   `z`: Toggle fold of selected node
+*   `o`: Open (unfold) selected node
+*   `c`: Close (fold) selected node
+*   `m`: Fold all nodes
+*   `r`: Unfold all nodes
+
 ## External Tools
 
 The TUI integrates with external tools for an enhanced experience:

@@ -95,6 +95,28 @@ The Lab directory structure serves as the interface contract between the definit
 
 This structure enables the CLI to remain stable while the Nix DSL evolves. The execution layer requires no knowledge of how the Lab was constructed.
 
+### Host Tools Bundling
+
+Labs include a set of statically-linked host tools in `host-tools/` for bootstrapping execution on machines without Nix. These are content-addressed and include:
+
+- `coreutils`, `findutils`, `sed`, `grep`, `bash` -- basic shell utilities
+- `jq` -- JSON processing for metadata
+- `tar`, `pigz` (aliased as `gzip`) -- archive handling
+- `bubblewrap` -- container-less sandboxing
+- `openssh`, `rsync` -- remote sync and transfer
+
+This allows the Lab to be self-contained: you can copy the `result` directory to any compatible Linux machine and execute experiments without requiring Nix on the target.
+
+### Build-Time Validation
+
+Every stage script undergoes automatic validation during the Nix build:
+
+1. **ShellCheck** lints for common Bash issues
+2. **OSH** (Oils for Unix) parses the script into an AST
+3. **Dependency analysis** extracts all external command invocations and verifies each one exists in `$PATH` (populated by `runDependencies`)
+
+This catches missing dependencies at build time rather than discovering them at runtime on a remote cluster.
+
 ## Type System
 
 RepX employs strongly-typed enumerations to enforce valid configurations:

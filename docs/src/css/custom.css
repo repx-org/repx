@@ -40,3 +40,18 @@ pre.prism-code {
 thead:not(:has(th:not(:empty))) {
 	display: none;
 }
+
+/* Version selector */
+.version-label {
+	font-size: 0.85rem;
+	opacity: 0.8;
+}
+
+.version-selector-btn {
+	background: none;
+	border: none;
+	cursor: pointer;
+	font: inherit;
+	color: inherit;
+	padding: 0.25rem 0.5rem;
+}
