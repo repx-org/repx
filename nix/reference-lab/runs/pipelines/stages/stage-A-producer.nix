@@ -5,6 +5,12 @@ _: {
     template_dir = "";
   };
 
+  resources = {
+    mem = "256M";
+    cpus = 1;
+    time = "00:02:00";
+  };
+
   outputs = {
     "data_a" = "$out/numbers.txt";
   };

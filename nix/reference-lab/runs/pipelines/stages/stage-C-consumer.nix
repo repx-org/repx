@@ -6,6 +6,10 @@ _: {
     list_b = "";
   };
 
+  resources = {
+    time = "00:15:00";
+  };
+
   outputs = {
     "combined_list" = "$out/combined_list.txt";
   };

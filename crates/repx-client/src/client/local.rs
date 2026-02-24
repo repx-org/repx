@@ -1,5 +1,6 @@
 use super::{Client, ClientEvent, SubmitOptions};
 use crate::error::{ClientError, Result};
+use crate::resources;
 use crate::targets::Target;
 use num_cpus;
 use repx_core::{
@@ -12,6 +13,123 @@ use std::path::Path;
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
+use sysinfo::System;
+
+const DEFAULT_JOB_MEM_BYTES: u64 = 1024 * 1024 * 1024;
+const DEFAULT_JOB_CPUS: u32 = 1;
+
+fn parse_mem_to_bytes(mem_str: &str) -> Option<u64> {
+    let mem_str = mem_str.trim().to_uppercase();
+    let (num_str, multiplier) = if let Some(n) = mem_str.strip_suffix('T') {
+        (n, 1024u64 * 1024 * 1024 * 1024)
+    } else if let Some(n) = mem_str.strip_suffix('G') {
+        (n, 1024u64 * 1024 * 1024)
+    } else if let Some(n) = mem_str.strip_suffix('M') {
+        (n, 1024u64 * 1024)
+    } else if let Some(n) = mem_str.strip_suffix('K') {
+        (n, 1024u64)
+    } else {
+        (mem_str.as_str(), 1u64)
+    };
+    num_str.parse::<u64>().ok().map(|n| n * multiplier)
+}
+
+fn get_job_mem_bytes(job: &Job, resources_config: &Option<repx_core::config::Resources>) -> u64 {
+    let hints = job.resource_hints.as_ref();
+
+    let dummy_id = JobId("".into());
+    let directives = resources::resolve_for_job(&dummy_id, "", resources_config, hints);
+
+    directives
+        .mem
+        .as_ref()
+        .and_then(|m| parse_mem_to_bytes(m))
+        .unwrap_or(DEFAULT_JOB_MEM_BYTES)
+}
+
+fn get_job_cpus(job: &Job, resources_config: &Option<repx_core::config::Resources>) -> u32 {
+    let hints = job.resource_hints.as_ref();
+    let dummy_id = JobId("".into());
+    let directives = resources::resolve_for_job(&dummy_id, "", resources_config, hints);
+    directives.cpus_per_task.unwrap_or(DEFAULT_JOB_CPUS)
+}
+
+struct ResourceTracker {
+    total_mem_bytes: u64,
+    total_cpus: usize,
+    used_mem_bytes: u64,
+    used_cpus: usize,
+    in_flight: HashMap<JobId, (u64, u32)>,
+}
+
+impl ResourceTracker {
+    fn new() -> Self {
+        let sys = System::new_all();
+        let total_mem_bytes = sys.total_memory();
+        let total_cpus = num_cpus::get();
+
+        tracing::debug!(
+            "Local scheduler resource limits: {} RAM, {} CPUs",
+            format_bytes(total_mem_bytes),
+            total_cpus
+        );
+
+        Self {
+            total_mem_bytes,
+            total_cpus,
+            used_mem_bytes: 0,
+            used_cpus: 0,
+            in_flight: HashMap::new(),
+        }
+    }
+
+    fn can_fit(&self, job_id: &JobId, mem_bytes: u64, cpus: u32) -> bool {
+        if self.in_flight.is_empty() {
+            if mem_bytes > self.total_mem_bytes || cpus as usize > self.total_cpus {
+                tracing::warn!(
+                    "Job '{}' requests {} RAM and {} CPUs, which exceeds system limits ({} RAM, {} CPUs). Running anyway.",
+                    job_id.short_id(),
+                    format_bytes(mem_bytes),
+                    cpus,
+                    format_bytes(self.total_mem_bytes),
+                    self.total_cpus
+                );
+            }
+            return true;
+        }
+
+        let mem_fits = self.used_mem_bytes + mem_bytes <= self.total_mem_bytes;
+        let cpus_fit = self.used_cpus + cpus as usize <= self.total_cpus;
+        mem_fits && cpus_fit
+    }
+
+    fn reserve(&mut self, job_id: JobId, mem_bytes: u64, cpus: u32) {
+        self.used_mem_bytes += mem_bytes;
+        self.used_cpus += cpus as usize;
+        self.in_flight.insert(job_id, (mem_bytes, cpus));
+    }
+
+    fn release(&mut self, job_id: &JobId) {
+        if let Some((mem, cpus)) = self.in_flight.remove(job_id) {
+            self.used_mem_bytes = self.used_mem_bytes.saturating_sub(mem);
+            self.used_cpus = self.used_cpus.saturating_sub(cpus as usize);
+        }
+    }
+}
+
+fn format_bytes(bytes: u64) -> String {
+    if bytes >= 1024 * 1024 * 1024 * 1024 {
+        format!("{}T", bytes / (1024 * 1024 * 1024 * 1024))
+    } else if bytes >= 1024 * 1024 * 1024 {
+        format!("{}G", bytes / (1024 * 1024 * 1024))
+    } else if bytes >= 1024 * 1024 {
+        format!("{}M", bytes / (1024 * 1024))
+    } else if bytes >= 1024 {
+        format!("{}K", bytes / 1024)
+    } else {
+        format!("{}B", bytes)
+    }
+}
 
 pub fn submit_local_batch_run(
     client: &Client,
@@ -58,6 +176,8 @@ pub fn submit_local_batch_run(
     )> = vec![];
     let concurrency = options.num_jobs.unwrap_or_else(num_cpus::get);
 
+    let mut resource_tracker = ResourceTracker::new();
+
     let mut failed_jobs: Vec<(JobId, String)> = vec![];
     let mut blocked_jobs: HashSet<JobId> = HashSet::new();
 
@@ -71,6 +191,9 @@ pub fn submit_local_batch_run(
 
         for i in finished_indices.into_iter().rev() {
             let (job_id, handle) = active_handles.remove(i);
+
+            resource_tracker.release(&job_id);
+
             let join_res = handle.join();
             match join_res {
                 Ok(output_res) => {
@@ -178,9 +301,29 @@ pub fn submit_local_batch_run(
                 )));
             }
 
-            for job_id in ready_candidates.into_iter().take(slots_available) {
-                jobs_left.remove(&job_id);
+            let mut spawned_this_iteration = 0;
+            for job_id in ready_candidates.into_iter() {
+                if spawned_this_iteration >= slots_available {
+                    break;
+                }
+
                 let job = jobs_in_batch.get(&job_id).unwrap();
+
+                let job_mem = get_job_mem_bytes(job, &options.resources);
+                let job_cpus = get_job_cpus(job, &options.resources);
+
+                if !resource_tracker.can_fit(&job_id, job_mem, job_cpus) {
+                    tracing::debug!(
+                        "Job '{}' waiting for resources ({} RAM, {} CPUs needed)",
+                        job_id.short_id(),
+                        format_bytes(job_mem),
+                        job_cpus
+                    );
+                    continue;
+                }
+
+                jobs_left.remove(&job_id);
+                resource_tracker.reserve(job_id.clone(), job_mem, job_cpus);
 
                 let image_path_opt = client
                     .lab
@@ -300,6 +443,7 @@ pub fn submit_local_batch_run(
 
                 let child = target.spawn_repx_job(repx_binary_path, &args)?;
                 submitted_count += 1;
+                spawned_this_iteration += 1;
                 let pid = child.id();
 
                 send(ClientEvent::JobStarted {
@@ -338,4 +482,155 @@ pub fn submit_local_batch_run(
         "Successfully executed {} jobs locally.",
         submitted_count
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_mem_to_bytes() {
+        assert_eq!(parse_mem_to_bytes("1G"), Some(1024 * 1024 * 1024));
+        assert_eq!(parse_mem_to_bytes("512M"), Some(512 * 1024 * 1024));
+        assert_eq!(
+            parse_mem_to_bytes("2T"),
+            Some(2 * 1024 * 1024 * 1024 * 1024)
+        );
+        assert_eq!(parse_mem_to_bytes("1024K"), Some(1024 * 1024));
+        assert_eq!(parse_mem_to_bytes("4096"), Some(4096));
+
+        assert_eq!(parse_mem_to_bytes("8g"), Some(8 * 1024 * 1024 * 1024));
+        assert_eq!(parse_mem_to_bytes("256m"), Some(256 * 1024 * 1024));
+
+        assert_eq!(parse_mem_to_bytes("  4G  "), Some(4 * 1024 * 1024 * 1024));
+
+        assert_eq!(parse_mem_to_bytes("invalid"), None);
+        assert_eq!(parse_mem_to_bytes("G"), None);
+    }
+
+    #[test]
+    fn test_format_bytes() {
+        assert_eq!(format_bytes(0), "0B");
+        assert_eq!(format_bytes(512), "512B");
+        assert_eq!(format_bytes(1024), "1K");
+        assert_eq!(format_bytes(1024 * 1024), "1M");
+        assert_eq!(format_bytes(1024 * 1024 * 1024), "1G");
+        assert_eq!(format_bytes(1024 * 1024 * 1024 * 1024), "1T");
+        assert_eq!(format_bytes(4 * 1024 * 1024 * 1024), "4G");
+    }
+
+    #[test]
+    fn test_resource_tracker_can_fit() {
+        let mut tracker = ResourceTracker {
+            total_mem_bytes: 16 * 1024 * 1024 * 1024,
+            total_cpus: 8,
+            used_mem_bytes: 0,
+            used_cpus: 0,
+            in_flight: HashMap::new(),
+        };
+
+        let job1 = JobId("job1".into());
+        let job2 = JobId("job2".into());
+        let job3 = JobId("job3".into());
+
+        assert!(tracker.can_fit(&job1, 8 * 1024 * 1024 * 1024, 4));
+
+        tracker.reserve(job1.clone(), 8 * 1024 * 1024 * 1024, 4);
+
+        assert!(tracker.can_fit(&job2, 4 * 1024 * 1024 * 1024, 2));
+        tracker.reserve(job2.clone(), 4 * 1024 * 1024 * 1024, 2);
+
+        assert!(!tracker.can_fit(&job3, 8 * 1024 * 1024 * 1024, 4));
+
+        assert!(tracker.can_fit(&job3, 2 * 1024 * 1024 * 1024, 1));
+
+        assert!(!tracker.can_fit(&job3, 6 * 1024 * 1024 * 1024, 1));
+
+        assert!(!tracker.can_fit(&job3, 2 * 1024 * 1024 * 1024, 4));
+    }
+
+    #[test]
+    fn test_resource_tracker_reserve_and_release() {
+        let mut tracker = ResourceTracker {
+            total_mem_bytes: 16 * 1024 * 1024 * 1024,
+            total_cpus: 8,
+            used_mem_bytes: 0,
+            used_cpus: 0,
+            in_flight: HashMap::new(),
+        };
+
+        let job1 = JobId("job1".into());
+        let job2 = JobId("job2".into());
+
+        tracker.reserve(job1.clone(), 4 * 1024 * 1024 * 1024, 2);
+        assert_eq!(tracker.used_mem_bytes, 4 * 1024 * 1024 * 1024);
+        assert_eq!(tracker.used_cpus, 2);
+        assert_eq!(tracker.in_flight.len(), 1);
+
+        tracker.reserve(job2.clone(), 8 * 1024 * 1024 * 1024, 4);
+        assert_eq!(tracker.used_mem_bytes, 12 * 1024 * 1024 * 1024);
+        assert_eq!(tracker.used_cpus, 6);
+        assert_eq!(tracker.in_flight.len(), 2);
+
+        tracker.release(&job1);
+        assert_eq!(tracker.used_mem_bytes, 8 * 1024 * 1024 * 1024);
+        assert_eq!(tracker.used_cpus, 4);
+        assert_eq!(tracker.in_flight.len(), 1);
+
+        tracker.release(&job2);
+        assert_eq!(tracker.used_mem_bytes, 0);
+        assert_eq!(tracker.used_cpus, 0);
+        assert_eq!(tracker.in_flight.len(), 0);
+    }
+
+    #[test]
+    fn test_resource_tracker_oversized_job_allowed_when_empty() {
+        let tracker = ResourceTracker {
+            total_mem_bytes: 8 * 1024 * 1024 * 1024,
+            total_cpus: 4,
+            used_mem_bytes: 0,
+            used_cpus: 0,
+            in_flight: HashMap::new(),
+        };
+
+        let big_job = JobId("big_job".into());
+
+        assert!(tracker.can_fit(&big_job, 32 * 1024 * 1024 * 1024, 16));
+    }
+
+    #[test]
+    fn test_resource_tracker_oversized_job_blocked_when_busy() {
+        let mut tracker = ResourceTracker {
+            total_mem_bytes: 8 * 1024 * 1024 * 1024,
+            total_cpus: 4,
+            used_mem_bytes: 0,
+            used_cpus: 0,
+            in_flight: HashMap::new(),
+        };
+
+        let small_job = JobId("small_job".into());
+        let big_job = JobId("big_job".into());
+
+        tracker.reserve(small_job.clone(), 1024 * 1024 * 1024, 1);
+
+        assert!(!tracker.can_fit(&big_job, 32 * 1024 * 1024 * 1024, 16));
+    }
+
+    #[test]
+    fn test_resource_tracker_release_unknown_job_is_safe() {
+        let mut tracker = ResourceTracker {
+            total_mem_bytes: 8 * 1024 * 1024 * 1024,
+            total_cpus: 4,
+            used_mem_bytes: 4 * 1024 * 1024 * 1024,
+            used_cpus: 2,
+            in_flight: HashMap::new(),
+        };
+
+        let unknown_job = JobId("unknown".into());
+
+        tracker.release(&unknown_job);
+
+        assert_eq!(tracker.used_mem_bytes, 4 * 1024 * 1024 * 1024);
+        assert_eq!(tracker.used_cpus, 2);
+    }
 }

@@ -184,6 +184,24 @@ pub struct InputMapping {
     pub source_stage_filter: Option<String>,
 }
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ResourceHints {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mem: Option<String>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cpus: Option<u32>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub time: Option<String>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub partition: Option<String>,
+
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sbatch_opts: Vec<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Executable {
     pub path: PathBuf,
@@ -191,6 +209,8 @@ pub struct Executable {
     pub inputs: Vec<InputMapping>,
     #[serde(default)]
     pub outputs: HashMap<String, serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub resource_hints: Option<ResourceHints>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -203,6 +223,8 @@ pub struct Job {
     pub stage_type: StageType,
     #[serde(default)]
     pub executables: HashMap<String, Executable>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub resource_hints: Option<ResourceHints>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
