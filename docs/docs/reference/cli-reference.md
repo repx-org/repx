@@ -82,7 +82,7 @@ repx list runs [RUN_NAME]
 
 #### repx list jobs
 
-List all jobs, optionally filtered by run or stage.
+List all jobs, optionally filtered by run, stage, or status.
 
 ```
 repx list jobs [RUN_NAME] [OPTIONS]
@@ -91,9 +91,12 @@ repx list jobs [RUN_NAME] [OPTIONS]
 | Option | Short | Description |
 |--------|-------|-------------|
 | `--stage <NAME>` | `-s` | Filter by stage name (substring match) |
+| `--status <STATUS>` | | Filter by job status (repeatable). Values: `succeeded`, `failed`, `pending`, `running`, `queued`, `blocked` |
 | `--output-paths` | | Show output directory paths |
 | `--param <KEY>` | `-p` | Show effective parameter values (repeatable for multiple keys) |
 | `--group-by-stage` | `-g` | Group output by stage name |
+
+When using `--status`, the global `--target` option specifies which target to check for job statuses (defaults to `local`).
 
 **Examples:**
 
@@ -109,6 +112,18 @@ repx list jobs simulation -s train -p seed -p learning_rate
 
 # Show output paths grouped by stage
 repx list jobs --output-paths --group-by-stage
+
+# List failed jobs on the default (local) target
+repx list jobs --status failed
+
+# List failed and blocked jobs
+repx list jobs --status failed --status blocked
+
+# List failed jobs on a specific target
+repx --target hpc list jobs --status failed
+
+# Combine stage and status filters
+repx list jobs -s preprocess --status failed
 ```
 
 #### repx list deps
@@ -286,6 +301,12 @@ List jobs with specific parameters:
 
 ```bash
 repx list jobs simulation -s train -p seed -p model --group-by-stage
+```
+
+List failed jobs on a remote target:
+
+```bash
+repx --target cluster list jobs --status failed --status blocked
 ```
 
 Generate SVG topology diagram:

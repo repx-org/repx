@@ -1,9 +1,11 @@
-use crate::cli::{ListArgs, ListEntity, ListJobsArgs};
+use crate::cli::{ListArgs, ListEntity, ListJobsArgs, StatusFilter};
 use crate::commands::trace::compute_all_effective_params;
 use crate::error::CliError;
+use repx_client::{client::status as client_status, Client};
 use repx_core::{
     config,
     constants::dirs,
+    engine::JobStatus,
     errors::{ConfigError, DomainError},
     lab,
     model::{JobId, Lab, RunId},
@@ -14,7 +16,7 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::str::FromStr;
 
-pub fn handle_list(args: ListArgs, lab_path: &Path) -> Result<(), CliError> {
+pub fn handle_list(args: ListArgs, lab_path: &Path, target: Option<&str>) -> Result<(), CliError> {
     let lab = lab::load_from_path(lab_path)?;
 
     match args.entity.unwrap_or(ListEntity::Runs { name: None }) {
@@ -24,14 +26,17 @@ pub fn handle_list(args: ListArgs, lab_path: &Path) -> Result<(), CliError> {
                 &ListJobsArgs {
                     name: Some(n),
                     stage: None,
+                    status: vec![],
                     output_paths: false,
                     param: vec![],
                     group_by_stage: false,
                 },
+                lab_path,
+                target,
             ),
             None => list_runs(&lab, lab_path),
         },
-        ListEntity::Jobs(job_args) => list_jobs(&lab, &job_args),
+        ListEntity::Jobs(job_args) => list_jobs(&lab, &job_args, lab_path, target),
         ListEntity::Dependencies { job_id } => list_dependencies(&lab, &job_id),
         ListEntity::Groups { name } => list_groups(&lab, name.as_deref()),
     }
@@ -54,25 +59,59 @@ struct ListJobsContext {
     effective_params: Option<HashMap<JobId, Value>>,
     param_keys: Vec<String>,
     group_by_stage: bool,
+    job_statuses: Option<HashMap<JobId, JobStatus>>,
+    status_filters: Vec<StatusFilter>,
 }
 
-fn list_jobs(lab: &Lab, args: &ListJobsArgs) -> Result<(), CliError> {
-    let store_path = if args.output_paths {
+fn list_jobs(
+    lab: &Lab,
+    args: &ListJobsArgs,
+    lab_path: &Path,
+    target: Option<&str>,
+) -> Result<(), CliError> {
+    let needs_config = args.output_paths || !args.status.is_empty();
+
+    let (store_path, job_statuses, resolved_target_name) = if needs_config {
         let config = config::load_config()?;
-        let target_name = config.submission_target.as_ref().ok_or_else(|| {
-            CliError::Config(ConfigError::General(
-                "No submission target configured".to_string(),
-            ))
-        })?;
-        let target = config.targets.get(target_name).ok_or_else(|| {
+
+        let target_name = target.unwrap_or("local").to_string();
+
+        let target_config = config.targets.get(&target_name).ok_or_else(|| {
             CliError::Config(ConfigError::General(format!(
                 "Target '{}' not found in config",
                 target_name
             )))
         })?;
-        Some(target.base_path.clone())
+
+        let store = if args.output_paths {
+            Some(target_config.base_path.clone())
+        } else {
+            None
+        };
+
+        let statuses = if !args.status.is_empty() {
+            let client = Client::new(config.clone(), lab_path.to_path_buf()).map_err(|e| {
+                CliError::Config(ConfigError::General(format!(
+                    "Failed to initialize client: {}",
+                    e
+                )))
+            })?;
+            let job_statuses =
+                client_status::get_statuses_for_active_target(&client, &target_name, None)
+                    .map_err(|e| {
+                        CliError::Config(ConfigError::General(format!(
+                            "Failed to get job statuses: {}",
+                            e
+                        )))
+                    })?;
+            Some(job_statuses)
+        } else {
+            None
+        };
+
+        (store, statuses, Some(target_name))
     } else {
-        None
+        (None, None, None)
     };
 
     let effective_params = if !args.param.is_empty() {
@@ -86,7 +125,16 @@ fn list_jobs(lab: &Lab, args: &ListJobsArgs) -> Result<(), CliError> {
         effective_params,
         param_keys: args.param.clone(),
         group_by_stage: args.group_by_stage,
+        job_statuses,
+        status_filters: args.status.clone(),
     };
+
+    if let Some(ref target) = resolved_target_name {
+        if !args.status.is_empty() {
+            println!("(status from target '{}')", target);
+            println!();
+        }
+    }
 
     let run_id_str = match &args.name {
         Some(s) => s.as_str(),
@@ -204,11 +252,12 @@ fn list_jobs(lab: &Lab, args: &ListJobsArgs) -> Result<(), CliError> {
                     let new_args = ListJobsArgs {
                         name: Some(found_runs[0].0.clone()),
                         stage: args.stage.clone(),
+                        status: args.status.clone(),
                         output_paths: args.output_paths,
                         param: args.param.clone(),
                         group_by_stage: args.group_by_stage,
                     };
-                    return list_jobs(lab, &new_args);
+                    return list_jobs(lab, &new_args, lab_path, target);
                 }
                 return Ok(());
             }
@@ -252,11 +301,30 @@ fn print_jobs_list(
         jobs
     };
 
-    if jobs.is_empty() && stage_filter.is_some() {
-        println!(
-            "  (no jobs matching stage filter '{}')",
-            stage_filter.unwrap()
-        );
+    let jobs: Vec<_> = if !ctx.status_filters.is_empty() {
+        jobs.into_iter()
+            .filter(|job_id| {
+                if let Some(ref statuses) = ctx.job_statuses {
+                    if let Some(status) = statuses.get(job_id) {
+                        ctx.status_filters
+                            .iter()
+                            .any(|f| status_matches_filter(status, f))
+                    } else {
+                        ctx.status_filters.contains(&StatusFilter::Pending)
+                    }
+                } else {
+                    true
+                }
+            })
+            .collect()
+    } else {
+        jobs
+    };
+
+    let has_filters = stage_filter.is_some() || !ctx.status_filters.is_empty();
+    if jobs.is_empty() && has_filters {
+        let filter_desc = build_filter_description(stage_filter, &ctx.status_filters);
+        println!("  (no jobs matching {})", filter_desc);
         return;
     }
 
@@ -284,9 +352,50 @@ fn print_jobs_list(
     }
 }
 
+fn status_matches_filter(status: &JobStatus, filter: &StatusFilter) -> bool {
+    matches!(
+        (status, filter),
+        (JobStatus::Succeeded { .. }, StatusFilter::Succeeded)
+            | (JobStatus::Failed { .. }, StatusFilter::Failed)
+            | (JobStatus::Pending, StatusFilter::Pending)
+            | (JobStatus::Running, StatusFilter::Running)
+            | (JobStatus::Queued, StatusFilter::Queued)
+            | (JobStatus::Blocked { .. }, StatusFilter::Blocked)
+    )
+}
+
+fn format_job_status(status: Option<&JobStatus>) -> &'static str {
+    match status {
+        Some(JobStatus::Succeeded { .. }) => "succeeded",
+        Some(JobStatus::Failed { .. }) => "failed",
+        Some(JobStatus::Pending) => "pending",
+        Some(JobStatus::Running) => "running",
+        Some(JobStatus::Queued) => "queued",
+        Some(JobStatus::Blocked { .. }) => "blocked",
+        None => "unknown",
+    }
+}
+
+fn build_filter_description(stage_filter: Option<&str>, status_filters: &[StatusFilter]) -> String {
+    let mut parts = Vec::new();
+    if let Some(stage) = stage_filter {
+        parts.push(format!("stage '{}'", stage));
+    }
+    if !status_filters.is_empty() {
+        let status_names: Vec<_> = status_filters.iter().map(|f| f.as_str()).collect();
+        parts.push(format!("status {}", status_names.join("/")));
+    }
+    parts.join(" and ")
+}
+
 fn print_job_line(lab: &Lab, job_id: &JobId, ctx: &ListJobsContext, indent: usize) {
     let prefix = " ".repeat(indent);
     let mut line = format!("{}{}", prefix, job_id);
+
+    if let Some(ref statuses) = ctx.job_statuses {
+        let status_str = format_job_status(statuses.get(job_id));
+        line.push_str(&format!("  [{}]", status_str));
+    }
 
     if !ctx.param_keys.is_empty() {
         if let Some(ref all_params) = ctx.effective_params {
