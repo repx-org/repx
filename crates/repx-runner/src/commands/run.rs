@@ -87,8 +87,8 @@ pub fn handle_run(
             }
             ClientEvent::SubmittingJobs { total } => {
                 println!(
-                    "- Submitting {} jobs to {}...",
-                    total,
+                    "- Scheduling {} jobs via {}...",
+                    total.to_string().bold(),
                     if scheduler == SchedulerType::Slurm {
                         "SLURM"
                     } else {
@@ -114,9 +114,70 @@ pub fn handle_run(
                 current,
             } => {
                 println!(
-                    "  [{}/{}] Started job {} as PID {}",
-                    current, total, job_id, pid
+                    "  {} [{}/{}] {} (PID {})",
+                    ">>".cyan(),
+                    current,
+                    total,
+                    job_id.to_string().dimmed(),
+                    pid,
                 );
+            }
+            ClientEvent::JobSucceeded { job_id } => {
+                println!("  {} {}", "OK".green().bold(), job_id.to_string().dimmed(),);
+            }
+            ClientEvent::JobFailed { job_id } => {
+                println!("  {} {}", "FAIL".red().bold(), job_id.to_string().dimmed(),);
+            }
+            ClientEvent::JobBlocked { job_id, blocked_by } => {
+                tracing::debug!("Job {} blocked by failed dependency {}", job_id, blocked_by);
+            }
+            ClientEvent::LocalProgress {
+                running,
+                succeeded,
+                failed,
+                blocked,
+                pending,
+                total,
+            } => {
+                let mut parts = Vec::new();
+
+                if succeeded > 0 {
+                    parts.push(format!(
+                        "{} {}",
+                        format!("{}/{}", succeeded, total).green().bold(),
+                        "ok".green(),
+                    ));
+                }
+                if failed > 0 {
+                    parts.push(format!(
+                        "{} {}",
+                        format!("{}/{}", failed, total).red().bold(),
+                        "fail".red(),
+                    ));
+                }
+                if blocked > 0 {
+                    parts.push(format!(
+                        "{} {}",
+                        format!("{}/{}", blocked, total).dimmed(),
+                        "blocked".dimmed(),
+                    ));
+                }
+                if running > 0 {
+                    parts.push(format!(
+                        "{} {}",
+                        format!("{}", running).yellow().bold(),
+                        "running".yellow(),
+                    ));
+                }
+                if pending > 0 {
+                    parts.push(format!(
+                        "{} {}",
+                        format!("{}", pending).dimmed(),
+                        "pending".dimmed(),
+                    ));
+                }
+
+                println!("  {} {}", "---".dimmed(), parts.join(" | "));
             }
             ClientEvent::WaveCompleted { wave, num_jobs } => {
                 println!("- Wave {} completed ({} jobs finished).", wave, num_jobs);

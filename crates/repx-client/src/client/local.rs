@@ -299,6 +299,7 @@ pub fn submit_local_batch_run(
                 finished_indices.push(i);
             }
         }
+        let finished_indices_nonempty = !finished_indices.is_empty();
 
         for i in finished_indices.into_iter().rev() {
             let (job_id, handle) = active_handles.remove(i);
@@ -314,6 +315,9 @@ pub fn submit_local_batch_run(
                         let stderr = String::from_utf8_lossy(&output.stderr).to_string();
                         if options.continue_on_failure {
                             failed_jobs.push((job_id.clone(), stderr));
+                            send(ClientEvent::JobFailed {
+                                job_id: job_id.clone(),
+                            });
                             for (candidate_id, candidate_job) in &jobs_in_batch {
                                 if jobs_left.contains(candidate_id) {
                                     let depends_on_failed =
@@ -325,6 +329,10 @@ pub fn submit_local_batch_run(
                                         });
                                     if depends_on_failed {
                                         blocked_jobs.insert(candidate_id.clone());
+                                        send(ClientEvent::JobBlocked {
+                                            job_id: candidate_id.clone(),
+                                            blocked_by: job_id.clone(),
+                                        });
                                     }
                                 }
                             }
@@ -336,6 +344,9 @@ pub fn submit_local_batch_run(
                         }
                     } else {
                         completed_jobs.insert(job_id.clone());
+                        send(ClientEvent::JobSucceeded {
+                            job_id: job_id.clone(),
+                        });
                     }
                 }
                 Err(e) => {
@@ -361,6 +372,29 @@ pub fn submit_local_batch_run(
         for blocked_id in &blocked_jobs {
             jobs_left.remove(blocked_id);
         }
+
+        let succeeded_count = completed_jobs
+            .iter()
+            .filter(|id| jobs_in_batch.contains_key(id))
+            .count();
+        let failed_count = failed_jobs.len();
+        let running_count = active_handles.len();
+        let blocked_count =
+            total_to_submit - succeeded_count - failed_count - running_count - jobs_left.len();
+        let pending_count = jobs_left.len();
+
+        if !finished_indices_nonempty {
+        } else {
+            send(ClientEvent::LocalProgress {
+                running: running_count,
+                succeeded: succeeded_count,
+                failed: failed_count,
+                blocked: blocked_count,
+                pending: pending_count,
+                total: total_to_submit,
+            });
+        }
+
         blocked_jobs.clear();
 
         if slots_available > 0 && !jobs_left.is_empty() {
