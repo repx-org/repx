@@ -8,6 +8,10 @@ pub mod logs {
     pub const STDERR: &str = "stderr.log";
 }
 
+pub mod manifests {
+    pub const WORKER_SLURM_IDS: &str = "worker_slurm_ids.json";
+}
+
 pub mod dirs {
     pub const REPX: &str = "repx";
     pub const OUTPUTS: &str = "outputs";
@@ -41,5 +45,10 @@ mod tests {
     fn test_dir_constants() {
         assert_eq!(dirs::REPX, "repx");
         assert_eq!(dirs::OUTPUTS, "outputs");
+    }
+
+    #[test]
+    fn test_manifest_constants() {
+        assert_eq!(manifests::WORKER_SLURM_IDS, "worker_slurm_ids.json");
     }
 }
