@@ -67,7 +67,7 @@ let
       Hide
       Type "repx tui --lab ${simple-lab}"
       Enter
-      Sleep 2s
+      Sleep 10s
       Show
 
       Sleep 2s
