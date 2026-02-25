@@ -56,6 +56,8 @@ let
   allParams = pkgs.lib.mapAttrs (_: p: p.values) processedParams;
   smartParamContext = pkgs.lib.flatten (pkgs.lib.mapAttrsToList (_: p: p.context) processedParams);
 
+  common = import ./common.nix;
+
   autoParamsDependencies =
     let
       extractDeps =
@@ -71,7 +73,7 @@ let
 
       flatParams = builtins.attrValues allParams;
     in
-    pkgs.lib.unique ((pkgs.lib.flatten (map extractDeps flatParams)) ++ smartParamContext);
+    common.uniqueDrvs ((pkgs.lib.flatten (map extractDeps flatParams)) ++ smartParamContext);
 
   allCombinations =
     let

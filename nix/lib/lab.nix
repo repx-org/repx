@@ -7,6 +7,7 @@
   groups ? { },
 }:
 let
+  common = import ./internal/common.nix;
   lab-packagers = (import ./lab-packagers.nix) { inherit pkgs gitHash lab_version; };
   findRunName =
     runPlaceholder:
@@ -132,7 +133,7 @@ let
           nestedJobs = pkgs.lib.map (pipeline: pkgs.lib.attrValues pipeline) pipelinesForRun;
           allStageResults = pkgs.lib.flatten nestedJobs;
         in
-        pkgs.lib.unique (pkgs.lib.filter pkgs.lib.isDerivation allStageResults);
+        common.uniqueDrvs (pkgs.lib.filter pkgs.lib.isDerivation allStageResults);
     in
     acc
     // {

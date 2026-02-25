@@ -73,6 +73,8 @@ let
     pkgs.lib.concatMapStringsSep "-" (spec: builtins.baseNameOf (toString spec.pkg)) hostToolBinaries
   );
 
+  common = import ./internal/common.nix;
+
   buildLabCoreAndManifest =
     {
       runs,
@@ -89,14 +91,14 @@ let
             allStageResults = pkgs.lib.flatten nestedJobs;
             allJobDerivations = pkgs.lib.filter pkgs.lib.isDerivation allStageResults;
           in
-          pkgs.lib.unique allJobDerivations;
+          common.uniqueDrvs allJobDerivations;
       };
 
-      allJobDerivations = pkgs.lib.unique (
+      allJobDerivations = common.uniqueDrvs (
         pkgs.lib.flatten (pkgs.lib.map (run: lib-run-internal.run2Jobs run) runs)
       );
 
-      imageDerivations = pkgs.lib.unique (
+      imageDerivations = common.uniqueDrvs (
         pkgs.lib.filter (i: i != null) (pkgs.lib.map (run: run.image) runs)
       );
 

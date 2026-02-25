@@ -72,11 +72,7 @@ let
 
   resolvedStageResources = resolveWithParams "resources" (stageDef.resources or null);
 
-  runDependencies = stageDef.runDependencies or [ ];
-  allInputDerivations = (pkgs.lib.unique processed.dependencyDerivations) ++ runDependencies;
-  collectedInputResources = common.collectInputResources allInputDerivations;
-
-  finalResources = common.mergeResourceHints collectedInputResources resolvedStageResources;
+  finalResources = resolvedStageResources;
 
   processed = processDependenciesFn (
     args
@@ -97,7 +93,7 @@ let
           inputs = resolvedInputs;
           outputs = resolvedOutputs;
           paramInputs = resolvedParams;
-          dependencyDerivations = pkgs.lib.unique processed.dependencyDerivations;
+          dependencyDerivations = common.uniqueDrvs processed.dependencyDerivations;
           stageInputs = processed.finalFlatInputs;
           inherit (processed) inputMappings;
           resources = if finalResources == { } then null else finalResources;
