@@ -1,5 +1,28 @@
-use clap::{Args, Parser, Subcommand};
+use clap::{Args, Parser, Subcommand, ValueEnum};
 use std::path::PathBuf;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum StatusFilter {
+    Succeeded,
+    Failed,
+    Pending,
+    Running,
+    Queued,
+    Blocked,
+}
+
+impl StatusFilter {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            StatusFilter::Succeeded => "succeeded",
+            StatusFilter::Failed => "failed",
+            StatusFilter::Pending => "pending",
+            StatusFilter::Running => "running",
+            StatusFilter::Queued => "queued",
+            StatusFilter::Blocked => "blocked",
+        }
+    }
+}
 
 #[derive(Parser)]
 #[command(
@@ -134,6 +157,13 @@ pub struct ListJobsArgs {
         help = "Filter jobs by stage name (substring match)"
     )]
     pub stage: Option<String>,
+
+    #[arg(
+        long,
+        value_enum,
+        help = "Filter jobs by status. Can be repeated (e.g., --status failed --status blocked)"
+    )]
+    pub status: Vec<StatusFilter>,
 
     #[arg(long, help = "Show output directory paths for each job")]
     pub output_paths: bool,

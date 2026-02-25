@@ -35,7 +35,7 @@ pub fn run(cli: Cli) -> Result<(), CliError> {
             let rt = tokio::runtime::Runtime::new().unwrap();
             rt.block_on(commands::gc::async_handle_internal_gc(args))
         }
-        Commands::List(args) => commands::list::handle_list(args, &cli.lab),
+        Commands::List(args) => commands::list::handle_list(args, &cli.lab, cli.target.as_deref()),
         Commands::Show(args) => commands::show::handle_show(args, &cli.lab),
         Commands::TraceParams(args) => commands::trace::handle_trace_params(args, &cli.lab),
         Commands::Gc(args) => {
