@@ -184,11 +184,42 @@ pub struct ListJobsArgs {
 
 #[derive(Args)]
 pub struct GcArgs {
+    #[command(subcommand)]
+    pub command: Option<GcCommand>,
+
     #[arg(
         long,
-        help = "The target to garbage collect (must be defined in config.toml)"
+        global = true,
+        help = "The target (must be defined in config.toml)"
     )]
     pub target: Option<String>,
+}
+
+#[derive(Subcommand)]
+pub enum GcCommand {
+    #[command(about = "List all GC roots (auto and pinned)")]
+    List,
+
+    #[command(about = "Pin a lab to prevent it from being garbage collected")]
+    Pin(GcPinArgs),
+
+    #[command(about = "Remove a pinned GC root")]
+    Unpin(GcUnpinArgs),
+}
+
+#[derive(Args)]
+pub struct GcPinArgs {
+    #[arg()]
+    pub lab_hash: Option<String>,
+
+    #[arg(long)]
+    pub name: Option<String>,
+}
+
+#[derive(Args)]
+pub struct GcUnpinArgs {
+    #[arg()]
+    pub name: String,
 }
 
 #[derive(Args)]

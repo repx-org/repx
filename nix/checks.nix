@@ -52,6 +52,15 @@ let
     e2e-bwrap-overlay-fallback = import ./checks/runtime/e2e-bwrap-overlay-fallback.nix {
       inherit pkgs repx referenceLab;
     };
+    e2e-gc-local = import ./checks/runtime/e2e-gc-local.nix {
+      inherit pkgs repx referenceLab;
+    };
+    e2e-gc-remote = import ./checks/runtime/e2e-gc-remote.nix {
+      inherit pkgs repx referenceLab;
+    };
+    e2e-scatter-gather-cancel = import ./checks/runtime/e2e-scatter-gather-cancel.nix {
+      inherit pkgs repx referenceLab;
+    };
   };
 
   libChecks = {

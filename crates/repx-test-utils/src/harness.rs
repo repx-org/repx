@@ -297,6 +297,28 @@ local_concurrency = 2
         combined_metadata.insert("runs_data".to_string(), Value::Object(all_runs));
         Value::Object(combined_metadata)
     }
+    pub fn get_lab_content_hash(&self) -> String {
+        let lab_subdir = self.cache_dir.join("artifacts").join("lab");
+        let manifest_path = fs::read_dir(&lab_subdir)
+            .expect("Could not read lab/ subdirectory in artifacts")
+            .filter_map(|e| e.ok())
+            .find(|e| {
+                e.file_name()
+                    .to_string_lossy()
+                    .ends_with("-lab-metadata.json")
+            })
+            .map(|e| e.path())
+            .expect("Could not find *-lab-metadata.json in artifacts/lab/");
+
+        let content = fs::read_to_string(&manifest_path).expect("Failed to read manifest");
+        let manifest: serde_json::Value =
+            serde_json::from_str(&content).expect("Failed to parse manifest");
+        manifest["labId"]
+            .as_str()
+            .expect("Manifest missing labId field")
+            .to_string()
+    }
+
     pub fn get_staged_executable_path(&self, job_id: &str) -> PathBuf {
         let job_data = &self.metadata["jobs"][job_id];
         let path_in_lab_str = job_data["executables"]["main"]["path"]

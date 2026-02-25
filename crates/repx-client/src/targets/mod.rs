@@ -216,10 +216,39 @@ pub trait JobRunner: CommandRunner {
     }
 }
 
+#[derive(Debug, Clone)]
+pub enum GcRootKind {
+    Auto,
+    Pinned,
+}
+
+#[derive(Debug, Clone)]
+pub struct GcRootEntry {
+    pub name: String,
+    pub kind: GcRootKind,
+    pub target_path: String,
+    pub project_id: Option<String>,
+}
+
+impl std::fmt::Display for GcRootKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            GcRootKind::Auto => write!(f, "auto"),
+            GcRootKind::Pinned => write!(f, "pinned"),
+        }
+    }
+}
+
 pub trait GcOps: TargetInfo {
     fn register_gc_root(&self, project_id: &str, lab_hash: &str) -> Result<()>;
 
     fn garbage_collect(&self) -> Result<String>;
+
+    fn pin_gc_root(&self, lab_hash: &str, name: &str) -> Result<()>;
+
+    fn unpin_gc_root(&self, name: &str) -> Result<()>;
+
+    fn list_gc_roots(&self) -> Result<Vec<GcRootEntry>>;
 }
 
 pub trait Target:

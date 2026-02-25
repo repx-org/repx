@@ -330,3 +330,267 @@ fn test_gc_handles_lab_load_failure() {
         "Corrupt artifact pointed to by root must still be preserved"
     );
 }
+
+fn make_client_and_target(
+    base_path: &std::path::Path,
+    lab_path: &std::path::Path,
+) -> (
+    repx_client::Client,
+    std::sync::Arc<dyn repx_client::targets::Target>,
+) {
+    use repx_client::Client;
+    use repx_core::config::{Config, Target as TargetConfig};
+    use std::collections::BTreeMap;
+
+    let target_config = TargetConfig {
+        base_path: base_path.to_path_buf(),
+        address: None,
+        node_local_path: None,
+        default_scheduler: None,
+        default_execution_type: None,
+        mount_host_paths: false,
+        local: None,
+        slurm: None,
+        mount_paths: vec![],
+    };
+    let config = Config {
+        targets: BTreeMap::from([("local".to_string(), target_config)]),
+        ..Default::default()
+    };
+
+    let client = Client::new(config, lab_path.to_path_buf()).unwrap();
+    let target = client.get_target("local").unwrap();
+    (client, target)
+}
+
+#[test]
+fn test_gc_pin_creates_symlink_in_pinned_dir() {
+    let harness = TestHarness::new();
+    let base_path = &harness.cache_dir;
+
+    let lab_hash = harness.get_lab_content_hash();
+    let (_client, target) = make_client_and_target(base_path, &harness.lab_path);
+
+    target.pin_gc_root(&lab_hash, "my-experiment").unwrap();
+
+    let pinned_link = base_path.join("gcroots/pinned/my-experiment");
+    assert!(
+        pinned_link.symlink_metadata().is_ok(),
+        "Pin should create a symlink in gcroots/pinned/"
+    );
+
+    let link_target = fs::read_link(&pinned_link).expect("Should be a symlink");
+    assert!(
+        link_target.to_string_lossy().contains("lab-metadata.json"),
+        "Symlink should point to a lab metadata file, got: {:?}",
+        link_target
+    );
+}
+
+#[test]
+fn test_gc_pin_default_name_uses_lab_hash() {
+    let harness = TestHarness::new();
+    let base_path = &harness.cache_dir;
+
+    let lab_hash = harness.get_lab_content_hash();
+    let (_client, target) = make_client_and_target(base_path, &harness.lab_path);
+
+    target.pin_gc_root(&lab_hash, &lab_hash).unwrap();
+
+    let pinned_link = base_path.join("gcroots/pinned").join(&lab_hash);
+    assert!(
+        pinned_link.symlink_metadata().is_ok(),
+        "Pin with lab hash as name should create the symlink"
+    );
+}
+
+#[test]
+fn test_gc_unpin_removes_symlink() {
+    let harness = TestHarness::new();
+    let base_path = &harness.cache_dir;
+
+    let lab_hash = harness.get_lab_content_hash();
+    let (_client, target) = make_client_and_target(base_path, &harness.lab_path);
+
+    target.pin_gc_root(&lab_hash, "to-remove").unwrap();
+
+    let pinned_link = base_path.join("gcroots/pinned/to-remove");
+    assert!(
+        pinned_link.symlink_metadata().is_ok(),
+        "Pin should exist before unpin"
+    );
+
+    target.unpin_gc_root("to-remove").unwrap();
+
+    assert!(
+        pinned_link.symlink_metadata().is_err(),
+        "Unpin should remove the symlink"
+    );
+}
+
+#[test]
+fn test_gc_unpin_nonexistent_name_fails() {
+    let harness = TestHarness::new();
+    let base_path = &harness.cache_dir;
+
+    let (_client, target) = make_client_and_target(base_path, &harness.lab_path);
+
+    let result = target.unpin_gc_root("does-not-exist");
+    assert!(result.is_err(), "Unpin of nonexistent name should fail");
+    let err_msg = format!("{}", result.unwrap_err());
+    assert!(
+        err_msg.contains("No pinned GC root named"),
+        "Error should mention the missing name. Got: {}",
+        err_msg
+    );
+}
+
+#[test]
+fn test_gc_pin_nonexistent_hash_fails() {
+    let harness = TestHarness::new();
+    let base_path = &harness.cache_dir;
+
+    let (_client, target) = make_client_and_target(base_path, &harness.lab_path);
+
+    let result = target.pin_gc_root("nonexistent-hash-xyz", "bad-pin");
+    assert!(result.is_err(), "Pin with nonexistent lab hash should fail");
+    let err_msg = format!("{}", result.unwrap_err());
+    assert!(
+        err_msg.contains("No lab manifest found"),
+        "Error should mention missing manifest. Got: {}",
+        err_msg
+    );
+}
+
+#[test]
+fn test_gc_list_shows_auto_and_pinned() {
+    use repx_client::targets::GcRootKind;
+
+    let harness = TestHarness::new();
+    let base_path = &harness.cache_dir;
+
+    let lab_hash = harness.get_lab_content_hash();
+    let (_client, target) = make_client_and_target(base_path, &harness.lab_path);
+
+    target.pin_gc_root(&lab_hash, "my-pin").unwrap();
+
+    target.register_gc_root("test-project", &lab_hash).unwrap();
+
+    let roots = target.list_gc_roots().unwrap();
+    assert!(!roots.is_empty(), "Should have at least 2 roots");
+
+    let has_pinned = roots
+        .iter()
+        .any(|r| matches!(r.kind, GcRootKind::Pinned) && r.name == "my-pin");
+    assert!(has_pinned, "Should contain the pinned root 'my-pin'");
+
+    let has_auto = roots.iter().any(|r| matches!(r.kind, GcRootKind::Auto));
+    assert!(has_auto, "Should contain auto roots");
+}
+
+#[test]
+fn test_gc_list_empty() {
+    let harness = TestHarness::new();
+    let base_path = &harness.cache_dir;
+
+    let (_client, target) = make_client_and_target(base_path, &harness.lab_path);
+
+    let roots = target.list_gc_roots().unwrap();
+    assert!(roots.is_empty(), "Should have no roots on fresh setup");
+}
+
+#[test]
+fn test_gc_no_subcommand_still_runs_gc() {
+    let harness = TestHarness::new();
+    let base_path = &harness.cache_dir;
+    let artifacts_dir = base_path.join("artifacts");
+    let gcroots_dir = base_path.join("gcroots");
+
+    fs::create_dir_all(&artifacts_dir).unwrap();
+    fs::create_dir_all(&gcroots_dir).unwrap();
+
+    let dead_artifact = artifacts_dir.join("dead-hash-999");
+    fs::create_dir_all(&dead_artifact).unwrap();
+    fs::write(dead_artifact.join("file"), "data").unwrap();
+
+    harness
+        .cmd()
+        .arg("internal-gc")
+        .arg("--base-path")
+        .arg(base_path)
+        .assert()
+        .success();
+
+    assert!(
+        !dead_artifact.exists(),
+        "Dead artifact should be collected by internal-gc"
+    );
+}
+
+#[test]
+fn test_pinned_root_survives_gc() {
+    let harness = TestHarness::new();
+    let base_path = &harness.cache_dir;
+
+    let lab_hash = harness.get_lab_content_hash();
+    let (_client, target) = make_client_and_target(base_path, &harness.lab_path);
+
+    target.pin_gc_root(&lab_hash, "keep-me").unwrap();
+
+    let dead = base_path.join("artifacts/dead-thing");
+    fs::create_dir_all(&dead).unwrap();
+    fs::write(dead.join("f"), "data").unwrap();
+
+    harness
+        .cmd()
+        .arg("internal-gc")
+        .arg("--base-path")
+        .arg(base_path)
+        .assert()
+        .success();
+
+    let pinned_link = base_path.join("gcroots/pinned/keep-me");
+    assert!(
+        pinned_link.symlink_metadata().is_ok(),
+        "Pinned symlink should survive GC"
+    );
+
+    let link_target = fs::read_link(&pinned_link).unwrap();
+    let abs_target = if link_target.is_absolute() {
+        link_target
+    } else {
+        pinned_link.parent().unwrap().join(link_target)
+    };
+    assert!(
+        fs::canonicalize(&abs_target).is_ok(),
+        "Pinned root's target artifact should survive GC"
+    );
+
+    assert!(!dead.exists(), "Dead artifact should be collected");
+}
+
+#[test]
+fn test_pin_overwrite_existing() {
+    let harness = TestHarness::new();
+    let base_path = &harness.cache_dir;
+
+    let lab_hash = harness.get_lab_content_hash();
+    let (_client, target) = make_client_and_target(base_path, &harness.lab_path);
+
+    target.pin_gc_root(&lab_hash, "same-name").unwrap();
+    target.pin_gc_root(&lab_hash, "same-name").unwrap();
+
+    let pinned_link = base_path.join("gcroots/pinned/same-name");
+    assert!(
+        pinned_link.symlink_metadata().is_ok(),
+        "Overwritten pin should still exist"
+    );
+
+    let count = fs::read_dir(base_path.join("gcroots/pinned"))
+        .unwrap()
+        .count();
+    assert_eq!(
+        count, 1,
+        "Should have exactly one pinned root after overwrite"
+    );
+}

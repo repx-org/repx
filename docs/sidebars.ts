@@ -31,8 +31,9 @@ const sidebars: SidebarsConfig = {
 				"running-experiments/remote-execution",
 				"running-experiments/configuration",
 				"running-experiments/containerization",
-				"running-experiments/tui",
-			],
+			"running-experiments/tui",
+			"running-experiments/garbage-collection",
+		],
 		},
 		{
 			type: "category",

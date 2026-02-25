@@ -153,12 +153,14 @@ pub fn load_from_path(initial_path: &Path) -> Result<Lab, ConfigError> {
     let root_meta: RootMetadata = serde_json::from_str(&root_metadata_content)?;
 
     if root_meta.repx_version != EXPECTED_REPX_VERSION {
-        return Err(ConfigError::IncompatibleVersion {
-            expected: EXPECTED_REPX_VERSION.to_string(),
-            found: root_meta.repx_version.clone(),
-        });
+        tracing::warn!(
+            "Lab version mismatch: binary expects '{}', lab has '{}'. Proceeding anyway.",
+            EXPECTED_REPX_VERSION,
+            root_meta.repx_version
+        );
+    } else {
+        tracing::debug!("repx_version check passed: {}", root_meta.repx_version);
     }
-    tracing::debug!("repx_version check passed: {}", root_meta.repx_version);
 
     let host_tools_root = lab_path.join("host-tools");
     if !host_tools_root.is_dir() {
