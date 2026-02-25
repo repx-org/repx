@@ -54,6 +54,24 @@ pub enum ClientEvent {
         total: usize,
         current: usize,
     },
+    JobSucceeded {
+        job_id: JobId,
+    },
+    JobFailed {
+        job_id: JobId,
+    },
+    JobBlocked {
+        job_id: JobId,
+        blocked_by: JobId,
+    },
+    LocalProgress {
+        running: usize,
+        succeeded: usize,
+        failed: usize,
+        blocked: usize,
+        pending: usize,
+        total: usize,
+    },
     WaveCompleted {
         wave: usize,
         num_jobs: usize,
