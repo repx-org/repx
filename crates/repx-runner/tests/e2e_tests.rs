@@ -242,6 +242,96 @@ fn test_show_commands() {
 }
 
 #[test]
+fn test_log_command_shows_stdout_by_default() {
+    let harness = TestHarness::new();
+
+    harness
+        .cmd()
+        .arg("run")
+        .arg("simulation-run")
+        .assert()
+        .success();
+
+    let job_id = harness.get_job_id_by_name("stage-A-producer");
+
+    harness.cmd().arg("log").arg(&job_id).assert().success();
+}
+
+#[test]
+fn test_log_command_shows_stderr_with_flag() {
+    let harness = TestHarness::new();
+
+    harness
+        .cmd()
+        .arg("run")
+        .arg("simulation-run")
+        .assert()
+        .success();
+
+    let job_id = harness.get_job_id_by_name("stage-A-producer");
+
+    harness
+        .cmd()
+        .arg("log")
+        .arg(&job_id)
+        .arg("--stderr")
+        .assert()
+        .success();
+}
+
+#[test]
+fn test_log_command_respects_line_count() {
+    let harness = TestHarness::new();
+
+    harness
+        .cmd()
+        .arg("run")
+        .arg("simulation-run")
+        .assert()
+        .success();
+
+    let job_id = harness.get_job_id_by_name("stage-A-producer");
+
+    harness
+        .cmd()
+        .arg("log")
+        .arg(&job_id)
+        .arg("-n")
+        .arg("5")
+        .assert()
+        .success();
+}
+
+#[test]
+fn test_log_command_resolves_job_prefix() {
+    let harness = TestHarness::new();
+
+    harness
+        .cmd()
+        .arg("run")
+        .arg("simulation-run")
+        .assert()
+        .success();
+
+    let full_job_id = harness.get_job_id_by_name("stage-A-producer");
+    let partial_id = &full_job_id[0..8];
+
+    harness.cmd().arg("log").arg(partial_id).assert().success();
+}
+
+#[test]
+fn test_log_command_nonexistent_job_errors() {
+    let harness = TestHarness::new();
+
+    harness
+        .cmd()
+        .arg("log")
+        .arg("nonexistent-job-id-that-does-not-exist")
+        .assert()
+        .failure();
+}
+
+#[test]
 fn test_continue_on_failure_runs_independent_jobs() {
     let harness = TestHarness::new();
 

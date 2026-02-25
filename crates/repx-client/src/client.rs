@@ -24,6 +24,13 @@ pub mod local;
 pub mod slurm;
 pub mod status;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LogType {
+    Auto,
+    Stdout,
+    Stderr,
+}
+
 #[derive(Debug)]
 pub enum ClientEvent {
     DeployingBinary,
@@ -392,36 +399,58 @@ impl Client {
         job_id: JobId,
         target_name: &str,
         line_count: u32,
+        log_type: LogType,
     ) -> Result<Vec<String>> {
         let target = self
             .targets
             .get(target_name)
             .ok_or_else(|| ClientError::TargetNotFound(target_name.to_string()))?;
 
-        let slurm_info = {
-            let slurm_map_guard = self.slurm_map.lock().unwrap();
-            slurm_map_guard.get(&job_id).cloned()
-        };
+        let log_path = match log_type {
+            LogType::Stderr => target
+                .base_path()
+                .join(dirs::OUTPUTS)
+                .join(&job_id.0)
+                .join(dirs::REPX)
+                .join(logs::STDERR),
+            LogType::Stdout => target
+                .base_path()
+                .join(dirs::OUTPUTS)
+                .join(&job_id.0)
+                .join(dirs::REPX)
+                .join(logs::STDOUT),
+            LogType::Auto => {
+                let slurm_info = {
+                    let slurm_map_guard = self.slurm_map.lock().unwrap();
+                    slurm_map_guard.get(&job_id).cloned()
+                };
 
-        if let Some((slurm_target_name, slurm_id)) = slurm_info {
-            if slurm_target_name == target_name {
-                let log_path = target
-                    .base_path()
-                    .join(dirs::OUTPUTS)
-                    .join(&job_id.0)
-                    .join(dirs::REPX)
-                    .join(format!("slurm-{}.out", slurm_id));
-
-                return target.read_remote_file_tail(&log_path, line_count);
+                if let Some((slurm_target_name, slurm_id)) = slurm_info {
+                    if slurm_target_name == target_name {
+                        target
+                            .base_path()
+                            .join(dirs::OUTPUTS)
+                            .join(&job_id.0)
+                            .join(dirs::REPX)
+                            .join(format!("slurm-{}.out", slurm_id))
+                    } else {
+                        target
+                            .base_path()
+                            .join(dirs::OUTPUTS)
+                            .join(&job_id.0)
+                            .join(dirs::REPX)
+                            .join(logs::STDOUT)
+                    }
+                } else {
+                    target
+                        .base_path()
+                        .join(dirs::OUTPUTS)
+                        .join(&job_id.0)
+                        .join(dirs::REPX)
+                        .join(logs::STDOUT)
+                }
             }
-        }
-
-        let log_path = target
-            .base_path()
-            .join(dirs::OUTPUTS)
-            .join(&job_id.0)
-            .join(dirs::REPX)
-            .join(logs::STDOUT);
+        };
 
         target.read_remote_file_tail(&log_path, line_count)
     }

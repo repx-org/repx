@@ -5,6 +5,7 @@ pub mod execute;
 pub mod gc;
 pub mod internal;
 pub mod list;
+pub mod log;
 pub mod run;
 pub mod scatter_gather;
 pub mod show;
