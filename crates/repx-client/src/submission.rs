@@ -1,3 +1,4 @@
+use crate::client::ClientEvent;
 use crate::error::Result;
 use crate::targets::Target;
 use repx_core::{
@@ -98,6 +99,7 @@ pub fn sync_images(
     target: &Arc<dyn Target>,
     local_target: &Arc<dyn Target>,
     images_to_sync: &HashSet<(std::path::PathBuf, String)>,
+    event_sender: Option<&std::sync::mpsc::Sender<ClientEvent>>,
 ) -> Result<()> {
     if images_to_sync.is_empty() {
         return Ok(());
@@ -113,6 +115,11 @@ pub fn sync_images(
             lab_path_abs.join(relative_path)
         };
         target.sync_image_incrementally(&full_path, tag, &local_cache_root)?;
+        if let Some(sender) = event_sender {
+            let _ = sender.send(ClientEvent::SyncingArtifactProgress {
+                path: relative_path.clone(),
+            });
+        }
     }
 
     Ok(())
