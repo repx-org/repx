@@ -137,7 +137,7 @@ fn handle_space_menu_key_event(key: KeyEvent, app: &mut App) {
             app.input_mode = InputMode::Normal;
         }
         KeyCode::Char('p') => {
-            app.show_path_selected();
+            app.pin_toggle();
             app.input_mode = InputMode::Normal;
         }
         KeyCode::Char('l') => {
