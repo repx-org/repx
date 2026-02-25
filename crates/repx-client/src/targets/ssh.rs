@@ -242,7 +242,7 @@ impl ArtifactSync for SshTarget {
         &self,
         local_lab_path: &Path,
         artifacts: &HashSet<PathBuf>,
-        _event_sender: Option<&Sender<super::super::ClientEvent>>,
+        event_sender: Option<&Sender<super::super::ClientEvent>>,
     ) -> Result<()> {
         if artifacts.is_empty() {
             return Ok(());
@@ -290,6 +290,14 @@ impl ArtifactSync for SshTarget {
                 "rsync batch sync failed: {}",
                 stderr
             ))));
+        }
+
+        if let Some(sender) = event_sender {
+            for path in artifacts {
+                let _ = sender.send(super::super::ClientEvent::SyncingArtifactProgress {
+                    path: path.clone(),
+                });
+            }
         }
 
         Ok(())

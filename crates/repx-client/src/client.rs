@@ -308,6 +308,9 @@ impl Client {
 
         send(ClientEvent::SyncingArtifacts { total: 1 });
         target.sync_lab_root(&self.lab_path)?;
+        send(ClientEvent::SyncingArtifactProgress {
+            path: PathBuf::from("lab"),
+        });
 
         if let Err(e) = target.register_gc_root(&project_id, &self.lab.content_hash) {
             tracing::info!("Warning: Failed to register GC root: {}", e);
@@ -339,7 +342,14 @@ impl Client {
                     "Local target ('local') must be defined in the configuration.".to_string(),
                 ))
             })?;
-            submission::sync_images(&self.lab_path, target, local_target, &images_to_sync)?;
+            submission::sync_images(
+                &self.lab_path,
+                target,
+                local_target,
+                &images_to_sync,
+                options.event_sender.as_ref(),
+            )?;
+            send(ClientEvent::SyncingFinished);
         }
 
         let jobs_to_submit: HashMap<JobId, &Job> = if scheduler == SchedulerType::Slurm {
