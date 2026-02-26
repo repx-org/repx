@@ -76,4 +76,4 @@ When the targets panel is focused:
 
 The TUI integrates with external tools for an enhanced experience:
 *   **`yazi`**: Used for file exploration when pressing `e` on a job.
-*   **`$EDITOR`**: Used for opening files. Defaults to `xdg-open` locally or `vi` remotely.
+*   **`$EDITOR`**: Used for opening files. Defaults to `xdg-open` locally. For remote targets, the remote machine's `$EDITOR` is used (with `vi` as fallback).

@@ -272,14 +272,12 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<Stdout>>, app: &mut App) -> 
                 }
                 ExternalAction::EditRemote { address, paths } => {
                     suspend_tui(terminal)?;
-                    let editor =
-                        std::env::var("REPX_REMOTE_EDITOR").unwrap_or_else(|_| "vi".to_string());
                     let remote_paths: Vec<String> = paths
                         .iter()
                         .map(|p| format!("'{}'", p.to_string_lossy().replace('\\', "/")))
                         .collect();
                     let remote_paths_str = remote_paths.join(" ");
-                    let remote_cmd = format!("{} {}", editor, remote_paths_str);
+                    let remote_cmd = format!("${{EDITOR:-vi}} {}", remote_paths_str);
                     let _ = std::process::Command::new("ssh")
                         .arg("-t")
                         .arg(address)
