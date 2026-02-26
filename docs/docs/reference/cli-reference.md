@@ -256,15 +256,48 @@ repx log abc123
 
 ### repx gc
 
-Remove stale artifacts from the output store.
+Run garbage collection or manage GC roots. When called with no subcommand, removes stale artifacts from the output store.
 
 ```
-repx gc [OPTIONS]
+repx gc [--target <NAME>]
 ```
 
 | Option | Description |
 |--------|-------------|
-| `--target <NAME>` | Target to garbage collect |
+| `--target <NAME>` | Target to operate on (global, applies to all subcommands) |
+
+#### repx gc list
+
+List all GC roots (auto and pinned) on a target.
+
+```
+repx gc list [--target <NAME>]
+```
+
+#### repx gc pin
+
+Pin a lab to prevent its artifacts from being garbage collected.
+
+```
+repx gc pin [LAB_HASH] [--name <NAME>] [--target <NAME>]
+```
+
+| Argument/Option | Description |
+|--------|-------------|
+| `LAB_HASH` | Lab content hash to pin. Defaults to the current lab. |
+| `--name <NAME>` | Name for the pinned root. Defaults to the lab hash. |
+
+#### repx gc unpin
+
+Remove a pinned GC root.
+
+```
+repx gc unpin <NAME> [--target <NAME>]
+```
+
+| Argument | Description |
+|--------|-------------|
+| `NAME` | Name of the pinned root to remove. |
 
 ### repx completions
 

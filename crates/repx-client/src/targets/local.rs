@@ -405,7 +405,7 @@ impl GcOps for LocalTarget {
     fn register_gc_root(&self, project_id: &str, lab_hash: &str) -> Result<()> {
         let gcroots = self
             .base_path()
-            .join("gcroots")
+            .join(repx_core::constants::dirs::GCROOTS)
             .join("auto")
             .join(project_id);
         fs_err::create_dir_all(&gcroots).map_err(|e| ClientError::Config(ConfigError::Io(e)))?;
@@ -413,28 +413,107 @@ impl GcOps for LocalTarget {
         let link_name = super::common::generate_gc_link_name(lab_hash);
         let link_path = gcroots.join(&link_name);
 
-        let artifacts_base = self.artifacts_base_path();
-        let lab_dir = artifacts_base.join("lab");
-
-        let target_path = if lab_dir.exists() {
-            fs_err::read_dir(&lab_dir)
-                .map_err(|e| ClientError::Config(ConfigError::Io(e)))?
-                .filter_map(|e| e.ok())
-                .find(|e| {
-                    let name = e.file_name().to_string_lossy().to_string();
-                    name.contains(lab_hash) && name.ends_with("-lab-metadata.json")
-                })
-                .map(|e| e.path())
-                .unwrap_or_else(|| artifacts_base.join(lab_hash))
-        } else {
-            artifacts_base.join(lab_hash)
-        };
+        let target_path = self
+            .find_lab_manifest(lab_hash)
+            .unwrap_or_else(|_| self.artifacts_base_path().join(lab_hash));
 
         let _ = std::os::unix::fs::symlink(&target_path, &link_path);
 
         self.cleanup_old_gc_roots(&gcroots, 5)?;
 
         Ok(())
+    }
+
+    fn pin_gc_root(&self, lab_hash: &str, name: &str) -> Result<()> {
+        let pinned_dir = self
+            .base_path()
+            .join(repx_core::constants::dirs::GCROOTS)
+            .join("pinned");
+        fs_err::create_dir_all(&pinned_dir).map_err(|e| ClientError::Config(ConfigError::Io(e)))?;
+
+        let link_path = pinned_dir.join(name);
+        if link_path.exists() || link_path.symlink_metadata().is_ok() {
+            let _ = fs_err::remove_file(&link_path);
+        }
+
+        let target_path = self.find_lab_manifest(lab_hash)?;
+        std::os::unix::fs::symlink(&target_path, &link_path)
+            .map_err(|e| ClientError::Config(ConfigError::Io(e)))?;
+
+        Ok(())
+    }
+
+    fn unpin_gc_root(&self, name: &str) -> Result<()> {
+        let link_path = self
+            .base_path()
+            .join(repx_core::constants::dirs::GCROOTS)
+            .join("pinned")
+            .join(name);
+
+        if !link_path.exists() && link_path.symlink_metadata().is_err() {
+            return Err(ClientError::Config(ConfigError::General(format!(
+                "No pinned GC root named '{}'",
+                name
+            ))));
+        }
+
+        fs_err::remove_file(&link_path).map_err(|e| ClientError::Config(ConfigError::Io(e)))?;
+        Ok(())
+    }
+
+    fn list_gc_roots(&self) -> Result<Vec<super::GcRootEntry>> {
+        let gcroots_dir = self.base_path().join(repx_core::constants::dirs::GCROOTS);
+        let mut entries = Vec::new();
+
+        let pinned_dir = gcroots_dir.join("pinned");
+        if pinned_dir.exists() {
+            for entry in fs_err::read_dir(&pinned_dir)
+                .map_err(|e| ClientError::Config(ConfigError::Io(e)))?
+            {
+                let entry = entry.map_err(|e| ClientError::Config(ConfigError::Io(e)))?;
+                let target_path = std::fs::read_link(entry.path())
+                    .map(|p| p.to_string_lossy().to_string())
+                    .unwrap_or_else(|_| "???".to_string());
+                entries.push(super::GcRootEntry {
+                    name: entry.file_name().to_string_lossy().to_string(),
+                    kind: super::GcRootKind::Pinned,
+                    target_path,
+                    project_id: None,
+                });
+            }
+        }
+
+        let auto_dir = gcroots_dir.join("auto");
+        if auto_dir.exists() {
+            for project_entry in
+                fs_err::read_dir(&auto_dir).map_err(|e| ClientError::Config(ConfigError::Io(e)))?
+            {
+                let project_entry =
+                    project_entry.map_err(|e| ClientError::Config(ConfigError::Io(e)))?;
+                if !project_entry.path().is_dir() {
+                    continue;
+                }
+                let project_id = project_entry.file_name().to_string_lossy().to_string();
+                for link_entry in fs_err::read_dir(project_entry.path())
+                    .map_err(|e| ClientError::Config(ConfigError::Io(e)))?
+                {
+                    let link_entry =
+                        link_entry.map_err(|e| ClientError::Config(ConfigError::Io(e)))?;
+                    let target_path = std::fs::read_link(link_entry.path())
+                        .map(|p| p.to_string_lossy().to_string())
+                        .unwrap_or_else(|_| "???".to_string());
+                    entries.push(super::GcRootEntry {
+                        name: link_entry.file_name().to_string_lossy().to_string(),
+                        kind: super::GcRootKind::Auto,
+                        target_path,
+                        project_id: Some(project_id.clone()),
+                    });
+                }
+            }
+        }
+
+        entries.sort_by(|a, b| a.name.cmp(&b.name));
+        Ok(entries)
     }
 
     fn garbage_collect(&self) -> Result<String> {
@@ -499,6 +578,51 @@ impl LocalTarget {
         }
 
         Ok(())
+    }
+
+    fn find_lab_manifest(&self, lab_hash: &str) -> Result<PathBuf> {
+        let artifacts_base = self.artifacts_base_path();
+        let lab_dir = artifacts_base.join("lab");
+
+        if lab_dir.exists() {
+            if let Some(entry) = fs_err::read_dir(&lab_dir)
+                .map_err(|e| ClientError::Config(ConfigError::Io(e)))?
+                .filter_map(|e| e.ok())
+                .find(|e| {
+                    let name = e.file_name().to_string_lossy().to_string();
+                    name.contains(lab_hash) && name.ends_with("-lab-metadata.json")
+                })
+            {
+                return Ok(entry.path());
+            }
+
+            for entry in fs_err::read_dir(&lab_dir)
+                .map_err(|e| ClientError::Config(ConfigError::Io(e)))?
+                .filter_map(|e| e.ok())
+            {
+                let name = entry.file_name().to_string_lossy().to_string();
+                if !name.ends_with("-lab-metadata.json") {
+                    continue;
+                }
+                if let Ok(content) = std::fs::read_to_string(entry.path()) {
+                    if let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) {
+                        if json.get("labId").and_then(|v| v.as_str()) == Some(lab_hash) {
+                            return Ok(entry.path());
+                        }
+                    }
+                }
+            }
+        }
+
+        let fallback = artifacts_base.join(lab_hash);
+        if fallback.exists() {
+            return Ok(fallback);
+        }
+
+        Err(ClientError::Config(ConfigError::General(format!(
+            "No lab manifest found for hash '{}'",
+            lab_hash
+        ))))
     }
 
     fn cleanup_old_gc_roots(&self, gcroots_dir: &Path, keep: usize) -> Result<()> {

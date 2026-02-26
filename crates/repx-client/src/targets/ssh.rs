@@ -166,6 +166,54 @@ impl SlurmOps for SshTarget {
 }
 
 impl SshTarget {
+    fn find_lab_manifest_remote(&self, lab_hash: &str) -> Result<String> {
+        let artifacts_base = self.artifacts_base_path();
+        let lab_dir = artifacts_base.join("lab");
+
+        let find_manifest_cmd = RemoteCommand::new("find")
+            .arg(&lab_dir.to_string_lossy())
+            .arg("-name")
+            .arg(&format!("*{}*-lab-metadata.json", lab_hash))
+            .pipe(RemoteCommand::new("head").arg("-n").arg("1"));
+
+        if let Ok(output) = self.run_command("sh", &["-c", &find_manifest_cmd.to_shell_string()]) {
+            let path = output.trim();
+            if !path.is_empty() {
+                return Ok(path.to_string());
+            }
+        }
+
+        let grep_script = format!(
+            r#"for f in {0}/*-lab-metadata.json; do
+                [ -f "$f" ] || continue
+                if grep -q '"labId"' "$f" 2>/dev/null && grep -q {1} "$f" 2>/dev/null; then
+                    echo "$f"
+                    exit 0
+                fi
+            done"#,
+            shell_quote(&lab_dir.to_string_lossy()),
+            shell_quote(lab_hash),
+        );
+
+        if let Ok(output) = self.run_command("sh", &["-c", &grep_script]) {
+            let path = output.trim();
+            if !path.is_empty() {
+                return Ok(path.to_string());
+            }
+        }
+
+        let fallback = artifacts_base.join(lab_hash).to_string_lossy().to_string();
+        let check_script = format!("test -e {}", shell_quote(&fallback));
+        if self.run_command("sh", &["-c", &check_script]).is_ok() {
+            return Ok(fallback);
+        }
+
+        Err(ClientError::Config(ConfigError::General(format!(
+            "No lab manifest found for hash '{}'",
+            lab_hash
+        ))))
+    }
+
     fn sync_directory_impl(
         &self,
         local_path: &Path,
@@ -742,31 +790,19 @@ impl GcOps for SshTarget {
     fn register_gc_root(&self, project_id: &str, lab_hash: &str) -> Result<()> {
         let gcroots_dir = self
             .base_path()
-            .join("gcroots")
+            .join(repx_core::constants::dirs::GCROOTS)
             .join("auto")
             .join(project_id);
 
         let link_name = super::common::generate_gc_link_name(lab_hash);
         let link_path = gcroots_dir.join(&link_name);
 
-        let artifacts_base = self.artifacts_base_path();
-        let lab_dir = artifacts_base.join("lab");
-
-        let find_manifest_cmd = RemoteCommand::new("find")
-            .arg(&lab_dir.to_string_lossy())
-            .arg("-name")
-            .arg(&format!("*{}*-lab-metadata.json", lab_hash))
-            .pipe(RemoteCommand::new("head").arg("-n").arg("1"));
-
-        let manifest_output =
-            self.run_command("sh", &["-c", &find_manifest_cmd.to_shell_string()])?;
-        let manifest_path_str = manifest_output.trim();
-
-        let target_path_str = if !manifest_path_str.is_empty() {
-            manifest_path_str.to_string()
-        } else {
-            artifacts_base.join(lab_hash).to_string_lossy().to_string()
-        };
+        let target_path_str = self.find_lab_manifest_remote(lab_hash).unwrap_or_else(|_| {
+            self.artifacts_base_path()
+                .join(lab_hash)
+                .to_string_lossy()
+                .to_string()
+        });
 
         let script = format!(
             r#"
@@ -782,6 +818,107 @@ impl GcOps for SshTarget {
 
         self.run_command("sh", &["-c", &script])?;
         Ok(())
+    }
+
+    fn pin_gc_root(&self, lab_hash: &str, name: &str) -> Result<()> {
+        let pinned_dir = self.base_path().join(dirs::GCROOTS).join("pinned");
+
+        let link_path = pinned_dir.join(name);
+
+        let target_path_str = self.find_lab_manifest_remote(lab_hash)?;
+
+        let script = format!(
+            "mkdir -p {0} && ln -sfn {1} {2}",
+            shell_quote(&pinned_dir.to_string_lossy()),
+            shell_quote(&target_path_str),
+            shell_quote(&link_path.to_string_lossy())
+        );
+
+        self.run_command("sh", &["-c", &script])?;
+        Ok(())
+    }
+
+    fn unpin_gc_root(&self, name: &str) -> Result<()> {
+        let link_path = self
+            .base_path()
+            .join(dirs::GCROOTS)
+            .join("pinned")
+            .join(name);
+
+        let check_script = format!(
+            "test -e {0} || test -L {0}",
+            shell_quote(&link_path.to_string_lossy())
+        );
+        if self.run_command("sh", &["-c", &check_script]).is_err() {
+            return Err(ClientError::Config(ConfigError::General(format!(
+                "No pinned GC root named '{}'",
+                name
+            ))));
+        }
+
+        let rm_script = format!("rm -f {}", shell_quote(&link_path.to_string_lossy()));
+        self.run_command("sh", &["-c", &rm_script])?;
+        Ok(())
+    }
+
+    fn list_gc_roots(&self) -> Result<Vec<super::GcRootEntry>> {
+        let gcroots_dir = self.base_path().join(dirs::GCROOTS);
+        let mut entries = Vec::new();
+
+        let pinned_dir = gcroots_dir.join("pinned");
+        let script = format!(
+            r#"
+            if [ -d {0} ]; then
+                for f in {0}/*; do
+                    [ -e "$f" ] || [ -L "$f" ] || continue
+                    target=$(readlink "$f" 2>/dev/null || echo "???")
+                    echo "pinned|$(basename "$f")|$target|"
+                done
+            fi
+            if [ -d {1} ]; then
+                for proj in {1}/*/; do
+                    [ -d "$proj" ] || continue
+                    proj_id=$(basename "$proj")
+                    for f in "$proj"*; do
+                        [ -e "$f" ] || [ -L "$f" ] || continue
+                        target=$(readlink "$f" 2>/dev/null || echo "???")
+                        echo "auto|$(basename "$f")|$target|$proj_id"
+                    done
+                done
+            fi
+            "#,
+            shell_quote(&pinned_dir.to_string_lossy()),
+            shell_quote(&gcroots_dir.join("auto").to_string_lossy()),
+        );
+
+        let output = self.run_command("sh", &["-c", &script])?;
+        for line in output.lines() {
+            let line = line.trim();
+            if line.is_empty() {
+                continue;
+            }
+            let parts: Vec<&str> = line.splitn(4, '|').collect();
+            if parts.len() < 3 {
+                continue;
+            }
+            let kind = match parts[0] {
+                "pinned" => super::GcRootKind::Pinned,
+                _ => super::GcRootKind::Auto,
+            };
+            entries.push(super::GcRootEntry {
+                name: parts[1].to_string(),
+                kind,
+                target_path: parts[2].to_string(),
+                project_id: if parts.len() > 3 && !parts[3].is_empty() {
+                    Some(parts[3].to_string())
+                } else {
+                    None
+                },
+            });
+        }
+
+        entries.sort_by(|a, b| a.name.cmp(&b.name));
+        Ok(entries)
     }
 
     fn garbage_collect(&self) -> Result<String> {

@@ -68,12 +68,17 @@ pub fn run(cli: Cli) -> Result<(), CliError> {
                     log_summary: e.to_string(),
                 }
             })?;
+            let submission_target = args
+                .target
+                .clone()
+                .or(config.submission_target.clone())
+                .unwrap_or_else(|| "local".to_string());
             let context = AppContext {
                 lab_path: &cli.lab,
                 client: &client,
-                submission_target: "local",
+                submission_target: &submission_target,
             };
-            commands::gc::handle_gc(args, &context, &config)
+            commands::gc::handle_gc_dispatch(args, &context, &config)
         }
         Commands::Run(args) => {
             let config = config::load_config()?;

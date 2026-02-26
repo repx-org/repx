@@ -64,6 +64,9 @@ jobs:
           - incremental-sync
           - large_lab
           - e2e-bwrap-overlay-fallback
+          - e2e-gc-local
+          - e2e-gc-remote
+          - e2e-scatter-gather-cancel
     steps:
       - uses: actions/checkout@v4
       - uses: DeterminateSystems/nix-installer-action@main

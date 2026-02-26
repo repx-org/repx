@@ -1,4 +1,4 @@
-use crate::cli::{GcArgs, InternalGcArgs};
+use crate::cli::{GcArgs, GcCommand, GcPinArgs, GcUnpinArgs, InternalGcArgs};
 use crate::commands::AppContext;
 use crate::error::CliError;
 use repx_core::{config::Config, constants::dirs, errors::DomainError, lab};
@@ -6,8 +6,27 @@ use std::collections::HashSet;
 use std::fs;
 use std::path::PathBuf;
 
-pub fn handle_gc(args: GcArgs, context: &AppContext, _config: &Config) -> Result<(), CliError> {
-    let target_name = args.target.as_deref().unwrap_or(context.submission_target);
+pub fn handle_gc_dispatch(
+    args: GcArgs,
+    context: &AppContext,
+    config: &Config,
+) -> Result<(), CliError> {
+    match args.command {
+        None => handle_gc_collect(args.target.as_deref(), context, config),
+        Some(GcCommand::List) => handle_gc_list(args.target.as_deref(), context),
+        Some(GcCommand::Pin(pin_args)) => handle_gc_pin(pin_args, args.target.as_deref(), context),
+        Some(GcCommand::Unpin(unpin_args)) => {
+            handle_gc_unpin(unpin_args, args.target.as_deref(), context)
+        }
+    }
+}
+
+fn handle_gc_collect(
+    target_arg: Option<&str>,
+    context: &AppContext,
+    _config: &Config,
+) -> Result<(), CliError> {
+    let target_name = target_arg.unwrap_or(context.submission_target);
     tracing::info!("Garbage collecting target '{}'...", target_name);
 
     let target = context
@@ -36,9 +55,105 @@ pub fn handle_gc(args: GcArgs, context: &AppContext, _config: &Config) -> Result
     Ok(())
 }
 
+fn handle_gc_list(target_arg: Option<&str>, context: &AppContext) -> Result<(), CliError> {
+    let target_name = target_arg.unwrap_or(context.submission_target);
+
+    let target = context
+        .client
+        .get_target(target_name)
+        .ok_or_else(|| CliError::Domain(DomainError::TargetNotFound(target_name.to_string())))?;
+
+    let roots = target
+        .list_gc_roots()
+        .map_err(|e| CliError::ExecutionFailed {
+            message: "Failed to list GC roots".to_string(),
+            log_path: None,
+            log_summary: e.to_string(),
+        })?;
+
+    if roots.is_empty() {
+        println!("No GC roots found on target '{}'.", target_name);
+        return Ok(());
+    }
+
+    println!("{:<8} {:<45} TARGET", "KIND", "NAME");
+    for root in &roots {
+        println!("{:<8} {:<45} {}", root.kind, root.name, root.target_path);
+    }
+
+    Ok(())
+}
+
+fn handle_gc_pin(
+    args: GcPinArgs,
+    target_arg: Option<&str>,
+    context: &AppContext,
+) -> Result<(), CliError> {
+    let target_name = target_arg.unwrap_or(context.submission_target);
+
+    let target = context
+        .client
+        .get_target(target_name)
+        .ok_or_else(|| CliError::Domain(DomainError::TargetNotFound(target_name.to_string())))?;
+
+    let lab_hash = match args.lab_hash {
+        Some(h) => h,
+        None => {
+            let lab =
+                lab::load_from_path(context.lab_path).map_err(|e| CliError::ExecutionFailed {
+                    message: "Failed to load lab metadata. Provide a lab hash explicitly."
+                        .to_string(),
+                    log_path: None,
+                    log_summary: e.to_string(),
+                })?;
+            lab.content_hash.clone()
+        }
+    };
+
+    let name = args.name.unwrap_or_else(|| lab_hash.clone());
+
+    target
+        .pin_gc_root(&lab_hash, &name)
+        .map_err(|e| CliError::ExecutionFailed {
+            message: format!("Failed to pin GC root on target '{}'", target_name),
+            log_path: None,
+            log_summary: e.to_string(),
+        })?;
+
+    println!("Pinned '{}' on target '{}'.", name, target_name);
+    Ok(())
+}
+
+fn handle_gc_unpin(
+    args: GcUnpinArgs,
+    target_arg: Option<&str>,
+    context: &AppContext,
+) -> Result<(), CliError> {
+    let target_name = target_arg.unwrap_or(context.submission_target);
+
+    let target = context
+        .client
+        .get_target(target_name)
+        .ok_or_else(|| CliError::Domain(DomainError::TargetNotFound(target_name.to_string())))?;
+
+    target
+        .unpin_gc_root(&args.name)
+        .map_err(|e| CliError::ExecutionFailed {
+            message: format!(
+                "Failed to unpin '{}' on target '{}'",
+                args.name, target_name
+            ),
+            log_path: None,
+            log_summary: e.to_string(),
+        })?;
+
+    println!("Unpinned '{}' from target '{}'.", args.name, target_name);
+    Ok(())
+}
+
 pub async fn async_handle_internal_gc(args: InternalGcArgs) -> Result<(), CliError> {
     let base_path = args.base_path;
-    let gcroots_dir = base_path.join("gcroots");
+    let gcroots_dir = base_path.join(dirs::GCROOTS);
     let artifacts_dir = base_path.join(dirs::ARTIFACTS);
     let outputs_dir = base_path.join(dirs::OUTPUTS);
 
