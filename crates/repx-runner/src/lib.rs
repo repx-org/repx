@@ -38,6 +38,27 @@ pub fn run(cli: Cli) -> Result<(), CliError> {
         Commands::List(args) => commands::list::handle_list(args, &cli.lab, cli.target.as_deref()),
         Commands::Show(args) => commands::show::handle_show(args, &cli.lab),
         Commands::TraceParams(args) => commands::trace::handle_trace_params(args, &cli.lab),
+        Commands::Log(args) => {
+            let config = config::load_config()?;
+            let client = Client::new(config.clone(), cli.lab.clone()).map_err(|e| {
+                CliError::ExecutionFailed {
+                    message: "Failed to initialize client".to_string(),
+                    log_path: None,
+                    log_summary: e.to_string(),
+                }
+            })?;
+            let target_name = cli
+                .target
+                .as_deref()
+                .or(config.submission_target.as_deref())
+                .unwrap_or("local");
+            let context = AppContext {
+                lab_path: &cli.lab,
+                client: &client,
+                submission_target: target_name,
+            };
+            commands::log::handle_log(args, &context)
+        }
         Commands::Gc(args) => {
             let config = config::load_config()?;
             let client = Client::new(config.clone(), cli.lab.clone()).map_err(|e| {

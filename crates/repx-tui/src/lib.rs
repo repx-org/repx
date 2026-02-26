@@ -184,8 +184,12 @@ pub fn run(args: TuiArgs) -> Result<(), TuiError> {
             if let Some(job_id) = &current_job_to_watch {
                 if last_fetch.elapsed() >= polling_interval {
                     let target_name = active_target_clone_for_logs.lock().unwrap().clone();
-                    let log_result =
-                        log_client_clone.get_log_tail(job_id.clone(), &target_name, 50);
+                    let log_result = log_client_clone.get_log_tail(
+                        job_id.clone(),
+                        &target_name,
+                        50,
+                        repx_client::client::LogType::Auto,
+                    );
                     if log_result_tx.send((job_id.clone(), log_result)).is_err() {
                         break;
                     }

@@ -92,6 +92,9 @@ pub enum Commands {
         about = "Trace effective parameters for a job (includes inherited params from dependencies)"
     )]
     TraceParams(TraceParamsArgs),
+
+    #[command(about = "View logs for a job")]
+    Log(LogArgs),
 }
 
 #[derive(Args)]
@@ -186,6 +189,26 @@ pub struct GcArgs {
         help = "The target to garbage collect (must be defined in config.toml)"
     )]
     pub target: Option<String>,
+}
+
+#[derive(Args)]
+pub struct LogArgs {
+    #[arg(help = "Job ID (or prefix) to get logs for")]
+    pub job_id: String,
+
+    #[arg(
+        short = 'n',
+        long,
+        default_value = "50",
+        help = "Number of lines to show"
+    )]
+    pub lines: u32,
+
+    #[arg(long, help = "Show stderr instead of stdout")]
+    pub stderr: bool,
+
+    #[arg(short, long, help = "Follow log output (like tail -f)")]
+    pub follow: bool,
 }
 
 #[derive(Args)]

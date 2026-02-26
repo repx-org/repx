@@ -222,6 +222,38 @@ Display effective parameter values and their sources for a job, tracing inherita
 repx trace-params [JOB_ID]
 ```
 
+### repx log
+
+View logs for a job.
+
+```
+repx log <JOB_ID> [OPTIONS]
+```
+
+| Option | Short | Description |
+|--------|-------|-------------|
+| `--lines <N>` | `-n` | Number of lines to show (default: 50) |
+| `--stderr` | | Show stderr instead of stdout |
+| `--follow` | `-f` | Follow log output (like `tail -f`) |
+
+By default, `repx log` shows stdout. For SLURM jobs, it auto-detects the combined slurm output file.
+
+**Examples:**
+
+```bash
+# Show last 50 lines of stdout
+repx log abc123def456
+
+# Show last 100 lines of stderr
+repx log abc123def456 -n 100 --stderr
+
+# Follow log output
+repx log abc123def456 -f
+
+# Job ID prefix matching
+repx log abc123
+```
+
 ### repx gc
 
 Remove stale artifacts from the output store.
