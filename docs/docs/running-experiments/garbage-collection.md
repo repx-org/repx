@@ -90,6 +90,12 @@ repx gc unpin <name>
 
 Removes the named pinned root. The lab's artifacts become eligible for GC on the next run.
 
+## TUI Usage
+
+In the TUI, press **Space** to open the Quick Actions menu, then **p** to toggle pin/unpin for the current lab on the active target.
+
+When the lab is pinned, a green **[Pinned]** indicator appears in the overview panel title bar.
+
 ## Tips
 
 - Pin important experiment results before running GC to ensure they're preserved

@@ -54,7 +54,7 @@ When the targets panel is focused:
 *   `r`: **Run** selected jobs
 *   `c`: **Cancel** selected jobs
 *   `d`: **Debug** (inspect) selected job
-*   `p`: **Path** (show output path)
+*   `p`: **Pin/Unpin** current lab as a GC root (see [Garbage Collection](garbage-collection.md))
 *   `l`: Show global **Logs**
 *   `y`: **Yank** (copy) path to clipboard
 *   `e`: **Explore** output directory (opens `yazi` or shell)
@@ -71,6 +71,10 @@ When the targets panel is focused:
 *   `c`: Close (fold) selected node
 *   `m`: Fold all nodes
 *   `r`: Unfold all nodes
+
+## Indicators
+
+*   **[Pinned]**: A green badge in the overview panel title bar indicates the current lab is pinned as a GC root on the active target. Toggle with **Space** > **p**.
 
 ## External Tools
 

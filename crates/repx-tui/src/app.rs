@@ -122,6 +122,7 @@ pub struct App {
     pub system_logs: Vec<String>,
     system_log_rx: Receiver<String>,
     pending_context_job_id: Option<JobId>,
+    pub is_pinned: bool,
 }
 
 impl App {
@@ -256,8 +257,10 @@ impl App {
             focused_panel: PanelFocus::Jobs,
             pending_action: None,
             pending_context_job_id: None,
+            is_pinned: false,
         };
 
+        app.is_pinned = app.check_if_pinned();
         app.jobs_state.init_from_lab(&app.lab);
         app.jobs_state.rebuild_display_list(&app.lab);
 
@@ -1031,7 +1034,63 @@ impl App {
 
     pub fn debug_selected(&mut self) {}
 
-    pub fn show_path_selected(&mut self) {}
+    pub fn pin_toggle(&mut self) {
+        let target_name = self.targets_state.get_active_target_name();
+        let target = match self.client.get_target(&target_name) {
+            Some(t) => t,
+            None => {
+                self.system_logs
+                    .push("No active target for pin operation".to_string());
+                return;
+            }
+        };
+
+        let lab_hash = &self.lab.content_hash;
+        if lab_hash.is_empty() {
+            self.system_logs
+                .push("Cannot pin: lab content hash is empty".to_string());
+            return;
+        }
+
+        if self.is_pinned {
+            match target.unpin_gc_root(lab_hash) {
+                Ok(_) => {
+                    self.is_pinned = false;
+                    self.system_logs
+                        .push(format!("Lab unpinned from GC roots on '{}'", target_name));
+                }
+                Err(e) => {
+                    self.system_logs.push(format!("Failed to unpin: {}", e));
+                }
+            }
+        } else {
+            match target.pin_gc_root(lab_hash, lab_hash) {
+                Ok(_) => {
+                    self.is_pinned = true;
+                    self.system_logs
+                        .push(format!("Lab pinned as GC root on '{}'", target_name));
+                }
+                Err(e) => {
+                    self.system_logs.push(format!("Failed to pin: {}", e));
+                }
+            }
+        }
+    }
+
+    fn check_if_pinned(&self) -> bool {
+        let target_name = self.targets_state.get_active_target_name();
+        let target = match self.client.get_target(&target_name) {
+            Some(t) => t,
+            None => return false,
+        };
+        match target.list_gc_roots() {
+            Ok(roots) => roots.iter().any(|r| {
+                matches!(r.kind, repx_client::targets::GcRootKind::Pinned)
+                    && r.target_path.contains(&self.lab.content_hash)
+            }),
+            Err(_) => false,
+        }
+    }
     pub fn yank_selected_path(&mut self) {
         if let Some(path) = self.get_selected_job_path() {
             let target_name = self.targets_state.get_active_target_name();

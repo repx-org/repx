@@ -44,6 +44,7 @@ fn draw_overview_panel(f: &mut Frame, area: Rect, app: &mut App) {
     let overview_border_style = get_style(app, &app.theme.elements.panels.overview);
     let targets_border_style = get_style(app, &app.theme.elements.panels.targets);
     let loading_indicator = if app.is_loading { " [Updating...]" } else { "" };
+    let pinned_indicator = if app.is_pinned { " [Pinned]" } else { "" };
     let store_path_str = {
         let active_target_name = app.targets_state.get_active_target_name();
         app.client
@@ -90,6 +91,16 @@ fn draw_overview_panel(f: &mut Frame, area: Rect, app: &mut App) {
                         .fg(Color::White)
                         .add_modifier(Modifier::DIM),
                 ),
+                if app.is_pinned {
+                    Span::styled(
+                        pinned_indicator,
+                        Style::default()
+                            .fg(Color::Green)
+                            .add_modifier(Modifier::BOLD),
+                    )
+                } else {
+                    Span::raw("")
+                },
                 Span::styled("┌", overview_border_style),
             ])
             .alignment(Alignment::Left),
@@ -894,6 +905,11 @@ fn draw_menu_popup(f: &mut Frame, area: Rect, app: &App, title: &str, shortcuts:
 }
 
 fn draw_space_menu_popup(f: &mut Frame, area: Rect, app: &App) {
+    let pin_label = if app.is_pinned {
+        "Unpin GC Root"
+    } else {
+        "Pin GC Root"
+    };
     draw_menu_popup(
         f,
         area,
@@ -904,6 +920,7 @@ fn draw_space_menu_popup(f: &mut Frame, area: Rect, app: &App) {
             ("c", "Cancel Selected"),
             ("y", "Yank Path"),
             ("e", "Explore (Yazi)"),
+            ("p", pin_label),
             ("l", "Global Logs"),
             ("ESC", "Close Menu"),
         ],
