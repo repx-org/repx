@@ -147,6 +147,16 @@ pub trait FileOps: TargetInfo {
 pub trait SlurmOps: CommandRunner {
     fn scancel(&self, slurm_id: u32) -> Result<()>;
 
+    fn scancel_batch(&self, slurm_ids: &[u32]) -> Result<()> {
+        if slurm_ids.is_empty() {
+            return Ok(());
+        }
+        let id_strs: Vec<String> = slurm_ids.iter().map(|id| id.to_string()).collect();
+        let id_refs: Vec<&str> = id_strs.iter().map(|s| s.as_str()).collect();
+        self.run_command("scancel", &id_refs)?;
+        Ok(())
+    }
+
     fn squeue(&self) -> Result<HashMap<JobId, SlurmJobInfo>> {
         let user = if self.config().address.is_some() {
             self.run_command("whoami", &[])?.trim().to_string()

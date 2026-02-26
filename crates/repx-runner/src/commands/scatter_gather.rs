@@ -1,7 +1,7 @@
 use crate::{cli::InternalScatterGatherArgs, error::CliError};
 use futures::future::join_all;
 use repx_core::{
-    constants::{dirs, markers},
+    constants::{dirs, manifests, markers},
     errors::ConfigError,
     model::JobId,
 };
@@ -386,6 +386,23 @@ fn resolve_step_inputs(
     Ok(inputs)
 }
 
+async fn cancel_workers_from_manifest(repx_dir: &Path) {
+    let manifest_path = repx_dir.join(manifests::WORKER_SLURM_IDS);
+    if let Ok(content) = fs::read_to_string(&manifest_path) {
+        if let Ok(worker_ids) = serde_json::from_str::<Vec<u32>>(&content) {
+            if !worker_ids.is_empty() {
+                let id_strs: Vec<String> = worker_ids.iter().map(|id| id.to_string()).collect();
+                tracing::info!(
+                    "Cancelling {} worker SLURM jobs: {:?}",
+                    worker_ids.len(),
+                    &id_strs
+                );
+                let _ = TokioCommand::new("scancel").args(&id_strs).output().await;
+            }
+        }
+    }
+}
+
 async fn async_handle_scatter_gather(args: InternalScatterGatherArgs) -> Result<(), CliError> {
     tracing::debug!(
         "INTERNAL SCATTER-GATHER (Phase: {}) starting for job '{}'",
@@ -436,6 +453,7 @@ async fn async_handle_scatter_gather(args: InternalScatterGatherArgs) -> Result<
                 );
                 tracing::error!("{}", msg);
                 fs::File::create(orch.repx_dir.join(markers::FAIL))?;
+                cancel_workers_from_manifest(&orch.repx_dir).await;
                 if let Some(anchor) = args.anchor_id {
                     let _ = TokioCommand::new("scancel")
                         .arg(anchor.to_string())
@@ -476,6 +494,7 @@ async fn async_handle_scatter_gather(args: InternalScatterGatherArgs) -> Result<
             }
             Err(e) => {
                 fs::File::create(orch.repx_dir.join(markers::FAIL))?;
+                cancel_workers_from_manifest(&orch.repx_dir).await;
                 if let Some(anchor) = args.anchor_id {
                     let _ = TokioCommand::new("scancel")
                         .arg(anchor.to_string())
@@ -499,6 +518,7 @@ async fn async_handle_scatter_gather(args: InternalScatterGatherArgs) -> Result<
     if let Err(e) = orch.run_scatter(&args.scatter_exe_path).await {
         let _ = fs::File::create(orch.scatter_repx_dir.join(markers::FAIL));
         fs::File::create(orch.repx_dir.join(markers::FAIL))?;
+        cancel_workers_from_manifest(&orch.repx_dir).await;
         if let Some(anchor) = args.anchor_id {
             let _ = TokioCommand::new("scancel")
                 .arg(anchor.to_string())
@@ -531,7 +551,7 @@ async fn async_handle_scatter_gather(args: InternalScatterGatherArgs) -> Result<
         }
         fs::File::create(orch.repx_dir.join(markers::SUCCESS))?;
     } else if args.scheduler == "slurm" {
-        let last_step_slurm_ids = submit_slurm_branches(
+        let (last_step_slurm_ids, all_worker_slurm_ids) = submit_slurm_branches(
             &orch,
             &work_items,
             &steps_meta,
@@ -539,6 +559,15 @@ async fn async_handle_scatter_gather(args: InternalScatterGatherArgs) -> Result<
             &args.step_sbatch_opts,
         )
         .await?;
+
+        let manifest_path = orch.repx_dir.join(manifests::WORKER_SLURM_IDS);
+        let manifest_json = serde_json::to_string(&all_worker_slurm_ids)?;
+        fs::write(&manifest_path, manifest_json)?;
+        tracing::info!(
+            "Wrote {} worker SLURM IDs to {}",
+            all_worker_slurm_ids.len(),
+            manifest_path.display()
+        );
 
         submit_slurm_gather_job(&orch, &args, &last_step_slurm_ids).await?;
 
@@ -865,8 +894,9 @@ async fn submit_slurm_branches(
     steps_meta: &StepsMetadata,
     topo_order: &[String],
     sbatch_opts: &str,
-) -> Result<Vec<String>, CliError> {
+) -> Result<(Vec<String>, Vec<u32>), CliError> {
     let mut last_step_slurm_ids = Vec::new();
+    let mut all_worker_slurm_ids: Vec<u32> = Vec::new();
 
     for (branch_idx, item) in work_items.iter().enumerate() {
         let branch_root = orch.job_root.join(format!("branch-{}", branch_idx));
@@ -960,6 +990,9 @@ async fn submit_slurm_branches(
                 });
             }
             let slurm_id = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if let Ok(id) = slurm_id.parse::<u32>() {
+                all_worker_slurm_ids.push(id);
+            }
             step_slurm_ids.insert(step_name.clone(), slurm_id);
         }
 
@@ -974,11 +1007,12 @@ async fn submit_slurm_branches(
     }
 
     tracing::info!(
-        "Submitted {} branches ({} steps each) to Slurm.",
+        "Submitted {} branches ({} steps each, {} total worker jobs) to Slurm.",
         work_items.len(),
-        topo_order.len()
+        topo_order.len(),
+        all_worker_slurm_ids.len()
     );
-    Ok(last_step_slurm_ids)
+    Ok((last_step_slurm_ids, all_worker_slurm_ids))
 }
 
 fn command_to_shell_string(cmd: &TokioCommand) -> String {
@@ -1329,5 +1363,57 @@ mod tests {
             result["number_list_file"],
             "/outputs/xyz-stage-C-1.1/out/combined_list.txt"
         );
+    }
+
+    #[test]
+    fn test_worker_manifest_serialization() {
+        let worker_ids: Vec<u32> = vec![100, 101, 102, 103, 200, 201];
+        let json = serde_json::to_string(&worker_ids).unwrap();
+        let deserialized: Vec<u32> = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized, worker_ids);
+    }
+
+    #[test]
+    fn test_worker_manifest_written_to_correct_path() {
+        let tmp = tempfile::tempdir().unwrap();
+        let repx_dir = tmp.path().join("repx");
+        fs::create_dir_all(&repx_dir).unwrap();
+
+        let worker_ids: Vec<u32> = vec![42, 43, 44];
+        let manifest_path = repx_dir.join(manifests::WORKER_SLURM_IDS);
+        let json = serde_json::to_string(&worker_ids).unwrap();
+        fs::write(&manifest_path, &json).unwrap();
+
+        let content = fs::read_to_string(&manifest_path).unwrap();
+        let read_ids: Vec<u32> = serde_json::from_str(&content).unwrap();
+        assert_eq!(read_ids, vec![42, 43, 44]);
+    }
+
+    #[test]
+    fn test_worker_manifest_empty_is_valid() {
+        let worker_ids: Vec<u32> = vec![];
+        let json = serde_json::to_string(&worker_ids).unwrap();
+        let deserialized: Vec<u32> = serde_json::from_str(&json).unwrap();
+        assert!(deserialized.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_cancel_workers_from_manifest_with_valid_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        let repx_dir = tmp.path();
+
+        let worker_ids: Vec<u32> = vec![999, 998, 997];
+        let manifest_path = repx_dir.join(manifests::WORKER_SLURM_IDS);
+        fs::write(&manifest_path, serde_json::to_string(&worker_ids).unwrap()).unwrap();
+
+        cancel_workers_from_manifest(repx_dir).await;
+
+        assert!(manifest_path.exists());
+    }
+
+    #[tokio::test]
+    async fn test_cancel_workers_from_manifest_no_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        cancel_workers_from_manifest(tmp.path()).await;
     }
 }

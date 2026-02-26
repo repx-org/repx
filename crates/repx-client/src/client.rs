@@ -478,7 +478,33 @@ impl Client {
                     target_name
                 )))
             })?;
-            return target.scancel(slurm_id);
+
+            target.scancel(slurm_id)?;
+
+            let manifest_path = target
+                .base_path()
+                .join(dirs::OUTPUTS)
+                .join(&job_id.0)
+                .join(dirs::REPX)
+                .join(repx_core::constants::manifests::WORKER_SLURM_IDS);
+
+            if let Ok(content) = target.read_remote_file_tail(&manifest_path, 10000) {
+                let full_content = content.join("\n");
+                if let Ok(worker_ids) = serde_json::from_str::<Vec<u32>>(&full_content) {
+                    if !worker_ids.is_empty() {
+                        tracing::info!(
+                            "Cancelling {} scatter-gather worker jobs for {}",
+                            worker_ids.len(),
+                            job_id
+                        );
+                        if let Err(e) = target.scancel_batch(&worker_ids) {
+                            tracing::warn!("Failed to cancel worker jobs for {}: {}", job_id, e);
+                        }
+                    }
+                }
+            }
+
+            return Ok(());
         }
         Ok(())
     }

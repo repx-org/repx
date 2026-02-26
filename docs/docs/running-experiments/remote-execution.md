@@ -101,6 +101,10 @@ This optimization significantly reduces synchronization time for iterative devel
 | SLURM | Generates `sbatch` scripts and submits via `sbatch` |
 | Local | Spawns RepX agent process for direct execution |
 
+## Job Cancellation
+
+Cancelling a SLURM job (via the TUI or `scancel`) automatically cancels all associated worker jobs. For scatter-gather stages, RepX tracks submitted worker SLURM IDs in a manifest file and cancels them when the parent job is cancelled or fails.
+
 ## Directory Structure
 
 Remote artifacts are organized under `base_path`:
