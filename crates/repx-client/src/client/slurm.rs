@@ -183,11 +183,12 @@ pub fn submit_slurm_batch_run(
                         !all_deps.contains(name)
                     })
                     .collect();
-                sink_candidates
-                    .first()
-                    .cloned()
-                    .cloned()
-                    .unwrap_or_default()
+                sink_candidates.first().cloned().cloned().ok_or_else(|| {
+                    ClientError::Config(ConfigError::General(format!(
+                        "Scatter-gather job '{}' has no sink step in its step DAG",
+                        job_id
+                    )))
+                })?
             };
             let sink_step_hints = job
                 .executables

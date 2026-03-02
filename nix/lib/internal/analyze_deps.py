@@ -1,6 +1,7 @@
 import argparse
 import ast
 import json
+import os
 import re
 import shutil
 import sys
@@ -88,7 +89,7 @@ SHELL_BUILTINS = {
     "function",
 }
 
-DEBUG = True
+DEBUG = os.environ.get("REPX_DEBUG", "").lower() in ("1", "true", "yes")
 
 
 def debug_print(msg):

@@ -606,11 +606,15 @@ fn draw_right_column(f: &mut Frame, area: Rect, app: &mut App) {
         InputMode::Normal | InputMode::SpaceMenu | InputMode::GMenu | InputMode::ZMenu => {
             if !app.jobs_state.filter_text.is_empty() {
                 let text_to_truncate = &app.jobs_state.filter_text;
-                let truncated_filter_text = if text_to_truncate.len() > max_filter_width as usize {
-                    let start_index = text_to_truncate.len() - max_filter_width as usize;
-                    &text_to_truncate[start_index..]
-                } else {
+                let char_count = text_to_truncate.chars().count();
+                let max_width = max_filter_width as usize;
+                let truncated_filter_text: String = if char_count > max_width {
                     text_to_truncate
+                        .chars()
+                        .skip(char_count - max_width)
+                        .collect()
+                } else {
+                    text_to_truncate.clone()
                 };
                 left_title_spans.push(Span::styled(truncated_filter_text, Style::default()));
             } else if "filter".len() <= max_filter_width as usize {

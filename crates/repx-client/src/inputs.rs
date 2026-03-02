@@ -27,7 +27,10 @@ pub fn generate_and_write_inputs_json(
     for mapping in &exe.inputs {
         if let (Some(dep_job_id), Some(source_output)) = (&mapping.job_id, &mapping.source_output) {
             let dep_job = lab.jobs.get(dep_job_id).ok_or_else(|| {
-                ClientError::JobNotTracked(dep_job_id.clone(), "unknown".to_string())
+                ClientError::Config(ConfigError::General(format!(
+                    "Dependency job '{}' not found in lab for job '{}'",
+                    dep_job_id, job_id
+                )))
             })?;
 
             let dep_exe = if dep_job.stage_type == repx_core::model::StageType::ScatterGather {
@@ -99,8 +102,8 @@ pub fn generate_and_write_inputs_json(
                     serde_json::Value::String(remote_path.to_string_lossy().to_string()),
                 );
             } else {
-                tracing::info!(
-                        "Warning: Could not resolve metadata file for run '{}' in revision directory. Input '{}' will be missing.",
+                tracing::warn!(
+                        "Could not resolve metadata file for run '{}' in revision directory. Input '{}' will be missing.",
                         run_id, mapping.target_input
                     );
             }

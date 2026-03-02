@@ -71,7 +71,7 @@ def execute_job(
     """Executes a single job using the simple (out_dir, inputs.json) contract."""
     if job.stage_type != "simple":
         logger.warning(f"SKIPPING Job: {job.id} (type: {job.stage_type})")
-        (job_cache_dir / job.id / "repx" / "SUCCESS").mkdir(parents=True, exist_ok=True)
+        (job_cache_dir / job.id / "repx").mkdir(parents=True, exist_ok=True)
         (job_cache_dir / job.id / "repx" / "SUCCESS").touch()
         (job_cache_dir / job.id / "out").mkdir(parents=True, exist_ok=True)
         return

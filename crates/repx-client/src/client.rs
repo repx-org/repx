@@ -21,6 +21,7 @@ use std::{
 };
 
 pub mod local;
+pub mod scheduler;
 pub mod slurm;
 pub mod status;
 
@@ -199,8 +200,8 @@ impl Client {
         &self.config
     }
 
-    pub fn lab(&self) -> Result<&Lab> {
-        Ok(&self.lab)
+    pub fn lab(&self) -> &Lab {
+        &self.lab
     }
 
     pub fn lab_path(&self) -> &Path {

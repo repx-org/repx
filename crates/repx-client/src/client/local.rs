@@ -924,10 +924,24 @@ pub fn submit_local_batch_run(
                 .len();
             let failed_count = failed_units.len();
             let running_count = active_handles.len();
-            let pending_count =
-                total_jobs.saturating_sub(succeeded_count + failed_count + running_count);
-            let blocked_count = total_jobs
-                .saturating_sub(succeeded_count + failed_count + running_count + pending_count);
+            let failed_ids_set: HashSet<&WorkUnitId> =
+                failed_units.iter().map(|(id, _)| id).collect();
+            let blocked_count = work_units
+                .iter()
+                .filter(|(uid, unit)| {
+                    units_left.contains(uid) && unit.deps.iter().any(|d| failed_ids_set.contains(d))
+                })
+                .filter_map(|(_, unit)| {
+                    completion_map
+                        .iter()
+                        .find(|(_, cuid)| **cuid == WorkUnitId::from_job(&unit.job_id))
+                        .map(|(jid, _)| jid)
+                })
+                .filter(|id| jobs_in_batch.contains_key(id))
+                .collect::<HashSet<_>>()
+                .len();
+            let pending_count = total_jobs
+                .saturating_sub(succeeded_count + failed_count + running_count + blocked_count);
 
             send(ClientEvent::LocalProgress {
                 running: running_count,
