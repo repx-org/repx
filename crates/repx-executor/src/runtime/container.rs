@@ -1,21 +1,9 @@
 use crate::context::RuntimeContext;
 use crate::error::{ExecutorError, Result};
-use nix::fcntl::{Flock, FlockArg};
 use std::path::Path;
 use std::process::Stdio;
 use tokio::fs::File;
 use tokio::process::Command as TokioCommand;
-
-const LOCK_POLL_INTERVAL_MS: u64 = 100;
-const LOCK_TIMEOUT_SECS_DEFAULT: u64 = 300;
-
-fn lock_timeout() -> std::time::Duration {
-    let secs = std::env::var("REPX_LOCK_TIMEOUT_SECS")
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(LOCK_TIMEOUT_SECS_DEFAULT);
-    std::time::Duration::from_secs(secs)
-}
 
 pub struct ContainerRuntime;
 
@@ -37,39 +25,12 @@ impl ContainerRuntime {
 
     pub async fn ensure_image_loaded(ctx: &RuntimeContext<'_>, runtime: &Runtime) -> Result<()> {
         let (binary, image_tag) = Self::get_runtime_details(runtime)?;
-        let image_hash = image_tag.split(':').next_back().unwrap_or(image_tag);
+        let image_hash = crate::util::extract_image_hash(image_tag);
 
         let temp_path = ctx.get_temp_path();
         let lock_path = temp_path.join(format!("repx-load-{}.lock", image_hash));
 
-        let mut lock_file = std::fs::File::create(&lock_path)?;
-        let timeout = lock_timeout();
-        let lock_start = std::time::Instant::now();
-        let _lock = loop {
-            match Flock::lock(lock_file, FlockArg::LockExclusiveNonblock) {
-                Ok(lock) => break lock,
-                Err((f, errno))
-                    if errno == nix::errno::Errno::EWOULDBLOCK
-                        || errno == nix::errno::Errno::EAGAIN =>
-                {
-                    if lock_start.elapsed() > timeout {
-                        return Err(ExecutorError::Io(std::io::Error::other(format!(
-                            "Timed out waiting for image load lock after {}s (set REPX_LOCK_TIMEOUT_SECS to override)",
-                            timeout.as_secs()
-                        ))));
-                    }
-                    lock_file = f;
-                    tokio::time::sleep(std::time::Duration::from_millis(LOCK_POLL_INTERVAL_MS))
-                        .await;
-                }
-                Err((_, e)) => {
-                    return Err(ExecutorError::Io(std::io::Error::other(format!(
-                        "Failed to acquire file lock: {}",
-                        e
-                    ))))
-                }
-            }
-        };
+        let _lock = super::acquire_flock(&lock_path, "image load").await?;
 
         tracing::debug!("Acquired lock for image '{}'", image_tag);
 

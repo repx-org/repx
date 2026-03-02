@@ -1,4 +1,4 @@
-use crate::config::Config;
+use crate::config::{self, Config};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fs;
@@ -297,18 +297,6 @@ pub fn default_theme() -> Theme {
     dracula_theme()
 }
 
-fn merge_values(a: &mut toml::Value, b: &toml::Value) {
-    if let toml::Value::Table(a) = a {
-        if let toml::Value::Table(b) = b {
-            for (k, v) in b {
-                merge_values(a.entry(k.clone()).or_insert(v.clone()), v);
-            }
-            return;
-        }
-    }
-    *a = b.clone();
-}
-
 pub fn load_theme(config: &Config) -> Result<Theme, std::io::Error> {
     let mut base_theme = match config.theme.as_deref() {
         Some("dracula") => dracula_theme(),
@@ -324,7 +312,7 @@ pub fn load_theme(config: &Config) -> Result<Theme, std::io::Error> {
         let mut base_theme_value =
             toml::Value::try_from(&base_theme).map_err(std::io::Error::other)?;
 
-        merge_values(&mut base_theme_value, &user_theme_value);
+        config::merge_toml_values(&mut base_theme_value, &user_theme_value);
 
         base_theme = base_theme_value
             .try_into::<Theme>()

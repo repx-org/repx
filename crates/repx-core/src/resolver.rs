@@ -1,6 +1,6 @@
 use crate::{
     errors::DomainError,
-    model::{Job, JobId, Lab, RunId},
+    model::{JobId, Lab, RunId},
 };
 use std::collections::HashSet;
 
@@ -27,15 +27,6 @@ pub fn resolve_run_spec(lab: &Lab, spec: &str) -> Result<Vec<RunId>, DomainError
         Ok(vec![RunId(spec.to_string())])
     }
 }
-fn get_all_dependencies(job: &Job) -> impl Iterator<Item = &JobId> {
-    job.executables
-        .values()
-        .flat_map(|exe| exe.inputs.iter())
-        .filter_map(|mapping| mapping.job_id.as_ref())
-        .collect::<HashSet<_>>()
-        .into_iter()
-}
-
 pub fn resolve_all_final_job_ids<'a>(
     lab: &'a Lab,
     run_id: &RunId,
@@ -46,7 +37,7 @@ pub fn resolve_all_final_job_ids<'a>(
 
         for job_id in &run.jobs {
             if let Some(job) = lab.jobs.get(job_id) {
-                let dependencies = get_all_dependencies(job);
+                let dependencies = job.all_dependencies();
                 for dep_id in dependencies {
                     if run_jobs_set.contains(dep_id) {
                         dep_ids_in_run.insert(dep_id);
@@ -89,7 +80,7 @@ pub fn resolve_target_job_id<'a>(
 
         for job_id in &run.jobs {
             if let Some(job) = lab.jobs.get(job_id) {
-                let dependencies = get_all_dependencies(job);
+                let dependencies = job.all_dependencies();
                 for dep_id in dependencies {
                     if run_jobs_set.contains(dep_id) {
                         dep_ids_in_run.insert(dep_id);

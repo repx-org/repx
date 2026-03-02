@@ -2,27 +2,15 @@
 stageDef:
 let
   mkStageScript = import ./internal/mk-stage-script.nix { inherit pkgs; };
+  common = import ./internal/common.nix;
+  utils = import ./utils.nix { inherit pkgs; };
+  inherit (utils) sanitize;
 
   paramsDef = stageDef.paramInputs or { };
   dependencyDerivations = stageDef.dependencyDerivations or [ ];
   runDependencies = stageDef.runDependencies or [ ];
 
-  resolveWithParams =
-    name: value:
-    if builtins.isFunction value then
-      let
-        argSet = builtins.functionArgs value;
-      in
-      if argSet == { params = false; } || argSet == { params = true; } then
-        value { params = paramsDef; }
-      else
-        throw ''
-          Stage definition error in '${stageDef.pname or "unknown"}':
-          The '${name}' attribute is a function, but it must take exactly { params } as argument.
-          Got function with arguments: ${builtins.toJSON (builtins.attrNames argSet)}
-        ''
-    else
-      value;
+  resolveWithParams = common.mkResolveWithParams paramsDef (stageDef.pname or "unknown");
 
   pname = resolveWithParams "pname" (stageDef.pname or (throw "Stage must have a pname"));
   version = stageDef.version or "1.1";
@@ -31,16 +19,6 @@ let
 
   bashInputs = pkgs.lib.mapAttrs (name: _: "\${inputs[\"${name}\"]}") inputsDef;
   bashOutputs = outputsDef;
-
-  sanitize =
-    val:
-    if builtins.isPath val then
-      builtins.path {
-        path = val;
-        name = baseNameOf val;
-      }
-    else
-      val;
 
   escapeParamValue =
     value:

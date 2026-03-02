@@ -92,7 +92,7 @@ impl TargetsState {
                             *self
                                 .active_scheduler_ref
                                 .lock()
-                                .expect("active_scheduler mutex must not be poisoned") =
+                                .unwrap_or_else(|e| e.into_inner()) =
                                 target.get_selected_scheduler().as_str().to_string();
                         }
                     }
@@ -132,7 +132,7 @@ impl TargetsState {
                             *self
                                 .active_scheduler_ref
                                 .lock()
-                                .expect("active_scheduler mutex must not be poisoned") =
+                                .unwrap_or_else(|e| e.into_inner()) =
                                 target.get_selected_scheduler().as_str().to_string();
                         }
                     }
@@ -149,11 +149,11 @@ impl TargetsState {
                 *self
                     .active_target_ref
                     .lock()
-                    .expect("active_target mutex must not be poisoned") = new_name.clone();
+                    .unwrap_or_else(|e| e.into_inner()) = new_name.clone();
                 *self
                     .active_scheduler_ref
                     .lock()
-                    .expect("active_scheduler mutex must not be poisoned") =
+                    .unwrap_or_else(|e| e.into_inner()) =
                     target.get_selected_scheduler().as_str().to_string();
 
                 for t in self.items.iter_mut() {
@@ -170,7 +170,7 @@ impl TargetsState {
     pub fn get_active_target_name(&self) -> String {
         self.active_target_ref
             .lock()
-            .expect("active_target mutex must not be poisoned")
+            .unwrap_or_else(|e| e.into_inner())
             .clone()
     }
 }
