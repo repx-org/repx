@@ -9,3 +9,6 @@ publish = false
 serde_json = { workspace = true }
 tempfile = { workspace = true }
 
+[lints]
+workspace = true
+

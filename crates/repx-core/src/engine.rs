@@ -39,18 +39,51 @@ pub fn resolve_job_status<'a>(
     lab: &'a Lab,
     cache: &'a mut HashMap<JobId, JobStatus>,
 ) -> &'a JobStatus {
+    let mut visiting = HashSet::new();
+    resolve_job_status_inner(job_id, lab, cache, &mut visiting)
+}
+
+fn resolve_job_status_inner<'a>(
+    job_id: &'a JobId,
+    lab: &'a Lab,
+    cache: &'a mut HashMap<JobId, JobStatus>,
+    visiting: &mut HashSet<JobId>,
+) -> &'a JobStatus {
     if cache.contains_key(job_id) {
-        return cache.get(job_id).unwrap();
+        return cache
+            .get(job_id)
+            .expect("job_id was just confirmed in cache");
     }
 
-    let job = lab.jobs.get(job_id).expect("Job ID must exist in lab");
+    if !visiting.insert(job_id.clone()) {
+        let status = JobStatus::Blocked {
+            missing_deps: Default::default(),
+        };
+        cache.insert(job_id.clone(), status);
+        return cache
+            .get(job_id)
+            .expect("job_id was just inserted into cache");
+    }
+
+    let job = match lab.jobs.get(job_id) {
+        Some(j) => j,
+        None => {
+            let status = JobStatus::Blocked {
+                missing_deps: HashSet::from([job_id.clone()]),
+            };
+            cache.insert(job_id.clone(), status);
+            return cache
+                .get(job_id)
+                .expect("job_id was just inserted into cache");
+        }
+    };
 
     let mut missing_deps = HashSet::new();
     let mut all_deps_succeeded = true;
 
     let dependencies = get_all_dependencies(job);
     for dep_id in dependencies {
-        let dep_status = resolve_job_status(dep_id, lab, cache);
+        let dep_status = resolve_job_status_inner(dep_id, lab, cache, visiting);
         if !matches!(dep_status, JobStatus::Succeeded { .. }) {
             all_deps_succeeded = false;
             missing_deps.insert(dep_id.clone());
@@ -63,8 +96,11 @@ pub fn resolve_job_status<'a>(
         JobStatus::Blocked { missing_deps }
     };
 
+    visiting.remove(job_id);
     cache.insert(job_id.clone(), status);
-    cache.get(job_id).unwrap()
+    cache
+        .get(job_id)
+        .expect("job_id was just inserted into cache")
 }
 
 pub fn determine_run_aggregate_statuses(
@@ -219,11 +255,23 @@ mod tests {
         let sorted = build_dependency_graph(&lab, &JobId("A".to_string()));
         println!("Sorted order: {:?}", sorted);
 
-        let pos_d = sorted.iter().position(|j| j.0 == "D").unwrap();
-        let pos_b = sorted.iter().position(|j| j.0 == "B").unwrap();
+        let pos_d = sorted
+            .iter()
+            .position(|j| j.0 == "D")
+            .expect("D must be in sorted");
+        let pos_b = sorted
+            .iter()
+            .position(|j| j.0 == "B")
+            .expect("B must be in sorted");
 
-        let pos_c = sorted.iter().position(|j| j.0 == "C").unwrap();
-        let pos_a = sorted.iter().position(|j| j.0 == "A").unwrap();
+        let pos_c = sorted
+            .iter()
+            .position(|j| j.0 == "C")
+            .expect("C must be in sorted");
+        let pos_a = sorted
+            .iter()
+            .position(|j| j.0 == "A")
+            .expect("A must be in sorted");
 
         assert!(
             pos_d < pos_b,

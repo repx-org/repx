@@ -17,3 +17,6 @@ xdg = { workspace = true }
 shellexpand = { workspace = true }
 sha2 = { workspace = true }
 rayon = { workspace = true }
+
+[lints]
+workspace = true

@@ -12,24 +12,24 @@ fn create_dummy_image(
     layers: &[(&str, &str)],
 ) -> std::path::PathBuf {
     let image_dir = work_dir.join(format!("{}_content", image_name));
-    fs::create_dir_all(&image_dir).unwrap();
+    fs::create_dir_all(&image_dir).expect("dir creation must succeed");
 
     let mut manifest_layers = Vec::new();
 
     for (hash, content) in layers {
         let layer_dir = image_dir.join(hash);
-        fs::create_dir_all(&layer_dir).unwrap();
+        fs::create_dir_all(&layer_dir).expect("dir creation must succeed");
         let layer_tar = layer_dir.join("layer.tar");
-        fs::write(&layer_tar, content).unwrap();
+        fs::write(&layer_tar, content).expect("file write must succeed");
         manifest_layers.push(format!("{}/layer.tar", hash));
     }
 
     let manifest_json = serde_json::to_string(&vec![serde_json::json!({
         "Layers": manifest_layers
     })])
-    .unwrap();
+    .expect("JSON serialization must succeed");
 
-    fs::write(image_dir.join("manifest.json"), manifest_json).unwrap();
+    fs::write(image_dir.join("manifest.json"), manifest_json).expect("file write must succeed");
 
     let image_tar = work_dir.join(format!("{}.tar", image_name));
 
@@ -45,7 +45,7 @@ fn create_dummy_image(
         tar_cmd.arg(hash);
     }
 
-    let status = tar_cmd.status().unwrap();
+    let status = tar_cmd.status().expect("tar command must succeed");
     assert!(status.success());
 
     image_tar
@@ -53,12 +53,12 @@ fn create_dummy_image(
 
 #[test]
 fn test_local_target_smart_sync() {
-    let temp_dir = TempDir::new().unwrap();
+    let temp_dir = TempDir::new().expect("tempdir creation must succeed");
     let base_path = temp_dir.path().join("repx-data");
     let cache_root = temp_dir.path().join("local-cache");
 
-    fs::create_dir_all(&base_path).unwrap();
-    fs::create_dir_all(&cache_root).unwrap();
+    fs::create_dir_all(&base_path).expect("dir creation must succeed");
+    fs::create_dir_all(&cache_root).expect("dir creation must succeed");
 
     let lab_path_str = std::env::var("REFERENCE_LAB_PATH").unwrap_or_else(|_| ".".to_string());
     let lab_path = std::path::PathBuf::from(lab_path_str);
@@ -119,7 +119,7 @@ fn test_local_target_smart_sync() {
 
     let link_a = image1_cache.join("hashA/layer.tar");
     assert!(link_a.is_symlink());
-    let target_path = fs::read_link(&link_a).unwrap();
+    let target_path = fs::read_link(&link_a).expect("symlink read must succeed");
     let expected_target = store_dir.join("hashA-layer.tar");
     assert_eq!(target_path, expected_target);
 
@@ -143,7 +143,7 @@ fn test_local_target_smart_sync() {
     );
 
     let count = fs::read_dir(&store_dir)
-        .unwrap()
+        .expect("dir read must succeed")
         .filter(|e| {
             e.as_ref()
                 .ok()
@@ -157,7 +157,7 @@ fn test_local_target_smart_sync() {
     assert!(image2_cache.exists());
     let link_a_in_image2 = image2_cache.join("hashA/layer.tar");
     assert!(link_a_in_image2.is_symlink());
-    let target_path_2 = fs::read_link(&link_a_in_image2).unwrap();
+    let target_path_2 = fs::read_link(&link_a_in_image2).expect("symlink read must succeed");
     assert_eq!(
         target_path_2, expected_target,
         "image2 should share same layer as image1"

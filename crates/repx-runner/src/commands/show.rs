@@ -63,7 +63,12 @@ fn handle_show_job(args: ShowJobArgs, lab_path: &Path) -> Result<(), CliError> {
     println!();
     println!("Parameters:");
     if job.params.is_null()
-        || (job.params.is_object() && job.params.as_object().unwrap().is_empty())
+        || (job.params.is_object()
+            && job
+                .params
+                .as_object()
+                .expect("as_object guaranteed by is_object check")
+                .is_empty())
     {
         println!("  (none)");
     } else {

@@ -21,7 +21,10 @@ pub fn handle_internal_orchestrate(args: InternalOrchestrateArgs) -> Result<(), 
         let mut current_wave: Vec<JobId> = Vec::new();
 
         for job_id in &jobs_left {
-            let job_plan = plan.jobs.get(job_id).unwrap();
+            let job_plan = plan
+                .jobs
+                .get(job_id)
+                .expect("job_id comes from plan.jobs.keys() iteration");
             let all_deps_met = job_plan
                 .dependencies
                 .iter()
@@ -46,7 +49,10 @@ pub fn handle_internal_orchestrate(args: InternalOrchestrateArgs) -> Result<(), 
 
         for job_id in current_wave {
             jobs_left.remove(&job_id);
-            let job_plan = plan.jobs.get(&job_id).unwrap();
+            let job_plan = plan
+                .jobs
+                .get(&job_id)
+                .expect("job_id was just removed from jobs_left which came from plan.jobs");
             let script_path = plan
                 .submissions_dir
                 .join(format!("{}.sbatch", job_plan.script_hash));

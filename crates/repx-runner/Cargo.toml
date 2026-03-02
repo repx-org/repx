@@ -20,6 +20,7 @@ repx-executor = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread"] }
 num_cpus = { workspace = true }
 thiserror = { workspace = true }
+ctrlc = { workspace = true }
 
 
 [dev-dependencies]
@@ -31,3 +32,6 @@ repx-core = { workspace = true }
 sha2 = { workspace = true }
 uuid = { workspace = true }
 repx-test-utils = { workspace = true }
+
+[lints]
+workspace = true

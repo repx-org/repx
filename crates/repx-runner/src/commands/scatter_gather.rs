@@ -94,7 +94,9 @@ fn toposort_steps(steps: &HashMap<String, StepMeta>) -> Result<Vec<String>, CliE
         if let Some(deps) = dependents.get(name) {
             let mut newly_ready = Vec::new();
             for &dep_name in deps {
-                let deg = in_degree.get_mut(dep_name).unwrap();
+                let deg = in_degree
+                    .get_mut(dep_name)
+                    .expect("in_degree must contain all step names from initialization");
                 *deg -= 1;
                 if *deg == 0 {
                     newly_ready.push(dep_name);
@@ -116,7 +118,12 @@ fn toposort_steps(steps: &HashMap<String, StepMeta>) -> Result<Vec<String>, CliE
 }
 
 pub fn handle_scatter_gather(args: InternalScatterGatherArgs) -> Result<(), CliError> {
-    let rt = TokioRuntime::new().unwrap();
+    let rt = TokioRuntime::new().map_err(|e| {
+        CliError::Config(ConfigError::General(format!(
+            "Failed to create async runtime: {}",
+            e
+        )))
+    })?;
     rt.block_on(async_handle_scatter_gather(args))
 }
 
@@ -850,7 +857,10 @@ async fn submit_slurm_branches(
         let mut step_slurm_ids: HashMap<String, String> = HashMap::new();
 
         for step_name in topo_order {
-            let step_meta = steps_meta.steps.get(step_name).unwrap();
+            let step_meta = steps_meta
+                .steps
+                .get(step_name)
+                .expect("step_name comes from topo_order which was derived from steps");
             let step_root = branch_root.join(format!("step-{}", step_name));
             let step_out = step_root.join(dirs::OUT);
             let step_repx = step_root.join(dirs::REPX);
@@ -984,7 +994,7 @@ mod tests {
                 resource_hints: None,
             },
         );
-        let order = toposort_steps(&steps).unwrap();
+        let order = toposort_steps(&steps).expect("toposort must succeed");
         assert_eq!(order, vec!["compute"]);
     }
 
@@ -1021,7 +1031,7 @@ mod tests {
                 resource_hints: None,
             },
         );
-        let order = toposort_steps(&steps).unwrap();
+        let order = toposort_steps(&steps).expect("toposort must succeed");
         assert_eq!(order, vec!["a", "b", "c"]);
     }
 
@@ -1068,7 +1078,7 @@ mod tests {
                 resource_hints: None,
             },
         );
-        let order = toposort_steps(&steps).unwrap();
+        let order = toposort_steps(&steps).expect("toposort must succeed");
         assert_eq!(order[0], "root");
         assert_eq!(order[3], "sink");
         let middle: HashSet<&str> = order[1..3].iter().map(|s| s.as_str()).collect();
@@ -1101,7 +1111,8 @@ mod tests {
         );
         let result = toposort_steps(&steps);
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("Cycle detected"));
+        let err = result.expect_err("cycle detection should return an error");
+        assert!(err.to_string().contains("Cycle detected"));
     }
 
     #[test]
@@ -1119,7 +1130,8 @@ mod tests {
         );
         let result = toposort_steps(&steps);
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("unknown step"));
+        let err = result.expect_err("unknown dep should return an error");
+        assert!(err.to_string().contains("unknown step"));
     }
 
     #[test]
@@ -1138,7 +1150,7 @@ mod tests {
             },
             "sink_step": "compute"
         }"#;
-        let meta: StepsMetadata = serde_json::from_str(json).unwrap();
+        let meta: StepsMetadata = serde_json::from_str(json).expect("JSON must deserialize");
         assert_eq!(meta.steps.len(), 1);
         assert_eq!(meta.sink_step, "compute");
         let compute = &meta.steps["compute"];
@@ -1187,11 +1199,11 @@ mod tests {
             },
             "sink_step": "foldability"
         }"#;
-        let meta: StepsMetadata = serde_json::from_str(json).unwrap();
+        let meta: StepsMetadata = serde_json::from_str(json).expect("JSON must deserialize");
         assert_eq!(meta.steps.len(), 4);
         assert_eq!(meta.sink_step, "foldability");
 
-        let order = toposort_steps(&meta.steps).unwrap();
+        let order = toposort_steps(&meta.steps).expect("toposort must succeed");
         assert_eq!(order[0], "trace_gen");
         assert_eq!(order[3], "foldability");
     }
@@ -1220,7 +1232,7 @@ mod tests {
 
         let result =
             resolve_step_inputs(&step, &branch_root, &work_item_path, &static_inputs, &steps)
-                .unwrap();
+                .expect("step input resolution must succeed");
         assert_eq!(
             result["worker__item"],
             "/tmp/job/branch-0/repx/work_item.json"
@@ -1267,7 +1279,7 @@ mod tests {
             &static_inputs,
             &steps,
         )
-        .unwrap();
+        .expect("step input resolution must succeed");
         assert_eq!(
             result["input_trace"],
             "/tmp/job/branch-0/step-gen/out/trace.bin"
@@ -1299,7 +1311,7 @@ mod tests {
 
         let result =
             resolve_step_inputs(&step, &branch_root, &work_item_path, &static_inputs, &steps)
-                .unwrap();
+                .expect("step input resolution must succeed");
         assert_eq!(
             result["number_list_file"],
             "/outputs/xyz-stage-C-1.1/out/combined_list.txt"
@@ -1309,43 +1321,47 @@ mod tests {
     #[test]
     fn test_worker_manifest_serialization() {
         let worker_ids: Vec<u32> = vec![100, 101, 102, 103, 200, 201];
-        let json = serde_json::to_string(&worker_ids).unwrap();
-        let deserialized: Vec<u32> = serde_json::from_str(&json).unwrap();
+        let json = serde_json::to_string(&worker_ids).expect("JSON serialization must succeed");
+        let deserialized: Vec<u32> = serde_json::from_str(&json).expect("JSON must deserialize");
         assert_eq!(deserialized, worker_ids);
     }
 
     #[test]
     fn test_worker_manifest_written_to_correct_path() {
-        let tmp = tempfile::tempdir().unwrap();
+        let tmp = tempfile::tempdir().expect("tempdir creation must succeed");
         let repx_dir = tmp.path().join("repx");
-        fs::create_dir_all(&repx_dir).unwrap();
+        fs::create_dir_all(&repx_dir).expect("dir creation must succeed");
 
         let worker_ids: Vec<u32> = vec![42, 43, 44];
         let manifest_path = repx_dir.join(manifests::WORKER_SLURM_IDS);
-        let json = serde_json::to_string(&worker_ids).unwrap();
-        fs::write(&manifest_path, &json).unwrap();
+        let json = serde_json::to_string(&worker_ids).expect("JSON serialization must succeed");
+        fs::write(&manifest_path, &json).expect("file write must succeed");
 
-        let content = fs::read_to_string(&manifest_path).unwrap();
-        let read_ids: Vec<u32> = serde_json::from_str(&content).unwrap();
+        let content = fs::read_to_string(&manifest_path).expect("file read must succeed");
+        let read_ids: Vec<u32> = serde_json::from_str(&content).expect("JSON must deserialize");
         assert_eq!(read_ids, vec![42, 43, 44]);
     }
 
     #[test]
     fn test_worker_manifest_empty_is_valid() {
         let worker_ids: Vec<u32> = vec![];
-        let json = serde_json::to_string(&worker_ids).unwrap();
-        let deserialized: Vec<u32> = serde_json::from_str(&json).unwrap();
+        let json = serde_json::to_string(&worker_ids).expect("JSON serialization must succeed");
+        let deserialized: Vec<u32> = serde_json::from_str(&json).expect("JSON must deserialize");
         assert!(deserialized.is_empty());
     }
 
     #[tokio::test]
     async fn test_cancel_workers_from_manifest_with_valid_file() {
-        let tmp = tempfile::tempdir().unwrap();
+        let tmp = tempfile::tempdir().expect("tempdir creation must succeed");
         let repx_dir = tmp.path();
 
         let worker_ids: Vec<u32> = vec![999, 998, 997];
         let manifest_path = repx_dir.join(manifests::WORKER_SLURM_IDS);
-        fs::write(&manifest_path, serde_json::to_string(&worker_ids).unwrap()).unwrap();
+        fs::write(
+            &manifest_path,
+            serde_json::to_string(&worker_ids).expect("JSON serialization must succeed"),
+        )
+        .expect("file write must succeed");
 
         cancel_workers_from_manifest(repx_dir).await;
 
@@ -1354,16 +1370,17 @@ mod tests {
 
     #[tokio::test]
     async fn test_cancel_workers_from_manifest_no_file() {
-        let tmp = tempfile::tempdir().unwrap();
+        let tmp = tempfile::tempdir().expect("tempdir creation must succeed");
         cancel_workers_from_manifest(tmp.path()).await;
     }
 
     fn make_script(path: &Path, body: &str) {
-        fs::write(path, format!("#!/bin/sh\n{body}\n")).unwrap();
+        fs::write(path, format!("#!/bin/sh\n{body}\n")).expect("file write must succeed");
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
+            fs::set_permissions(path, fs::Permissions::from_mode(0o755))
+                .expect("setting permissions must succeed");
         }
     }
 
@@ -1421,7 +1438,7 @@ mod tests {
         );
         steps
             .get_mut("sink")
-            .unwrap()
+            .expect("sink step must exist")
             .inputs
             .push(StepInputMapping {
                 source: Some("step:right".into()),
@@ -1445,22 +1462,23 @@ mod tests {
         topo_order: &[String],
     ) -> Result<PathBuf, CliError> {
         let scatter_out = job_root.join("scatter").join(dirs::OUT);
-        fs::create_dir_all(&scatter_out).unwrap();
+        fs::create_dir_all(&scatter_out).expect("dir creation must succeed");
         let mut items = Vec::new();
         for _ in 0..=branch_idx {
             items.push(work_item.clone());
         }
         fs::write(
             scatter_out.join("work_items.json"),
-            serde_json::to_string(&items).unwrap(),
+            serde_json::to_string(&items).expect("JSON serialization must succeed"),
         )
-        .unwrap();
+        .expect("file write must succeed");
 
         let scripts = tmp.join("scripts");
         let repx_dir = job_root.join(dirs::REPX);
-        fs::create_dir_all(&repx_dir).unwrap();
+        fs::create_dir_all(&repx_dir).expect("dir creation must succeed");
 
-        let steps_json = serde_json::to_string(steps_meta).unwrap();
+        let steps_json =
+            serde_json::to_string(steps_meta).expect("JSON serialization must succeed");
 
         for step_name in topo_order {
             let args = InternalScatterGatherArgs {
@@ -1498,17 +1516,17 @@ mod tests {
 
     #[tokio::test]
     async fn test_marker_write_failure_propagates_as_error() {
-        let tmp = tempfile::tempdir().unwrap();
+        let tmp = tempfile::tempdir().expect("tempdir creation must succeed");
         let job_root = tmp.path().join("outputs/test-job");
         let scripts = tmp.path().join("scripts");
-        fs::create_dir_all(&scripts).unwrap();
+        fs::create_dir_all(&scripts).expect("dir creation must succeed");
         make_script(
             &scripts.join("succeed.sh"),
             "mkdir -p \"$1\"\necho done > \"$1/result.txt\"",
         );
 
         let meta = single_step_metadata(scripts.join("succeed.sh"));
-        let order = toposort_steps(&meta.steps).unwrap();
+        let order = toposort_steps(&meta.steps).expect("toposort must succeed");
         let item = serde_json::json!({"id": 0});
 
         let r = run_branch(tmp.path(), &job_root, 0, &item, &meta, &order).await;
@@ -1520,15 +1538,17 @@ mod tests {
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            fs::remove_file(step_repx.join(markers::SUCCESS)).unwrap();
-            fs::set_permissions(&step_repx, fs::Permissions::from_mode(0o555)).unwrap();
+            fs::remove_file(step_repx.join(markers::SUCCESS)).expect("file removal must succeed");
+            fs::set_permissions(&step_repx, fs::Permissions::from_mode(0o555))
+                .expect("setting permissions must succeed");
 
             let probe = step_repx.join(".write_probe");
             let perms_effective = fs::File::create(&probe).is_err();
             let _ = fs::remove_file(&probe);
 
             let r2 = run_branch(tmp.path(), &job_root, 0, &item, &meta, &order).await;
-            fs::set_permissions(&step_repx, fs::Permissions::from_mode(0o755)).unwrap();
+            fs::set_permissions(&step_repx, fs::Permissions::from_mode(0o755))
+                .expect("setting permissions must succeed");
 
             if perms_effective {
                 assert!(
@@ -1541,7 +1561,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_scatter_skipped_on_rerun_if_already_succeeded() {
-        let tmp = tempfile::tempdir().unwrap();
+        let tmp = tempfile::tempdir().expect("tempdir creation must succeed");
         let job_root = tmp.path().join("outputs/test-sg-job");
         let scatter_out = job_root.join("scatter").join(dirs::OUT);
         let scatter_repx = job_root.join("scatter").join(dirs::REPX);
@@ -1551,18 +1571,18 @@ mod tests {
             &job_root.join(dirs::REPX),
             &job_root.join(dirs::OUT),
         ] {
-            fs::create_dir_all(d).unwrap();
+            fs::create_dir_all(d).expect("dir creation must succeed");
         }
 
-        fs::File::create(scatter_repx.join(markers::SUCCESS)).unwrap();
+        fs::File::create(scatter_repx.join(markers::SUCCESS)).expect("file creation must succeed");
         fs::write(
             scatter_out.join("work_items.json"),
             r#"[{"id":1},{"id":2}]"#,
         )
-        .unwrap();
+        .expect("file write must succeed");
 
         let scripts = tmp.path().join("scripts");
-        fs::create_dir_all(&scripts).unwrap();
+        fs::create_dir_all(&scripts).expect("dir creation must succeed");
         make_script(
             &scripts.join("scatter.sh"),
             "echo '[{\"id\":99}]' > \"$1/work_items.json\"",
@@ -1586,7 +1606,7 @@ mod tests {
             mount_paths: vec![],
         };
 
-        orch.init_dirs().unwrap();
+        orch.init_dirs().expect("init_dirs must succeed");
         assert!(
             scatter_repx.join(markers::SUCCESS).exists(),
             "init_dirs must preserve scatter SUCCESS"
@@ -1598,9 +1618,11 @@ mod tests {
             let _ = orch.run_scatter(&scripts.join("scatter.sh")).await;
         }
 
-        let items: Vec<Value> =
-            serde_json::from_str(&fs::read_to_string(scatter_out.join("work_items.json")).unwrap())
-                .unwrap();
+        let items: Vec<Value> = serde_json::from_str(
+            &fs::read_to_string(scatter_out.join("work_items.json"))
+                .expect("file read must succeed"),
+        )
+        .expect("JSON must deserialize");
         assert_eq!(
             items,
             vec![serde_json::json!({"id":1}), serde_json::json!({"id":2})],
@@ -1610,33 +1632,35 @@ mod tests {
 
     #[tokio::test]
     async fn test_stale_step_markers_cleared_when_work_item_changes() {
-        let tmp = tempfile::tempdir().unwrap();
+        let tmp = tempfile::tempdir().expect("tempdir creation must succeed");
         let job_root = tmp.path().join("outputs/test-job");
         let scripts = tmp.path().join("scripts");
-        fs::create_dir_all(&scripts).unwrap();
+        fs::create_dir_all(&scripts).expect("dir creation must succeed");
         make_script(
             &scripts.join("step.sh"),
             "mkdir -p \"$1\"\necho done > \"$1/result.txt\"",
         );
 
         let meta = single_step_metadata(scripts.join("step.sh"));
-        let order = toposort_steps(&meta.steps).unwrap();
+        let order = toposort_steps(&meta.steps).expect("toposort must succeed");
 
         let branch_repx = job_root.join("branch-0").join(dirs::REPX);
         let step_repx = job_root.join("branch-0/step-only").join(dirs::REPX);
         let step_out = job_root.join("branch-0/step-only").join(dirs::OUT);
-        fs::create_dir_all(&branch_repx).unwrap();
-        fs::create_dir_all(&step_repx).unwrap();
-        fs::create_dir_all(&step_out).unwrap();
-        fs::write(branch_repx.join("work_item.json"), r#"{"id":"old_item"}"#).unwrap();
-        fs::File::create(step_repx.join(markers::SUCCESS)).unwrap();
-        fs::write(step_out.join("result.txt"), "old_item_result").unwrap();
+        fs::create_dir_all(&branch_repx).expect("dir creation must succeed");
+        fs::create_dir_all(&step_repx).expect("dir creation must succeed");
+        fs::create_dir_all(&step_out).expect("dir creation must succeed");
+        fs::write(branch_repx.join("work_item.json"), r#"{"id":"old_item"}"#)
+            .expect("file write must succeed");
+        fs::File::create(step_repx.join(markers::SUCCESS)).expect("file creation must succeed");
+        fs::write(step_out.join("result.txt"), "old_item_result").expect("file write must succeed");
 
         let new_item = serde_json::json!({"id": "new_item"});
         let r = run_branch(tmp.path(), &job_root, 0, &new_item, &meta, &order).await;
         assert!(r.is_ok());
 
-        let output = fs::read_to_string(step_out.join("result.txt")).unwrap();
+        let output =
+            fs::read_to_string(step_out.join("result.txt")).expect("file read must succeed");
         assert_ne!(
             output.trim(),
             "old_item_result",
@@ -1646,16 +1670,16 @@ mod tests {
 
     #[tokio::test]
     async fn test_diamond_dag_steps_all_execute() {
-        let tmp = tempfile::tempdir().unwrap();
+        let tmp = tempfile::tempdir().expect("tempdir creation must succeed");
         let job_root = tmp.path().join("outputs/test-job");
         let scripts = tmp.path().join("scripts");
-        fs::create_dir_all(&scripts).unwrap();
+        fs::create_dir_all(&scripts).expect("dir creation must succeed");
 
         make_script(&scripts.join("timed.sh"),
             "mkdir -p \"$1\"\nfor f in data left right final result; do echo done > \"$1/$f.txt\"; done");
 
         let meta = diamond_step_metadata(scripts.join("timed.sh"));
-        let order = toposort_steps(&meta.steps).unwrap();
+        let order = toposort_steps(&meta.steps).expect("toposort must succeed");
         let item = serde_json::json!({"id": 0});
 
         let r = run_branch(tmp.path(), &job_root, 0, &item, &meta, &order).await;
@@ -1677,7 +1701,10 @@ mod tests {
     #[test]
     fn test_marker_write_calls_fsync() {
         let source = include_str!("scatter_gather.rs");
-        let prod = source.split("#[cfg(test)]").next().unwrap();
+        let prod = source
+            .split("#[cfg(test)]")
+            .next()
+            .expect("source must contain #[cfg(test)]");
         let has_bare = prod
             .lines()
             .any(|l| l.contains("let _ = fs::File::create(") && l.contains("markers::"));
@@ -1690,17 +1717,17 @@ mod tests {
 
     #[tokio::test]
     async fn test_rerun_preserves_scatter_output_and_skips_succeeded_steps() {
-        let tmp = tempfile::tempdir().unwrap();
+        let tmp = tempfile::tempdir().expect("tempdir creation must succeed");
         let job_root = tmp.path().join("outputs/test-job");
         let scripts = tmp.path().join("scripts");
-        fs::create_dir_all(&scripts).unwrap();
+        fs::create_dir_all(&scripts).expect("dir creation must succeed");
         make_script(
             &scripts.join("good.sh"),
             "mkdir -p \"$1\"\necho done > \"$1/result.txt\"",
         );
 
         let meta = single_step_metadata(scripts.join("good.sh"));
-        let order = toposort_steps(&meta.steps).unwrap();
+        let order = toposort_steps(&meta.steps).expect("toposort must succeed");
         let items = [serde_json::json!({"id":"A"}), serde_json::json!({"id":"B"})];
 
         let r = run_branch(tmp.path(), &job_root, 0, &items[0], &meta, &order).await;
@@ -1713,22 +1740,24 @@ mod tests {
             &s1_repx,
             &job_root.join("branch-1/step-only").join(dirs::OUT),
         ] {
-            fs::create_dir_all(d).unwrap();
+            fs::create_dir_all(d).expect("dir creation must succeed");
         }
         fs::write(
             b1_repx.join("work_item.json"),
-            serde_json::to_string(&items[1]).unwrap(),
+            serde_json::to_string(&items[1]).expect("JSON serialization must succeed"),
         )
-        .unwrap();
-        fs::File::create(s1_repx.join(markers::FAIL)).unwrap();
+        .expect("file write must succeed");
+        fs::File::create(s1_repx.join(markers::FAIL)).expect("file creation must succeed");
 
-        let orig = fs::read_to_string(job_root.join("branch-0/step-only/out/result.txt")).unwrap();
+        let orig = fs::read_to_string(job_root.join("branch-0/step-only/out/result.txt"))
+            .expect("file read must succeed");
 
         let r = run_branch(tmp.path(), &job_root, 0, &items[0], &meta, &order).await;
         assert!(r.is_ok());
         assert_eq!(
             orig,
-            fs::read_to_string(job_root.join("branch-0/step-only/out/result.txt")).unwrap()
+            fs::read_to_string(job_root.join("branch-0/step-only/out/result.txt"))
+                .expect("file read must succeed")
         );
 
         let r = run_branch(tmp.path(), &job_root, 1, &items[1], &meta, &order).await;

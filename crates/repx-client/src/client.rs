@@ -236,7 +236,10 @@ impl Client {
         let map_filename = format!("slurm_map_{}.json", lab_hash);
 
         let map_path = client_state_dir.join(map_filename);
-        let data = self.slurm_map.lock().unwrap();
+        let data = self
+            .slurm_map
+            .lock()
+            .expect("slurm_map mutex must not be poisoned");
         let json_string = serde_json::to_string_pretty(&*data)
             .map_err(|e| ClientError::Config(ConfigError::Json(e)))?;
         fs_err::write(map_path, json_string)
@@ -431,7 +434,10 @@ impl Client {
                 .join(logs::STDOUT),
             LogType::Auto => {
                 let slurm_info = {
-                    let slurm_map_guard = self.slurm_map.lock().unwrap();
+                    let slurm_map_guard = self
+                        .slurm_map
+                        .lock()
+                        .expect("slurm_map mutex must not be poisoned");
                     slurm_map_guard.get(&job_id).cloned()
                 };
 
@@ -467,7 +473,10 @@ impl Client {
 
     pub fn cancel_job(&self, job_id: JobId) -> Result<()> {
         let slurm_info = {
-            let slurm_map_guard = self.slurm_map.lock().unwrap();
+            let slurm_map_guard = self
+                .slurm_map
+                .lock()
+                .expect("slurm_map mutex must not be poisoned");
             slurm_map_guard.get(&job_id).cloned()
         };
 

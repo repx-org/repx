@@ -27,10 +27,18 @@ pub fn handle_log(args: LogArgs, context: &AppContext) -> Result<(), CliError> {
     }
 
     if args.follow {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::sync::Arc;
         use std::{thread, time::Duration};
 
+        let running = Arc::new(AtomicBool::new(true));
+        let r = running.clone();
+        let _ = ctrlc::set_handler(move || {
+            r.store(false, Ordering::SeqCst);
+        });
+
         let mut last_line_count = lines.len();
-        loop {
+        while running.load(Ordering::SeqCst) {
             thread::sleep(Duration::from_secs(1));
             let new_lines = context.client.get_log_tail(
                 job_id.clone(),

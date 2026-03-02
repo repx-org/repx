@@ -32,7 +32,12 @@ pub fn run(cli: Cli) -> Result<(), CliError> {
             commands::scatter_gather::handle_scatter_gather(*args)
         }
         Commands::InternalGc(args) => {
-            let rt = tokio::runtime::Runtime::new().unwrap();
+            let rt = tokio::runtime::Runtime::new().map_err(|e| {
+                CliError::Config(ConfigError::General(format!(
+                    "Failed to create async runtime: {}",
+                    e
+                )))
+            })?;
             rt.block_on(commands::gc::async_handle_internal_gc(args))
         }
         Commands::List(args) => commands::list::handle_list(args, &cli.lab, cli.target.as_deref()),

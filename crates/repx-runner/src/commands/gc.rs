@@ -178,7 +178,9 @@ pub async fn async_handle_internal_gc(args: InternalGcArgs) -> Result<(), CliErr
             let abs_target = if target.is_absolute() {
                 target
             } else {
-                path.parent().unwrap().join(target)
+                path.parent()
+                    .expect("symlink path must have a parent directory")
+                    .join(target)
             };
 
             if let Ok(canonical) = fs::canonicalize(&abs_target) {

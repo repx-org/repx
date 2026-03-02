@@ -221,7 +221,7 @@ mod tests {
     fn resolve_direct_run_id_success() {
         let lab = test_lab();
         let input = RunId("run-a".to_string());
-        let result = resolve_target_job_id(&lab, &input).unwrap();
+        let result = resolve_target_job_id(&lab, &input).expect("direct run ID should resolve");
         assert_eq!(result, &JobId("job-a2".to_string()));
     }
 
@@ -237,7 +237,7 @@ mod tests {
     fn resolve_full_job_id_success() {
         let lab = test_lab();
         let input = RunId("12345-unique-name".to_string());
-        let result = resolve_target_job_id(&lab, &input).unwrap();
+        let result = resolve_target_job_id(&lab, &input).expect("full job ID should resolve");
         assert_eq!(result, &JobId("12345-unique-name".to_string()));
     }
 
@@ -245,7 +245,8 @@ mod tests {
     fn resolve_partial_job_id_unique_match() {
         let lab = test_lab();
         let input = RunId("12345".to_string());
-        let result = resolve_target_job_id(&lab, &input).unwrap();
+        let result =
+            resolve_target_job_id(&lab, &input).expect("partial job ID should resolve uniquely");
         assert_eq!(result, &JobId("12345-unique-name".to_string()));
     }
 
@@ -268,7 +269,7 @@ mod tests {
     #[test]
     fn resolve_run_spec_group_returns_correct_run_ids() {
         let lab = test_lab();
-        let result = resolve_run_spec(&lab, "@all").unwrap();
+        let result = resolve_run_spec(&lab, "@all").expect("@all group should resolve");
         assert_eq!(result.len(), 2);
         assert!(result.contains(&RunId("run-a".into())));
         assert!(result.contains(&RunId("run-b-ambiguous".into())));
@@ -277,14 +278,14 @@ mod tests {
     #[test]
     fn resolve_run_spec_single_group() {
         let lab = test_lab();
-        let result = resolve_run_spec(&lab, "@only-a").unwrap();
+        let result = resolve_run_spec(&lab, "@only-a").expect("@only-a group should resolve");
         assert_eq!(result, vec![RunId("run-a".into())]);
     }
 
     #[test]
     fn resolve_run_spec_empty_group() {
         let lab = test_lab();
-        let result = resolve_run_spec(&lab, "@empty").unwrap();
+        let result = resolve_run_spec(&lab, "@empty").expect("@empty group should resolve");
         assert!(result.is_empty());
     }
 
@@ -305,7 +306,7 @@ mod tests {
     #[test]
     fn resolve_run_spec_plain_run_name_falls_through() {
         let lab = test_lab();
-        let result = resolve_run_spec(&lab, "run-a").unwrap();
+        let result = resolve_run_spec(&lab, "run-a").expect("plain run name should resolve");
         assert_eq!(result, vec![RunId("run-a".into())]);
     }
 }

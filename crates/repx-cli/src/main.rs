@@ -135,7 +135,9 @@ fn main() {
     let command = match cli.command {
         Some(cmd) => cmd,
         None => {
-            Cli::command().print_help().unwrap();
+            Cli::command()
+                .print_help()
+                .expect("printing help to stdout must succeed");
             return;
         }
     };

@@ -67,7 +67,7 @@ pub fn handle_run(
                     .set_style(
                         ProgressStyle::default_bar()
                         .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} ({percent}%) {msg}")
-                        .unwrap()
+                        .expect("static progress bar template must be valid")
                         .progress_chars("#>-"),
                     );
                 new_pb.set_message("Syncing artifacts...");
@@ -185,15 +185,22 @@ pub fn handle_run(
         }
     }
 
-    match submission_thread.join().unwrap() {
-        Ok(message) => {
+    match submission_thread.join() {
+        Ok(Ok(message)) => {
             println!("{}", message);
         }
-        Err(e) => {
+        Ok(Err(e)) => {
             return Err(CliError::ExecutionFailed {
                 message: "Failed to submit run".to_string(),
                 log_path: None,
                 log_summary: e.to_string(),
+            });
+        }
+        Err(_panic) => {
+            return Err(CliError::ExecutionFailed {
+                message: "Submission thread panicked".to_string(),
+                log_path: None,
+                log_summary: "Internal error: submission thread panicked unexpectedly".to_string(),
             });
         }
     }

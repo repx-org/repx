@@ -124,10 +124,9 @@ impl Widget for BrailleGraph<'_> {
 
                 let color = interpolate_color(self.low_color, self.high_color, t);
 
-                buf.cell_mut((column_x, row_y))
-                    .unwrap()
-                    .set_symbol(symbol)
-                    .set_fg(color);
+                if let Some(cell) = buf.cell_mut((column_x, row_y)) {
+                    cell.set_symbol(symbol).set_fg(color);
+                }
             }
         }
     }

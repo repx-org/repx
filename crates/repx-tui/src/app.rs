@@ -921,12 +921,19 @@ impl App {
             }
         }
         let target_name = self.targets_state.get_active_target_name();
-        let active_tui_target = self
+        let active_tui_target = match self
             .targets_state
             .items
             .iter()
             .find(|t| t.name == target_name)
-            .unwrap();
+        {
+            Some(t) => t,
+            None => {
+                self.system_logs
+                    .push(format!("Error: target '{}' not found", target_name));
+                return;
+            }
+        };
         let scheduler = active_tui_target
             .get_selected_scheduler()
             .as_str()
@@ -937,7 +944,16 @@ impl App {
             .to_string();
 
         let config = self.client.config();
-        let target_config = config.targets.get(&target_name).unwrap();
+        let target_config = match config.targets.get(&target_name) {
+            Some(tc) => tc,
+            None => {
+                self.system_logs.push(format!(
+                    "Error: target '{}' not found in configuration",
+                    target_name
+                ));
+                return;
+            }
+        };
 
         let num_jobs = if scheduler != "local" {
             None

@@ -19,11 +19,11 @@ fn test_podman_impure_mode_args() {
         .join(harness.get_host_tools_dir_name())
         .join("bin");
 
-    fs::create_dir_all(&host_tools_dir).unwrap();
+    fs::create_dir_all(&host_tools_dir).expect("creating host-tools dir must succeed");
     let mock_podman_path = host_tools_dir.join("podman");
 
     if mock_podman_path.exists() {
-        fs::remove_file(&mock_podman_path).unwrap();
+        fs::remove_file(&mock_podman_path).expect("removing existing mock podman must succeed");
     }
 
     let log_file = base_path.join("podman_args.log");
@@ -38,23 +38,30 @@ exit 0
         log_file.display()
     );
 
-    fs::write(&mock_podman_path, mock_content).unwrap();
-    let mut perms = fs::metadata(&mock_podman_path).unwrap().permissions();
+    fs::write(&mock_podman_path, mock_content).expect("writing mock podman script must succeed");
+    let mut perms = fs::metadata(&mock_podman_path)
+        .expect("reading mock podman metadata must succeed")
+        .permissions();
     perms.set_mode(0o755);
-    fs::set_permissions(&mock_podman_path, perms).unwrap();
+    fs::set_permissions(&mock_podman_path, perms)
+        .expect("setting mock podman permissions must succeed");
 
     let job_out_path = harness.get_job_output_path(job_id);
-    fs::write(job_out_path.join("repx/inputs.json"), "{}").unwrap();
+    fs::write(job_out_path.join("repx/inputs.json"), "{}")
+        .expect("writing inputs.json must succeed");
 
     let job_package_dir = base_path.join("artifacts/jobs").join(job_id);
     let bin_dir = job_package_dir.join("bin");
-    fs::create_dir_all(&bin_dir).unwrap();
+    fs::create_dir_all(&bin_dir).expect("creating job bin dir must succeed");
     let script_path = bin_dir.join("script.sh");
-    fs::write(&script_path, "#!/bin/sh\nexit 0").unwrap();
+    fs::write(&script_path, "#!/bin/sh\nexit 0").expect("writing script.sh must succeed");
 
-    let mut perms_script = fs::metadata(&script_path).unwrap().permissions();
+    let mut perms_script = fs::metadata(&script_path)
+        .expect("reading script metadata must succeed")
+        .permissions();
     perms_script.set_mode(0o755);
-    fs::set_permissions(&script_path, perms_script).unwrap();
+    fs::set_permissions(&script_path, perms_script)
+        .expect("setting script permissions must succeed");
 
     let image_tag = harness.get_any_image_tag().expect("No image found");
 
@@ -76,7 +83,7 @@ exit 0
 
     cmd.assert().success();
 
-    let args = fs::read_to_string(&log_file).unwrap();
+    let args = fs::read_to_string(&log_file).expect("reading podman args log must succeed");
 
     assert!(
         args.contains("-v /home:/home"),
@@ -110,11 +117,11 @@ fn test_podman_mount_specific_paths_args() {
         .join(harness.get_host_tools_dir_name())
         .join("bin");
 
-    fs::create_dir_all(&host_tools_dir).unwrap();
+    fs::create_dir_all(&host_tools_dir).expect("creating host-tools dir must succeed");
     let mock_podman_path = host_tools_dir.join("podman");
 
     if mock_podman_path.exists() {
-        fs::remove_file(&mock_podman_path).unwrap();
+        fs::remove_file(&mock_podman_path).expect("removing existing mock podman must succeed");
     }
 
     let log_file = base_path.join("podman_specific_args.log");
@@ -127,21 +134,28 @@ exit 0
         log_file.display()
     );
 
-    fs::write(&mock_podman_path, mock_content).unwrap();
-    let mut perms = fs::metadata(&mock_podman_path).unwrap().permissions();
+    fs::write(&mock_podman_path, mock_content).expect("writing mock podman script must succeed");
+    let mut perms = fs::metadata(&mock_podman_path)
+        .expect("reading mock podman metadata must succeed")
+        .permissions();
     perms.set_mode(0o755);
-    fs::set_permissions(&mock_podman_path, perms).unwrap();
+    fs::set_permissions(&mock_podman_path, perms)
+        .expect("setting mock podman permissions must succeed");
 
     let job_out_path = harness.get_job_output_path(job_id);
-    fs::write(job_out_path.join("repx/inputs.json"), "{}").unwrap();
+    fs::write(job_out_path.join("repx/inputs.json"), "{}")
+        .expect("writing inputs.json must succeed");
     let job_package_dir = base_path.join("artifacts/jobs").join(job_id);
     let bin_dir = job_package_dir.join("bin");
-    fs::create_dir_all(&bin_dir).unwrap();
+    fs::create_dir_all(&bin_dir).expect("creating job bin dir must succeed");
     let script_path = bin_dir.join("script.sh");
-    fs::write(&script_path, "#!/bin/sh\nexit 0").unwrap();
-    let mut perms_script = fs::metadata(&script_path).unwrap().permissions();
+    fs::write(&script_path, "#!/bin/sh\nexit 0").expect("writing script.sh must succeed");
+    let mut perms_script = fs::metadata(&script_path)
+        .expect("reading script metadata must succeed")
+        .permissions();
     perms_script.set_mode(0o755);
-    fs::set_permissions(&script_path, perms_script).unwrap();
+    fs::set_permissions(&script_path, perms_script)
+        .expect("setting script permissions must succeed");
 
     let image_tag = harness.get_any_image_tag().expect("No image found");
 
@@ -169,7 +183,8 @@ exit 0
 
     cmd.assert().success();
 
-    let args = fs::read_to_string(&log_file).unwrap();
+    let args =
+        fs::read_to_string(&log_file).expect("reading podman specific args log must succeed");
 
     assert!(
         args.contains(&format!("-v {}:{}", path1, path1)),

@@ -358,7 +358,7 @@ impl<'a> VizGenerator<'a> {
                     job_name,
                     &unique_node_id,
                     count,
-                    first_job.unwrap(),
+                    first_job.expect("first_job is guaranteed Some when is_sg is true"),
                     &format!("{}    ", indent),
                 );
             } else {
@@ -458,7 +458,11 @@ impl<'a> VizGenerator<'a> {
             .executables
             .keys()
             .filter(|k| k.starts_with("step-"))
-            .map(|k| k.strip_prefix("step-").unwrap().to_string())
+            .map(|k| {
+                k.strip_prefix("step-")
+                    .expect("prefix guaranteed by starts_with filter")
+                    .to_string()
+            })
             .collect();
         step_names.sort();
 
@@ -662,7 +666,7 @@ impl<'a> VizGenerator<'a> {
 fn canonical_json(v: &Value) -> String {
     match v {
         Value::String(s) => s.clone(),
-        _ => serde_json::to_string(v).unwrap_or_default(),
+        _ => serde_json::to_string(v).expect("serializing JSON value to string should not fail"),
     }
 }
 
@@ -673,18 +677,21 @@ fn get_fill_color(name: &str) -> String {
             return color.to_string();
         }
     }
-    PALETTE.get("default").unwrap().to_string()
+    PALETTE
+        .get("default")
+        .expect("PALETTE must contain 'default' key")
+        .to_string()
 }
 
 fn clean_id(s: &str) -> String {
-    let re = Regex::new(r"[^a-zA-Z0-9_]").unwrap();
+    let re = Regex::new(r"[^a-zA-Z0-9_]").expect("static regex pattern must compile");
     re.replace_all(s, "").to_string()
 }
 
 fn smart_truncate(val: &Value, max_len: usize) -> String {
     let mut s = match val {
         Value::String(s) => s.clone(),
-        _ => serde_json::to_string(val).unwrap_or_default(),
+        _ => serde_json::to_string(val).expect("serializing JSON value to string should not fail"),
     };
 
     if s.contains('/') {
@@ -716,39 +723,58 @@ mod tests {
     fn test_get_fill_color() {
         assert_eq!(
             get_fill_color("stage-producer-abc"),
-            *PALETTE.get("producer").unwrap()
+            *PALETTE
+                .get("producer")
+                .expect("PALETTE must contain this key")
         );
         assert_eq!(
             get_fill_color("stage-consumer-xyz"),
-            *PALETTE.get("consumer").unwrap()
+            *PALETTE
+                .get("consumer")
+                .expect("PALETTE must contain this key")
         );
         assert_eq!(
             get_fill_color("data-worker-123"),
-            *PALETTE.get("worker").unwrap()
+            *PALETTE
+                .get("worker")
+                .expect("PALETTE must contain this key")
         );
         assert_eq!(
             get_fill_color("partial-sum-stage"),
-            *PALETTE.get("partial").unwrap()
+            *PALETTE
+                .get("partial")
+                .expect("PALETTE must contain this key")
         );
         assert_eq!(
             get_fill_color("total-sum-stage"),
-            *PALETTE.get("total").unwrap()
+            *PALETTE.get("total").expect("PALETTE must contain this key")
         );
         assert_eq!(
             get_fill_color("random-stage-name"),
-            *PALETTE.get("default").unwrap()
+            *PALETTE
+                .get("default")
+                .expect("PALETTE must contain this key")
         );
 
         assert_eq!(
             get_fill_color("STAGE-PRODUCER"),
-            *PALETTE.get("producer").unwrap()
+            *PALETTE
+                .get("producer")
+                .expect("PALETTE must contain this key")
         );
         assert_eq!(
             get_fill_color("Stage-Consumer"),
-            *PALETTE.get("consumer").unwrap()
+            *PALETTE
+                .get("consumer")
+                .expect("PALETTE must contain this key")
         );
 
-        assert_eq!(get_fill_color(""), *PALETTE.get("default").unwrap());
+        assert_eq!(
+            get_fill_color(""),
+            *PALETTE
+                .get("default")
+                .expect("PALETTE must contain this key")
+        );
     }
 
     #[test]

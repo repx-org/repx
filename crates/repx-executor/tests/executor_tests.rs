@@ -41,7 +41,7 @@ fn create_test_request_with_host_tools(
 
 #[test]
 fn test_executor_with_different_runtimes() {
-    let temp = tempdir().unwrap();
+    let temp = tempdir().expect("tempdir creation must succeed");
 
     let mut request = create_test_request(temp.path().to_path_buf());
     request.runtime = Runtime::Docker {
@@ -60,7 +60,7 @@ fn test_executor_with_different_runtimes() {
 
 #[test]
 fn test_execution_request_with_mount_paths() {
-    let temp = tempdir().unwrap();
+    let temp = tempdir().expect("tempdir creation must succeed");
     let mut request = create_test_request(temp.path().to_path_buf());
     request.mount_paths = vec!["/data".to_string(), "/scratch".to_string()];
 
@@ -70,46 +70,46 @@ fn test_execution_request_with_mount_paths() {
 
 #[test]
 fn test_find_image_file_in_images_dir() {
-    let temp = tempdir().unwrap();
+    let temp = tempdir().expect("tempdir creation must succeed");
     let images_dir = temp.path().join("artifacts/images");
-    fs::create_dir_all(&images_dir).unwrap();
+    fs::create_dir_all(&images_dir).expect("dir creation must succeed");
 
     let image_file = images_dir.join("my-image.tar.gz");
-    fs::write(&image_file, "fake image content").unwrap();
+    fs::write(&image_file, "fake image content").expect("file write must succeed");
 
     let request = create_test_request(temp.path().to_path_buf());
     let executor = Executor::new(request);
 
     let result = executor.find_image_file("my-image");
     assert!(result.is_some());
-    assert_eq!(result.unwrap(), image_file);
+    assert_eq!(result.expect("result must be Ok"), image_file);
 }
 
 #[test]
 fn test_find_image_file_in_image_dir() {
-    let temp = tempdir().unwrap();
+    let temp = tempdir().expect("tempdir creation must succeed");
     let image_dir = temp.path().join("artifacts/image");
-    fs::create_dir_all(&image_dir).unwrap();
+    fs::create_dir_all(&image_dir).expect("dir creation must succeed");
 
     let image_file = image_dir.join("container.tar");
-    fs::write(&image_file, "fake image").unwrap();
+    fs::write(&image_file, "fake image").expect("file write must succeed");
 
     let request = create_test_request(temp.path().to_path_buf());
     let executor = Executor::new(request);
 
     let result = executor.find_image_file("container");
     assert!(result.is_some());
-    assert_eq!(result.unwrap(), image_file);
+    assert_eq!(result.expect("result must be Ok"), image_file);
 }
 
 #[test]
 fn test_find_image_file_exact_match() {
-    let temp = tempdir().unwrap();
+    let temp = tempdir().expect("tempdir creation must succeed");
     let images_dir = temp.path().join("artifacts/images");
-    fs::create_dir_all(&images_dir).unwrap();
+    fs::create_dir_all(&images_dir).expect("dir creation must succeed");
 
     let image_file = images_dir.join("exact-name");
-    fs::write(&image_file, "content").unwrap();
+    fs::write(&image_file, "content").expect("file write must succeed");
 
     let request = create_test_request(temp.path().to_path_buf());
     let executor = Executor::new(request);
@@ -120,9 +120,9 @@ fn test_find_image_file_exact_match() {
 
 #[test]
 fn test_find_image_file_not_found() {
-    let temp = tempdir().unwrap();
+    let temp = tempdir().expect("tempdir creation must succeed");
     let images_dir = temp.path().join("artifacts/images");
-    fs::create_dir_all(&images_dir).unwrap();
+    fs::create_dir_all(&images_dir).expect("dir creation must succeed");
 
     let request = create_test_request(temp.path().to_path_buf());
     let executor = Executor::new(request);
@@ -133,7 +133,7 @@ fn test_find_image_file_not_found() {
 
 #[test]
 fn test_find_image_file_no_artifacts_dir() {
-    let temp = tempdir().unwrap();
+    let temp = tempdir().expect("tempdir creation must succeed");
     let request = create_test_request(temp.path().to_path_buf());
     let executor = Executor::new(request);
 
@@ -143,24 +143,24 @@ fn test_find_image_file_no_artifacts_dir() {
 
 #[test]
 fn test_get_host_tool_path_no_dir_configured() {
-    let temp = tempdir().unwrap();
+    let temp = tempdir().expect("tempdir creation must succeed");
     let request = create_test_request(temp.path().to_path_buf());
     let executor = Executor::new(request);
 
     let result = executor.get_host_tool_path("some-tool");
     assert!(result.is_err());
-    let err = result.unwrap_err();
+    let err = result.expect_err("result must be Err");
     assert!(matches!(err, ExecutorError::Config(_)));
 }
 
 #[test]
 fn test_get_host_tool_path_tool_exists() {
-    let temp = tempdir().unwrap();
+    let temp = tempdir().expect("tempdir creation must succeed");
     let host_tools = temp.path().join("host-tools/bin");
-    fs::create_dir_all(&host_tools).unwrap();
+    fs::create_dir_all(&host_tools).expect("dir creation must succeed");
 
     let tool_path = host_tools.join("my-tool");
-    fs::write(&tool_path, "#!/bin/sh\necho hello").unwrap();
+    fs::write(&tool_path, "#!/bin/sh\necho hello").expect("file write must succeed");
 
     let request =
         create_test_request_with_host_tools(temp.path().to_path_buf(), host_tools.clone());
@@ -168,14 +168,14 @@ fn test_get_host_tool_path_tool_exists() {
 
     let result = executor.get_host_tool_path("my-tool");
     assert!(result.is_ok());
-    assert_eq!(result.unwrap(), tool_path);
+    assert_eq!(result.expect("result must be Ok"), tool_path);
 }
 
 #[test]
 fn test_get_host_tool_path_tool_not_found() {
-    let temp = tempdir().unwrap();
+    let temp = tempdir().expect("tempdir creation must succeed");
     let host_tools = temp.path().join("host-tools/bin");
-    fs::create_dir_all(&host_tools).unwrap();
+    fs::create_dir_all(&host_tools).expect("dir creation must succeed");
 
     let request = create_test_request_with_host_tools(temp.path().to_path_buf(), host_tools);
     let executor = Executor::new(request);
@@ -186,7 +186,7 @@ fn test_get_host_tool_path_tool_not_found() {
 
 #[test]
 fn test_calculate_restricted_path_empty_with_no_host_tools() {
-    let temp = tempdir().unwrap();
+    let temp = tempdir().expect("tempdir creation must succeed");
     let request = create_test_request(temp.path().to_path_buf());
     let executor = Executor::new(request);
 
@@ -196,9 +196,9 @@ fn test_calculate_restricted_path_empty_with_no_host_tools() {
 
 #[test]
 fn test_calculate_restricted_path_with_host_tools() {
-    let temp = tempdir().unwrap();
+    let temp = tempdir().expect("tempdir creation must succeed");
     let host_tools = temp.path().join("host-tools/bin");
-    fs::create_dir_all(&host_tools).unwrap();
+    fs::create_dir_all(&host_tools).expect("dir creation must succeed");
 
     let request =
         create_test_request_with_host_tools(temp.path().to_path_buf(), host_tools.clone());
@@ -210,7 +210,7 @@ fn test_calculate_restricted_path_with_host_tools() {
 
 #[test]
 fn test_calculate_restricted_path_rejects_disallowed_binary() {
-    let temp = tempdir().unwrap();
+    let temp = tempdir().expect("tempdir creation must succeed");
     let request = create_test_request(temp.path().to_path_buf());
     let executor = Executor::new(request);
 
@@ -220,7 +220,7 @@ fn test_calculate_restricted_path_rejects_disallowed_binary() {
 
 #[test]
 fn test_build_native_command_basic() {
-    let temp = tempdir().unwrap();
+    let temp = tempdir().expect("tempdir creation must succeed");
     let request = create_test_request(temp.path().to_path_buf());
     let executor = Executor::new(request);
 
@@ -237,9 +237,9 @@ fn test_build_native_command_basic() {
 
 #[test]
 fn test_build_native_command_with_host_tools() {
-    let temp = tempdir().unwrap();
+    let temp = tempdir().expect("tempdir creation must succeed");
     let host_tools = temp.path().join("host-tools/bin");
-    fs::create_dir_all(&host_tools).unwrap();
+    fs::create_dir_all(&host_tools).expect("dir creation must succeed");
 
     let request =
         create_test_request_with_host_tools(temp.path().to_path_buf(), host_tools.clone());
@@ -251,13 +251,16 @@ fn test_build_native_command_with_host_tools() {
     let envs: std::collections::HashMap<_, _> = cmd.as_std().get_envs().collect();
     let path_env = envs.get(std::ffi::OsStr::new("PATH"));
     assert!(path_env.is_some());
-    let path_val = path_env.unwrap().unwrap().to_string_lossy();
+    let path_val = path_env
+        .expect("PATH env must be present")
+        .expect("PATH value must be set")
+        .to_string_lossy();
     assert!(path_val.contains("host-tools"));
 }
 
 #[test]
 fn test_build_native_command_empty_args() {
-    let temp = tempdir().unwrap();
+    let temp = tempdir().expect("tempdir creation must succeed");
     let request = create_test_request(temp.path().to_path_buf());
     let executor = Executor::new(request);
 
@@ -319,35 +322,37 @@ fn test_executor_error_security_violation() {
 
 #[tokio::test]
 async fn test_ensure_bwrap_rootfs_extracted_from_directory() {
-    let temp = tempdir().unwrap();
+    let temp = tempdir().expect("tempdir creation must succeed");
     let base_path = temp.path().to_path_buf();
     let images_dir = base_path.join("artifacts/images");
-    fs::create_dir_all(&images_dir).unwrap();
+    fs::create_dir_all(&images_dir).expect("dir creation must succeed");
 
     let host_tools = base_path.join("host-tools/bin");
-    fs::create_dir_all(&host_tools).unwrap();
+    fs::create_dir_all(&host_tools).expect("dir creation must succeed");
     let tar_path = host_tools.join("tar");
 
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        fs::write(&tar_path, "#!/bin/sh\nexit 0").unwrap();
-        let mut perms = fs::metadata(&tar_path).unwrap().permissions();
+        fs::write(&tar_path, "#!/bin/sh\nexit 0").expect("file write must succeed");
+        let mut perms = fs::metadata(&tar_path)
+            .expect("metadata read must succeed")
+            .permissions();
         perms.set_mode(0o755);
-        fs::set_permissions(&tar_path, perms).unwrap();
+        fs::set_permissions(&tar_path, perms).expect("set permissions must succeed");
     }
 
     let image_tag = "my-image:v1";
     let image_hash = "v1";
     let image_dir = images_dir.join(image_tag);
-    fs::create_dir_all(&image_dir).unwrap();
+    fs::create_dir_all(&image_dir).expect("dir creation must succeed");
 
     let manifest_json = r#"[{"Layers": ["layer1/layer.tar"]}]"#;
-    fs::write(image_dir.join("manifest.json"), manifest_json).unwrap();
+    fs::write(image_dir.join("manifest.json"), manifest_json).expect("file write must succeed");
 
     let layer_dir = image_dir.join("layer1");
-    fs::create_dir_all(&layer_dir).unwrap();
-    fs::write(layer_dir.join("layer.tar"), "dummy tar content").unwrap();
+    fs::create_dir_all(&layer_dir).expect("dir creation must succeed");
+    fs::write(layer_dir.join("layer.tar"), "dummy tar content").expect("file write must succeed");
 
     let mut request = create_test_request_with_host_tools(base_path.clone(), host_tools);
     request.runtime = Runtime::Bwrap {
@@ -362,7 +367,7 @@ async fn test_ensure_bwrap_rootfs_extracted_from_directory() {
         "Extraction should succeed with directory input. Error: {:?}",
         result.err()
     );
-    let rootfs = result.unwrap();
+    let rootfs = result.expect("result must be Ok");
     assert!(rootfs.ends_with(format!("cache/images/{}/rootfs", image_hash)));
     assert!(rootfs.exists());
     assert!(base_path
@@ -374,10 +379,10 @@ async fn test_ensure_bwrap_rootfs_extracted_from_directory() {
 
 #[tokio::test]
 async fn test_build_command_for_script_native_runtime() {
-    let temp = tempdir().unwrap();
+    let temp = tempdir().expect("tempdir creation must succeed");
     let base_path = temp.path().to_path_buf();
     let repx_out_dir = base_path.join("outputs/repx");
-    fs::create_dir_all(&repx_out_dir).unwrap();
+    fs::create_dir_all(&repx_out_dir).expect("dir creation must succeed");
 
     let mut request = create_test_request(base_path);
     request.runtime = Runtime::Native;
@@ -389,7 +394,7 @@ async fn test_build_command_for_script_native_runtime() {
     let result = executor.build_command_for_script(&script_path, &args).await;
     assert!(result.is_ok(), "Native command build should succeed");
 
-    let cmd = result.unwrap();
+    let cmd = result.expect("result must be Ok");
     let std_cmd = cmd.as_std();
     assert_eq!(std_cmd.get_program(), "/test/script.sh");
 
@@ -399,10 +404,10 @@ async fn test_build_command_for_script_native_runtime() {
 
 #[tokio::test]
 async fn test_build_command_for_script_with_special_chars_in_args() {
-    let temp = tempdir().unwrap();
+    let temp = tempdir().expect("tempdir creation must succeed");
     let base_path = temp.path().to_path_buf();
     let repx_out_dir = base_path.join("outputs/repx");
-    fs::create_dir_all(&repx_out_dir).unwrap();
+    fs::create_dir_all(&repx_out_dir).expect("dir creation must succeed");
 
     let mut request = create_test_request(base_path);
     request.runtime = Runtime::Native;
@@ -418,34 +423,36 @@ async fn test_build_command_for_script_with_special_chars_in_args() {
     let result = executor.build_command_for_script(&script_path, &args).await;
     assert!(result.is_ok());
 
-    let cmd = result.unwrap();
+    let cmd = result.expect("result must be Ok");
     let collected_args: Vec<_> = cmd.as_std().get_args().collect();
     assert_eq!(collected_args.len(), 3);
 }
 
 #[tokio::test]
 async fn test_ensure_bwrap_rootfs_fails_if_file() {
-    let temp = tempdir().unwrap();
+    let temp = tempdir().expect("tempdir creation must succeed");
     let base_path = temp.path().to_path_buf();
     let images_dir = base_path.join("artifacts/images");
-    fs::create_dir_all(&images_dir).unwrap();
+    fs::create_dir_all(&images_dir).expect("dir creation must succeed");
 
     let host_tools = base_path.join("host-tools/bin");
-    fs::create_dir_all(&host_tools).unwrap();
+    fs::create_dir_all(&host_tools).expect("dir creation must succeed");
     let tar_path = host_tools.join("tar");
 
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        fs::write(&tar_path, "#!/bin/sh\nexit 0").unwrap();
-        let mut perms = fs::metadata(&tar_path).unwrap().permissions();
+        fs::write(&tar_path, "#!/bin/sh\nexit 0").expect("file write must succeed");
+        let mut perms = fs::metadata(&tar_path)
+            .expect("metadata read must succeed")
+            .permissions();
         perms.set_mode(0o755);
-        fs::set_permissions(&tar_path, perms).unwrap();
+        fs::set_permissions(&tar_path, perms).expect("set permissions must succeed");
     }
 
     let image_tag = "my-image:v1";
     let image_file = images_dir.join(image_tag);
-    fs::write(&image_file, "i am a file").unwrap();
+    fs::write(&image_file, "i am a file").expect("file write must succeed");
 
     let mut request = create_test_request_with_host_tools(base_path.clone(), host_tools);
     request.runtime = Runtime::Bwrap {
@@ -456,7 +463,7 @@ async fn test_ensure_bwrap_rootfs_fails_if_file() {
     let result = executor.ensure_bwrap_rootfs_extracted(image_tag).await;
 
     assert!(result.is_err());
-    let err = result.unwrap_err();
+    let err = result.expect_err("result must be Err");
     assert!(
         format!("{}", err).contains("must be a directory"),
         "Error was: {}",

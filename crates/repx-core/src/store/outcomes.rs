@@ -98,7 +98,9 @@ pub fn merge_stores(
                 )
             })?;
 
-        let relative_path = path.strip_prefix(source_root).unwrap();
+        let relative_path = path
+            .strip_prefix(source_root)
+            .expect("strip_prefix guaranteed by starts_with check");
         let dest_path = destination.join(relative_path);
 
         on_progress(MergeProgress {
