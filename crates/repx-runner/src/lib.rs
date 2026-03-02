@@ -104,16 +104,17 @@ pub fn run(cli: Cli) -> Result<(), CliError> {
                 )))
             })?;
 
-            let scheduler: SchedulerType = cli
-                .scheduler
-                .as_deref()
-                .or(target_config.default_scheduler.as_deref())
-                .or(config.default_scheduler.as_deref())
-                .unwrap_or("slurm")
-                .parse()
-                .map_err(|e: repx_core::model::ParseSchedulerTypeError| {
-                    CliError::Config(ConfigError::General(e.to_string()))
-                })?;
+            let scheduler: SchedulerType = if let Some(s) = &cli.scheduler {
+                s.parse()
+                    .map_err(|e: repx_core::model::ParseSchedulerTypeError| {
+                        CliError::Config(ConfigError::General(e.to_string()))
+                    })?
+            } else {
+                target_config
+                    .default_scheduler
+                    .or(config.default_scheduler)
+                    .unwrap_or(SchedulerType::Slurm)
+            };
 
             let num_jobs = if scheduler == SchedulerType::Local {
                 Some(

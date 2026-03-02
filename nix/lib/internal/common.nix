@@ -1,3 +1,12 @@
+let
+  validResourceHintKeys = [
+    "mem"
+    "cpus"
+    "time"
+    "partition"
+    "sbatch_opts"
+  ];
+in
 {
   mkRuntimePackages = pkgs: [
     pkgs.bash
@@ -41,8 +50,43 @@
       )
     );
 
-  # Create a resolveWithParams function parameterized by the params set and error context string.
-  # Usage: mkResolveWithParams resolvedParams "stage name or file" "attrName" value
+  mkDependencyMeta =
+    { dependencyDerivations, paramInputs }:
+    let
+      depders = dependencyDerivations;
+      dependencyPaths = map toString depders;
+    in
+    {
+      inherit dependencyPaths;
+      dependencyManifestJson = builtins.toJSON (map builtins.unsafeDiscardStringContext dependencyPaths);
+      dependencyHash = builtins.hashString "sha256" (builtins.concatStringsSep ":" dependencyPaths);
+      paramsJson = builtins.toJSON paramInputs;
+    };
+
+  inherit validResourceHintKeys;
+
+  validateResourceHints =
+    {
+      pkgs,
+      resources,
+      contextStr,
+    }:
+    if resources == null || resources == { } then
+      resources
+    else
+      let
+        actualKeys = builtins.attrNames resources;
+        invalidKeys = pkgs.lib.subtractLists validResourceHintKeys actualKeys;
+      in
+      if invalidKeys != [ ] then
+        throw ''
+          Error in ${contextStr}.
+          Unknown resource hint keys: ${builtins.toJSON invalidKeys}.
+          Valid resource hint keys are: ${builtins.toJSON validResourceHintKeys}.
+        ''
+      else
+        resources;
+
   mkResolveWithParams =
     params: contextStr: attrName: value:
     if builtins.isFunction value then

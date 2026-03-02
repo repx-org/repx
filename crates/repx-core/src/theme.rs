@@ -309,13 +309,16 @@ pub fn load_theme(config: &Config) -> Result<Theme, crate::errors::ConfigError> 
         let user_theme_value: toml::Value = toml::from_str(&user_theme_str)?;
 
         let mut base_theme_value = toml::Value::try_from(&base_theme).map_err(|e| {
-            crate::errors::ConfigError::General(format!("Failed to serialize base theme: {}", e))
+            crate::errors::ConfigError::SerializationError(format!(
+                "Failed to serialize base theme: {}",
+                e
+            ))
         })?;
 
         config::merge_toml_values(&mut base_theme_value, &user_theme_value);
 
         base_theme = base_theme_value.try_into::<Theme>().map_err(|e| {
-            crate::errors::ConfigError::General(format!(
+            crate::errors::ConfigError::SerializationError(format!(
                 "Failed to deserialize merged theme: {}",
                 e
             ))

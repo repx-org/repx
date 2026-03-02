@@ -89,8 +89,8 @@ pub fn run(args: TuiArgs) -> Result<(), TuiError> {
 
     let initial_target_config = client.config().targets.get(&initial_active_target);
     let initial_active_scheduler = initial_target_config
-        .and_then(|t| t.default_scheduler.clone())
-        .or_else(|| client.config().default_scheduler.clone())
+        .and_then(|t| t.default_scheduler.map(|s| s.to_string()))
+        .or_else(|| client.config().default_scheduler.map(|s| s.to_string()))
         .unwrap_or_else(|| targets::LOCAL.to_string());
 
     let active_target = Arc::new(Mutex::new(initial_active_target.clone()));

@@ -122,7 +122,7 @@ const DEFAULT_RESOURCES_CONTENT: &str = r#"# Repx Resource Configuration File
 #[serde(deny_unknown_fields)]
 pub struct SchedulerConfig {
     #[serde(default)]
-    pub execution_types: Vec<String>,
+    pub execution_types: Vec<crate::model::ExecutionType>,
     pub local_concurrency: Option<usize>,
 }
 
@@ -132,8 +132,8 @@ pub struct Target {
     pub address: Option<String>,
     pub base_path: PathBuf,
     pub node_local_path: Option<PathBuf>,
-    pub default_scheduler: Option<String>,
-    pub default_execution_type: Option<String>,
+    pub default_scheduler: Option<crate::model::SchedulerType>,
+    pub default_execution_type: Option<crate::model::ExecutionType>,
     #[serde(default)]
     pub mount_host_paths: bool,
     #[serde(default)]
@@ -177,7 +177,7 @@ impl Default for LoggingConfig {
 pub struct Config {
     pub theme: Option<String>,
     pub submission_target: Option<String>,
-    pub default_scheduler: Option<String>,
+    pub default_scheduler: Option<crate::model::SchedulerType>,
     #[serde(default)]
     pub logging: LoggingConfig,
     #[serde(default)]

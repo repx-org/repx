@@ -57,7 +57,11 @@ let
 
   resolvedStageResources = resolveWithParams "resources" (stageDef.resources or null);
 
-  finalResources = resolvedStageResources;
+  finalResources = common.validateResourceHints {
+    inherit pkgs;
+    resources = resolvedStageResources;
+    contextStr = "stage '${resolvedPname}' resources";
+  };
 
   processed = processDependenciesFn (
     args

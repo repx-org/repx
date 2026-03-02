@@ -116,9 +116,11 @@ pub fn sync_images(
         };
         target.sync_image_incrementally(&full_path, tag, &local_cache_root)?;
         if let Some(sender) = event_sender {
-            let _ = sender.send(ClientEvent::SyncingArtifactProgress {
+            if let Err(e) = sender.send(ClientEvent::SyncingArtifactProgress {
                 path: relative_path.clone(),
-            });
+            }) {
+                tracing::debug!("Failed to send artifact sync progress event: {}", e);
+            }
         }
     }
 

@@ -18,7 +18,7 @@ pub fn generate_and_write_inputs_json(
     let mut inputs_map = serde_json::Map::new();
 
     let exe = job.executables.get(executable_name).ok_or_else(|| {
-        ClientError::Config(ConfigError::General(format!(
+        ClientError::Config(ConfigError::InvalidState(format!(
             "Job '{}' missing required executable '{}'",
             job_id, executable_name
         )))
@@ -27,7 +27,7 @@ pub fn generate_and_write_inputs_json(
     for mapping in &exe.inputs {
         if let (Some(dep_job_id), Some(source_output)) = (&mapping.job_id, &mapping.source_output) {
             let dep_job = lab.jobs.get(dep_job_id).ok_or_else(|| {
-                ClientError::Config(ConfigError::General(format!(
+                ClientError::Config(ConfigError::InvalidState(format!(
                     "Dependency job '{}' not found in lab for job '{}'",
                     dep_job_id, job_id
                 )))
@@ -39,21 +39,21 @@ pub fn generate_and_write_inputs_json(
                 dep_job.executables.get("main")
             }
             .ok_or_else(|| {
-                ClientError::Config(ConfigError::General(format!(
+                ClientError::Config(ConfigError::InvalidState(format!(
                     "Could not find output executable for dependency job '{}'",
                     dep_job_id
                 )))
             })?;
 
             let value_template_val = dep_exe.outputs.get(source_output).ok_or_else(|| {
-                ClientError::Config(ConfigError::General(format!(
+                ClientError::Config(ConfigError::InvalidState(format!(
                             "Inconsistent metadata: job '{}' requires output '{}' from dependency '{}', but this output is not defined in the dependency's metadata.",
                             job_id, source_output, dep_job_id
                         )))
             })?;
 
             let value_template = value_template_val.as_str().ok_or_else(|| {
-                ClientError::Config(ConfigError::General(format!(
+                ClientError::Config(ConfigError::InvalidState(format!(
                         "Inconsistent metadata: job '{}' requires output '{}' from dependency '{}', but this output is not a string path template.",
                         job_id, source_output, dep_job_id
                     )))
@@ -70,7 +70,7 @@ pub fn generate_and_write_inputs_json(
                 mapping.target_input.clone(),
                 serde_json::Value::String(final_path),
             );
-        } else if mapping.mapping_type.as_deref() == Some("global")
+        } else if mapping.mapping_type == Some(repx_core::model::MappingType::Global)
             || mapping.target_input == "store__base"
         {
             let store_path = target.base_path().to_string_lossy().to_string();

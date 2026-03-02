@@ -38,7 +38,7 @@ impl OrchestrationPlan {
             .get("main")
             .or_else(|| job_def.executables.get("scatter"))
             .ok_or_else(|| {
-                ClientError::Config(ConfigError::General(format!(
+                ClientError::Config(ConfigError::InvalidState(format!(
                     "Job '{}' missing required executable 'main' or 'scatter'",
                     job_id
                 )))

@@ -87,6 +87,33 @@ pub enum ClientEvent {
 }
 type SlurmIdMap = Arc<Mutex<HashMap<JobId, (String, u32)>>>;
 
+pub(crate) fn resolve_execution_type(
+    image_tag: Option<&str>,
+    explicit_execution_type: Option<&str>,
+    target_config: &repx_core::config::Target,
+    scheduler_config: Option<&repx_core::config::SchedulerConfig>,
+) -> String {
+    use repx_core::model::ExecutionType;
+
+    if explicit_execution_type.is_none() && image_tag.is_none() {
+        return ExecutionType::Native.to_string();
+    }
+    explicit_execution_type
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| {
+            let sched_config = match scheduler_config {
+                Some(cfg) => cfg,
+                None => return ExecutionType::Native.to_string(),
+            };
+            target_config
+                .default_execution_type
+                .filter(|et| sched_config.execution_types.contains(et))
+                .map(|et| et.to_string())
+                .or_else(|| sched_config.execution_types.first().map(|s| s.to_string()))
+                .unwrap_or_else(|| ExecutionType::Native.to_string())
+        })
+}
+
 #[derive(Default)]
 pub struct SubmitOptions {
     pub execution_type: Option<String>,
@@ -282,7 +309,9 @@ impl Client {
 
         let send = |event: ClientEvent| {
             if let Some(sender) = &options.event_sender {
-                let _ = sender.send(event);
+                if let Err(e) = sender.send(event) {
+                    tracing::debug!("Failed to send client event: {}", e);
+                }
             }
         };
 
@@ -474,8 +503,8 @@ impl Client {
 
         if let Some((target_name, slurm_id)) = slurm_info {
             let target = self.targets.get(&target_name).ok_or_else(|| {
-                ClientError::Config(ConfigError::General(format!(
-                    "Inconsistent state: target '{}' from slurm_map not found.",
+                ClientError::Config(ConfigError::InvalidState(format!(
+                    "Target '{}' from slurm_map not found in configuration.",
                     target_name
                 )))
             })?;

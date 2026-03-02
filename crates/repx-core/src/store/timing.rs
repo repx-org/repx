@@ -41,7 +41,17 @@ fn update_timestamps<F>(output_dir: &Path, update_fn: F) -> Result<(), ConfigErr
 where
     F: FnOnce(&mut JobTimestamps),
 {
-    let mut timestamps = read_timestamps(output_dir).unwrap_or_default();
+    let mut timestamps = match read_timestamps(output_dir) {
+        Ok(ts) => ts,
+        Err(e) => {
+            tracing::warn!(
+                "Failed to read timestamps from '{}': {}. Using defaults.",
+                output_dir.display(),
+                e
+            );
+            JobTimestamps::default()
+        }
+    };
     update_fn(&mut timestamps);
     write_timestamps(output_dir, &timestamps)
 }

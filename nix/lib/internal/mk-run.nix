@@ -152,16 +152,10 @@ else
           name = name + "-image";
           tag = "latest";
           compressor = "none";
-          contents = (pkgs.lib.flatten (map getDrvsFromPipeline loadedPipelines)) ++ [
-            pkgs.jq
-            pkgs.bash
-            pkgs.coreutils
-            pkgs.findutils
-            pkgs.gnused
-            pkgs.gawk
-            pkgs.gnugrep
-            paramDepsClosure
-          ];
+          contents =
+            (pkgs.lib.flatten (map getDrvsFromPipeline loadedPipelines))
+            ++ (common.mkRuntimePackages pkgs)
+            ++ [ paramDepsClosure ];
           config = {
             Cmd = [ "${pkgs.bash}/bin/bash" ];
           };

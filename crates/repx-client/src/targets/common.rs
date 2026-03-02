@@ -62,7 +62,7 @@ pub fn extract_image_to_cache(
 
         if !cp_output.status.success() {
             let stderr = String::from_utf8_lossy(&cp_output.stderr);
-            return Err(ClientError::Config(ConfigError::General(format!(
+            return Err(ClientError::Config(ConfigError::CommandFailed(format!(
                 "Failed to copy image directory {}: {}",
                 image_path.display(),
                 stderr
@@ -91,8 +91,14 @@ pub fn extract_image_to_cache(
 
     if !tar_output.status.success() {
         let stderr = String::from_utf8_lossy(&tar_output.stderr);
-        let _ = fs_err::remove_dir_all(&image_extract_dir);
-        return Err(ClientError::Config(ConfigError::General(format!(
+        if let Err(e) = fs_err::remove_dir_all(&image_extract_dir) {
+            tracing::debug!(
+                "Failed to clean up image extract dir '{}': {}",
+                image_extract_dir.display(),
+                e
+            );
+        }
+        return Err(ClientError::Config(ConfigError::CommandFailed(format!(
             "Failed to extract image tarball {}: {}",
             image_path.display(),
             stderr
@@ -184,7 +190,7 @@ pub fn get_image_manifest(image_path: &Path, tar_tool: &Path) -> Result<Vec<Stri
     let list_output = tar_list_cmd.output().map_err(ConfigError::Io)?;
 
     if !list_output.status.success() {
-        return Err(ClientError::Config(ConfigError::General(format!(
+        return Err(ClientError::Config(ConfigError::CommandFailed(format!(
             "Failed to list tar content {}: {}",
             image_path.display(),
             String::from_utf8_lossy(&list_output.stderr)
@@ -196,7 +202,7 @@ pub fn get_image_manifest(image_path: &Path, tar_tool: &Path) -> Result<Vec<Stri
         .lines()
         .find(|line| line.trim() == "manifest.json" || line.trim().ends_with("/manifest.json"))
         .ok_or_else(|| {
-            ClientError::Config(ConfigError::General(format!(
+            ClientError::Config(ConfigError::InvalidState(format!(
                 "manifest.json not found in {}: manifest.json missing from tar listing",
                 image_path.display()
             )))
@@ -212,7 +218,7 @@ pub fn get_image_manifest(image_path: &Path, tar_tool: &Path) -> Result<Vec<Stri
     let extract_output = tar_extract_cmd.output().map_err(ConfigError::Io)?;
 
     if !extract_output.status.success() {
-        return Err(ClientError::Config(ConfigError::General(format!(
+        return Err(ClientError::Config(ConfigError::CommandFailed(format!(
             "Failed to extract manifest from {}: {}",
             image_path.display(),
             String::from_utf8_lossy(&extract_output.stderr)
@@ -223,7 +229,7 @@ pub fn get_image_manifest(image_path: &Path, tar_tool: &Path) -> Result<Vec<Stri
         .map_err(|e| ClientError::Config(ConfigError::Json(e)))?;
 
     if manifest.is_empty() {
-        return Err(ClientError::Config(ConfigError::General(format!(
+        return Err(ClientError::Config(ConfigError::InvalidState(format!(
             "Empty manifest in {}",
             image_path.display()
         ))));
@@ -247,7 +253,13 @@ pub fn extract_layer_to_cache(
 
     let temp_extract_dir = layers_cache.join(format!(".tmp_{}", layer_hash));
     if temp_extract_dir.exists() {
-        let _ = fs_err::remove_dir_all(&temp_extract_dir);
+        if let Err(e) = fs_err::remove_dir_all(&temp_extract_dir) {
+            tracing::debug!(
+                "Failed to clean up temp extract dir '{}': {}",
+                temp_extract_dir.display(),
+                e
+            );
+        }
     }
     fs_err::create_dir_all(&temp_extract_dir).map_err(ConfigError::Io)?;
 
@@ -267,8 +279,14 @@ pub fn extract_layer_to_cache(
     let output = tar_cmd.output().map_err(ConfigError::Io)?;
 
     if !output.status.success() {
-        let _ = fs_err::remove_dir_all(&temp_extract_dir);
-        return Err(ClientError::Config(ConfigError::General(format!(
+        if let Err(e) = fs_err::remove_dir_all(&temp_extract_dir) {
+            tracing::debug!(
+                "Failed to clean up temp extract dir '{}': {}",
+                temp_extract_dir.display(),
+                e
+            );
+        }
+        return Err(ClientError::Config(ConfigError::CommandFailed(format!(
             "Failed to extract layer {} from {}: {}",
             layer_path_in_tar,
             image_path.display(),
@@ -300,7 +318,13 @@ pub fn extract_layer_to_flat_store(
 
     let temp_path = store_cache.join(format!(".tmp_{}", flat_layer_name));
     if temp_path.exists() {
-        let _ = fs_err::remove_file(&temp_path);
+        if let Err(e) = fs_err::remove_file(&temp_path) {
+            tracing::debug!(
+                "Failed to clean up temp file '{}': {}",
+                temp_path.display(),
+                e
+            );
+        }
     }
 
     tracing::info!(
@@ -319,7 +343,7 @@ pub fn extract_layer_to_flat_store(
     let output = tar_cmd.output().map_err(ConfigError::Io)?;
 
     if !output.status.success() {
-        return Err(ClientError::Config(ConfigError::General(format!(
+        return Err(ClientError::Config(ConfigError::CommandFailed(format!(
             "Failed to extract layer {} from {}: {}",
             layer_path_in_tar,
             image_path.display(),

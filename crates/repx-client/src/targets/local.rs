@@ -70,7 +70,7 @@ impl CommandRunner for LocalTarget {
             let stderr = String::from_utf8_lossy(&output.stderr);
             return Err(ClientError::TargetCommandFailed {
                 target: self.name.clone(),
-                source: ConfigError::General(format!(
+                source: ConfigError::CommandFailed(format!(
                     "Command '{}' failed on target '{}': {}",
                     command, self.name, stderr
                 )),
@@ -131,7 +131,7 @@ impl ArtifactSync for LocalTarget {
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(ClientError::Config(ConfigError::General(format!(
+            return Err(ClientError::Config(ConfigError::CommandFailed(format!(
                 "rsync failed for lab sync: {}",
                 stderr
             ))));
@@ -155,7 +155,7 @@ impl ArtifactSync for LocalTarget {
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(ClientError::Config(ConfigError::General(format!(
+            return Err(ClientError::Config(ConfigError::CommandFailed(format!(
                 "rsync failed for directory sync: {}",
                 stderr
             ))));
@@ -190,9 +190,19 @@ impl ArtifactSync for LocalTarget {
             let final_source = image_path.to_path_buf();
             if dest_image_path.exists() || dest_image_path.is_symlink() {
                 if dest_image_path.is_dir() && !dest_image_path.is_symlink() {
-                    let _ = fs_err::remove_dir_all(&dest_image_path);
-                } else {
-                    let _ = fs_err::remove_file(&dest_image_path);
+                    if let Err(e) = fs_err::remove_dir_all(&dest_image_path) {
+                        tracing::debug!(
+                            "Failed to remove old image dir '{}': {}",
+                            dest_image_path.display(),
+                            e
+                        );
+                    }
+                } else if let Err(e) = fs_err::remove_file(&dest_image_path) {
+                    tracing::debug!(
+                        "Failed to remove old image file '{}': {}",
+                        dest_image_path.display(),
+                        e
+                    );
                 }
             }
             std::os::unix::fs::symlink(&final_source, &dest_image_path)
@@ -246,7 +256,13 @@ impl ArtifactSync for LocalTarget {
             let link_path = image_layer_dir.join("layer.tar");
 
             if link_path.exists() || link_path.is_symlink() {
-                let _ = fs_err::remove_file(&link_path);
+                if let Err(e) = fs_err::remove_file(&link_path) {
+                    tracing::debug!(
+                        "Failed to remove old layer link '{}': {}",
+                        link_path.display(),
+                        e
+                    );
+                }
             }
             std::os::unix::fs::symlink(&target_layer_tar, &link_path)
                 .map_err(|e| ClientError::Config(ConfigError::Io(e)))?;
@@ -256,9 +272,19 @@ impl ArtifactSync for LocalTarget {
 
         if dest_image_path.exists() || dest_image_path.is_symlink() {
             if dest_image_path.is_dir() && !dest_image_path.is_symlink() {
-                let _ = fs_err::remove_dir_all(&dest_image_path);
-            } else {
-                let _ = fs_err::remove_file(&dest_image_path);
+                if let Err(e) = fs_err::remove_dir_all(&dest_image_path) {
+                    tracing::debug!(
+                        "Failed to remove old image dir '{}': {}",
+                        dest_image_path.display(),
+                        e
+                    );
+                }
+            } else if let Err(e) = fs_err::remove_file(&dest_image_path) {
+                tracing::debug!(
+                    "Failed to remove old image file '{}': {}",
+                    dest_image_path.display(),
+                    e
+                );
             }
         }
 
@@ -302,7 +328,7 @@ impl FileOps for LocalTarget {
             }
             return Err(ClientError::TargetCommandFailed {
                 target: self.name.clone(),
-                source: ConfigError::General(format!(
+                source: ConfigError::CommandFailed(format!(
                     "tail failed on '{}': {}",
                     path.display(),
                     stderr
@@ -421,7 +447,13 @@ impl GcOps for LocalTarget {
             .find_lab_manifest(lab_hash)
             .unwrap_or_else(|_| self.artifacts_base_path().join(lab_hash));
 
-        let _ = std::os::unix::fs::symlink(&target_path, &link_path);
+        if let Err(e) = std::os::unix::fs::symlink(&target_path, &link_path) {
+            tracing::debug!(
+                "Failed to create GC root symlink '{}': {}",
+                link_path.display(),
+                e
+            );
+        }
 
         self.cleanup_old_gc_roots(&gcroots, 5)?;
 
@@ -437,7 +469,13 @@ impl GcOps for LocalTarget {
 
         let link_path = pinned_dir.join(name);
         if link_path.exists() || link_path.symlink_metadata().is_ok() {
-            let _ = fs_err::remove_file(&link_path);
+            if let Err(e) = fs_err::remove_file(&link_path) {
+                tracing::debug!(
+                    "Failed to remove old pinned GC root '{}': {}",
+                    link_path.display(),
+                    e
+                );
+            }
         }
 
         let target_path = self.find_lab_manifest(lab_hash)?;
@@ -531,7 +569,7 @@ impl GcOps for LocalTarget {
             .map_err(|e| ClientError::Config(ConfigError::Io(e)))?;
 
         if !output.status.success() {
-            return Err(ClientError::Config(ConfigError::General(format!(
+            return Err(ClientError::Config(ConfigError::CommandFailed(format!(
                 "GC failed: {}",
                 String::from_utf8_lossy(&output.stderr)
             ))));
@@ -625,7 +663,7 @@ impl LocalTarget {
             return Ok(fallback);
         }
 
-        Err(ClientError::Config(ConfigError::General(format!(
+        Err(ClientError::Config(ConfigError::InvalidState(format!(
             "No lab manifest found for hash '{}'",
             lab_hash
         ))))
@@ -641,7 +679,13 @@ impl LocalTarget {
 
         if entries.len() > keep {
             for entry in entries.iter().take(entries.len() - keep) {
-                let _ = fs_err::remove_file(entry.path());
+                if let Err(e) = fs_err::remove_file(entry.path()) {
+                    tracing::debug!(
+                        "Failed to remove old GC root '{}': {}",
+                        entry.path().display(),
+                        e
+                    );
+                }
             }
         }
 

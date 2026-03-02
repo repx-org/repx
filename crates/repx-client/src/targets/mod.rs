@@ -62,7 +62,7 @@ pub(crate) fn find_local_runner_binary() -> Result<PathBuf> {
             return Ok(cli_exe_path);
         }
 
-        return Err(ClientError::Config(ConfigError::General(format!(
+        return Err(ClientError::Config(ConfigError::InvalidState(format!(
             "Could not find repx runner binary. Searched for:\n  {}\n  {}",
             runner_exe_path.display(),
             cli_exe_path.display()
@@ -127,9 +127,11 @@ pub trait ArtifactSync: TargetInfo {
     ) -> Result<()> {
         for relative_path in artifacts {
             if let Some(sender) = event_sender {
-                let _ = sender.send(super::ClientEvent::SyncingArtifactProgress {
+                if let Err(e) = sender.send(super::ClientEvent::SyncingArtifactProgress {
                     path: relative_path.clone(),
-                });
+                }) {
+                    tracing::debug!("Failed to send artifact sync progress event: {}", e);
+                }
             }
             let local_path = local_lab_path.join(relative_path);
             self.sync_artifact(&local_path, relative_path)?;
