@@ -158,7 +158,7 @@ impl App {
                     let executors: Vec<TuiExecutor> = conf
                         .execution_types
                         .iter()
-                        .filter_map(|s| s.parse().ok())
+                        .map(|et| TuiExecutor::from(*et))
                         .filter(|e| !is_native_lab || *e == TuiExecutor::Native)
                         .collect();
                     available_executors.insert(TuiScheduler::Local, executors);
@@ -168,7 +168,7 @@ impl App {
                     let executors: Vec<TuiExecutor> = conf
                         .execution_types
                         .iter()
-                        .filter_map(|s| s.parse().ok())
+                        .map(|et| TuiExecutor::from(*et))
                         .filter(|e| !is_native_lab || *e == TuiExecutor::Native)
                         .collect();
                     available_executors.insert(TuiScheduler::Slurm, executors);
@@ -183,8 +183,7 @@ impl App {
 
                 let default_scheduler: TuiScheduler = target_config
                     .default_scheduler
-                    .as_deref()
-                    .and_then(|s| s.parse().ok())
+                    .map(TuiScheduler::from)
                     .unwrap_or(TuiScheduler::Local);
 
                 let actual_scheduler = if available_schedulers.contains(&default_scheduler) {
@@ -203,8 +202,7 @@ impl App {
 
                 let default_executor: TuiExecutor = target_config
                     .default_execution_type
-                    .as_deref()
-                    .and_then(|s| s.parse().ok())
+                    .map(TuiExecutor::from)
                     .unwrap_or(TuiExecutor::Native);
 
                 let selected_executor_idx = available_executors

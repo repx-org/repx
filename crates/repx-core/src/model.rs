@@ -98,6 +98,90 @@ impl FromStr for SchedulerType {
     }
 }
 
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Hash, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum ExecutionType {
+    #[default]
+    Native,
+    Bwrap,
+    Podman,
+    Docker,
+}
+
+impl fmt::Display for ExecutionType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ExecutionType::Native => write!(f, "native"),
+            ExecutionType::Bwrap => write!(f, "bwrap"),
+            ExecutionType::Podman => write!(f, "podman"),
+            ExecutionType::Docker => write!(f, "docker"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ParseExecutionTypeError(pub String);
+
+impl fmt::Display for ParseExecutionTypeError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "invalid execution type: '{}'. Valid values are: native, bwrap, podman, docker",
+            self.0
+        )
+    }
+}
+
+impl std::error::Error for ParseExecutionTypeError {}
+
+impl FromStr for ExecutionType {
+    type Err = ParseExecutionTypeError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "native" => Ok(ExecutionType::Native),
+            "bwrap" => Ok(ExecutionType::Bwrap),
+            "podman" => Ok(ExecutionType::Podman),
+            "docker" => Ok(ExecutionType::Docker),
+            _ => Err(ParseExecutionTypeError(s.to_string())),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum MappingType {
+    IntraPipeline,
+    InterRun,
+    Global,
+}
+
+impl fmt::Display for MappingType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            MappingType::IntraPipeline => write!(f, "intra-pipeline"),
+            MappingType::InterRun => write!(f, "inter-run"),
+            MappingType::Global => write!(f, "global"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum DependencyType {
+    Hard,
+    Soft,
+}
+
+impl fmt::Display for DependencyType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            DependencyType::Hard => write!(f, "hard"),
+            DependencyType::Soft => write!(f, "soft"),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize, Ord, PartialOrd)]
 pub struct JobId(pub String);
 
@@ -178,8 +262,8 @@ pub struct InputMapping {
     pub source_key: Option<String>,
 
     #[serde(rename = "type")]
-    pub mapping_type: Option<String>,
-    pub dependency_type: Option<String>,
+    pub mapping_type: Option<MappingType>,
+    pub dependency_type: Option<DependencyType>,
     pub source_run: Option<RunId>,
     pub source_stage_filter: Option<String>,
 }

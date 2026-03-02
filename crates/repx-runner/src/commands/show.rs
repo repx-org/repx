@@ -317,7 +317,7 @@ fn handle_show_output(
     let out_dir = output_dir.join(dirs::OUT);
 
     if !out_dir.exists() {
-        return Err(CliError::Config(ConfigError::General(format!(
+        return Err(CliError::Config(ConfigError::InvalidState(format!(
             "Output directory does not exist: {}\nJob may not have been executed yet.",
             out_dir.display()
         ))));
@@ -342,7 +342,7 @@ fn handle_show_output(
                 list_directory_recursive(&file_path, &file_path, 2)?;
             } else {
                 let contents = fs::read_to_string(&file_path).map_err(|e| {
-                    CliError::Config(ConfigError::General(format!(
+                    CliError::Config(ConfigError::CommandFailed(format!(
                         "Failed to read file '{}': {}",
                         file_path.display(),
                         e

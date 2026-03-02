@@ -389,27 +389,78 @@ async fn cancel_workers_from_manifest(repx_dir: &Path) {
     }
 }
 
+async fn run_scatter_if_needed(
+    orch: &ScatterGatherOrchestrator,
+    scatter_exe_path: &Path,
+) -> Result<bool, CliError> {
+    let already_succeeded = orch.scatter_repx_dir.join(markers::SUCCESS).exists()
+        && orch.scatter_out_dir.join("work_items.json").exists();
+
+    if already_succeeded {
+        return Ok(true);
+    }
+
+    if let Err(e) = orch.run_scatter(scatter_exe_path).await {
+        write_marker(&orch.scatter_repx_dir.join(markers::FAIL))?;
+        write_marker(&orch.repx_dir.join(markers::FAIL))?;
+        tracing::error!("Scatter failed: {}", e);
+        return Err(e);
+    }
+    write_marker(&orch.scatter_repx_dir.join(markers::SUCCESS))?;
+    Ok(false)
+}
+
 async fn handle_phase_scatter_only(
     orch: &mut ScatterGatherOrchestrator,
     args: &InternalScatterGatherArgs,
 ) -> Result<(), CliError> {
     orch.init_dirs()?;
 
-    let scatter_already_succeeded = orch.scatter_repx_dir.join(markers::SUCCESS).exists()
-        && orch.scatter_out_dir.join("work_items.json").exists();
-
-    if scatter_already_succeeded {
+    let skipped = run_scatter_if_needed(orch, &args.scatter_exe_path).await?;
+    if skipped {
         tracing::info!("Scatter already succeeded (SUCCESS marker exists), skipping re-execution.");
-    } else {
-        if let Err(e) = orch.run_scatter(&args.scatter_exe_path).await {
-            write_marker(&orch.scatter_repx_dir.join(markers::FAIL))?;
-            write_marker(&orch.repx_dir.join(markers::FAIL))?;
-            tracing::error!("Scatter failed: {}", e);
-            return Err(e);
-        }
-        write_marker(&orch.scatter_repx_dir.join(markers::SUCCESS))?;
     }
     Ok(())
+}
+
+fn invalidate_stale_step_markers(
+    branch_root: &Path,
+    work_item_path: &Path,
+    new_work_item_json: &str,
+    steps: &HashMap<String, StepMeta>,
+    branch_idx: usize,
+) -> Result<(), CliError> {
+    if work_item_path.exists() {
+        let old = match fs::read_to_string(work_item_path) {
+            Ok(content) => content,
+            Err(e) => {
+                tracing::warn!(
+                    "Failed to read previous work item at '{}': {}. Treating as changed.",
+                    work_item_path.display(),
+                    e
+                );
+                String::new()
+            }
+        };
+        if old != new_work_item_json {
+            tracing::info!(
+                "Branch {} work item changed, invalidating step markers",
+                branch_idx
+            );
+            let topo_order = toposort_steps(steps)?;
+            for s in &topo_order {
+                let sr = branch_root.join(format!("step-{}", s)).join(dirs::REPX);
+                let _ = fs::remove_file(sr.join(markers::SUCCESS));
+                let _ = fs::remove_file(sr.join(markers::FAIL));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn clear_step_markers(step_repx: &Path) {
+    let _ = fs::remove_file(step_repx.join(markers::SUCCESS));
+    let _ = fs::remove_file(step_repx.join(markers::FAIL));
 }
 
 async fn handle_phase_step(
@@ -451,21 +502,13 @@ async fn handle_phase_step(
     let new_work_item_json = serde_json::to_string(item)?;
 
     let work_item_path = branch_repx.join("work_item.json");
-    if work_item_path.exists() {
-        let old = fs::read_to_string(&work_item_path).unwrap_or_default();
-        if old != new_work_item_json {
-            tracing::info!(
-                "Branch {} work item changed, invalidating step markers",
-                branch_idx
-            );
-            let topo_order = toposort_steps(&steps_meta.steps)?;
-            for s in &topo_order {
-                let sr = branch_root.join(format!("step-{}", s)).join(dirs::REPX);
-                let _ = fs::remove_file(sr.join(markers::SUCCESS));
-                let _ = fs::remove_file(sr.join(markers::FAIL));
-            }
-        }
-    }
+    invalidate_stale_step_markers(
+        &branch_root,
+        &work_item_path,
+        &new_work_item_json,
+        &steps_meta.steps,
+        branch_idx,
+    )?;
     fs::write(&work_item_path, &new_work_item_json)?;
 
     let step_out = branch_root
@@ -477,8 +520,7 @@ async fn handle_phase_step(
     fs::create_dir_all(&step_out)?;
     fs::create_dir_all(&step_repx)?;
 
-    let _ = fs::remove_file(step_repx.join(markers::SUCCESS));
-    let _ = fs::remove_file(step_repx.join(markers::FAIL));
+    clear_step_markers(&step_repx);
 
     let inputs = resolve_step_inputs(
         step_meta,
@@ -605,7 +647,7 @@ async fn async_handle_scatter_gather(args: InternalScatterGatherArgs) -> Result<
     );
 
     let steps_meta: StepsMetadata = serde_json::from_str(&args.steps_json).map_err(|e| {
-        CliError::Config(ConfigError::General(format!(
+        CliError::Config(ConfigError::SerializationError(format!(
             "Failed to parse --steps-json: {}",
             e
         )))
@@ -656,17 +698,14 @@ async fn async_handle_scatter_gather(args: InternalScatterGatherArgs) -> Result<
         topo_order
     );
 
-    let scatter_already_succeeded = orch.scatter_repx_dir.join(markers::SUCCESS).exists()
-        && orch.scatter_out_dir.join("work_items.json").exists();
-
-    if scatter_already_succeeded {
-        tracing::info!(
-            "[1/4] Scatter already succeeded (SUCCESS marker exists), skipping re-execution."
-        );
-    } else {
-        if let Err(e) = orch.run_scatter(&args.scatter_exe_path).await {
-            write_marker(&orch.scatter_repx_dir.join(markers::FAIL))?;
-            write_marker(&orch.repx_dir.join(markers::FAIL))?;
+    match run_scatter_if_needed(&orch, &args.scatter_exe_path).await {
+        Ok(true) => {
+            tracing::info!(
+                "[1/4] Scatter already succeeded (SUCCESS marker exists), skipping re-execution."
+            );
+        }
+        Ok(false) => {}
+        Err(e) => {
             cancel_workers_from_manifest(&orch.repx_dir).await;
             if let Some(anchor) = args.anchor_id {
                 let _ = TokioCommand::new("scancel")
@@ -674,10 +713,8 @@ async fn async_handle_scatter_gather(args: InternalScatterGatherArgs) -> Result<
                     .output()
                     .await;
             }
-            tracing::error!("Scatter failed: {}", e);
             return Err(e);
         }
-        write_marker(&orch.scatter_repx_dir.join(markers::SUCCESS))?;
     }
 
     tracing::info!("[2/4] Scatter finished. Reading work items...");
@@ -924,7 +961,7 @@ async fn submit_slurm_branches(
         if let Some(sink_slurm_id) = step_slurm_ids.get(&steps_meta.sink_step) {
             last_step_slurm_ids.push(sink_slurm_id.clone());
         } else {
-            return Err(CliError::Config(ConfigError::General(format!(
+            return Err(CliError::Config(ConfigError::InvalidState(format!(
                 "Sink step '{}' was not submitted for branch #{}",
                 steps_meta.sink_step, branch_idx
             ))));

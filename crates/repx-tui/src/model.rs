@@ -39,6 +39,15 @@ impl FromStr for TuiScheduler {
     }
 }
 
+impl From<repx_core::model::SchedulerType> for TuiScheduler {
+    fn from(st: repx_core::model::SchedulerType) -> Self {
+        match st {
+            repx_core::model::SchedulerType::Local => TuiScheduler::Local,
+            repx_core::model::SchedulerType::Slurm => TuiScheduler::Slurm,
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Copy, Eq, Hash)]
 pub enum TuiExecutor {
     Native,
@@ -65,6 +74,17 @@ impl FromStr for TuiExecutor {
             "docker" => Ok(TuiExecutor::Docker),
             "bwrap" => Ok(TuiExecutor::Bwrap),
             _ => Err(()),
+        }
+    }
+}
+
+impl From<repx_core::model::ExecutionType> for TuiExecutor {
+    fn from(et: repx_core::model::ExecutionType) -> Self {
+        match et {
+            repx_core::model::ExecutionType::Native => TuiExecutor::Native,
+            repx_core::model::ExecutionType::Bwrap => TuiExecutor::Bwrap,
+            repx_core::model::ExecutionType::Podman => TuiExecutor::Podman,
+            repx_core::model::ExecutionType::Docker => TuiExecutor::Docker,
         }
     }
 }

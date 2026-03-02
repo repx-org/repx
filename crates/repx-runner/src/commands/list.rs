@@ -99,7 +99,7 @@ fn list_jobs(
             let job_statuses =
                 client_status::get_statuses_for_active_target(&client, &target_name, None)
                     .map_err(|e| {
-                        CliError::Config(ConfigError::General(format!(
+                        CliError::Config(ConfigError::CommandFailed(format!(
                             "Failed to get job statuses: {}",
                             e
                         )))

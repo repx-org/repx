@@ -191,7 +191,7 @@ impl<'a> VizGenerator<'a> {
                 if let Some(srun) = &mapping.source_run {
                     let dtype = mapping
                         .dependency_type
-                        .clone()
+                        .map(|d| d.to_string())
                         .unwrap_or_else(|| "hard".to_string());
                     inter_edges.insert((srun.0.clone(), unique_tgt.clone(), dtype));
                 }

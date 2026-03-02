@@ -75,6 +75,9 @@ let
     large_lab = pkgs.callPackage ./checks/lib/check-large-lab.nix { };
     buildcommand_size = pkgs.callPackage ./checks/lib/check-buildcommand-size.nix { };
     stage_env_size = pkgs.callPackage ./checks/lib/check-stage-env-size.nix { };
+    resource_hints = pkgs.callPackage ./checks/lib/check-resource-hints.nix {
+      inherit repx-lib;
+    };
   }
   // (import ./checks/lib/check-deps.nix { inherit pkgs; });
 

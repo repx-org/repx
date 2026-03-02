@@ -153,8 +153,16 @@ else
 
     externalInputMappings = scatterDrv.passthru.executables.main.inputs;
 
-    scatterResources = scatterDef.resources or null;
-    gatherResources = gatherDef.resources or null;
+    scatterResources = common.validateResourceHints {
+      inherit pkgs;
+      resources = scatterDef.resources or null;
+      contextStr = "scatter-gather stage '${groupPname}', scatter resources";
+    };
+    gatherResources = common.validateResourceHints {
+      inherit pkgs;
+      resources = gatherDef.resources or null;
+      contextStr = "scatter-gather stage '${groupPname}', gather resources";
+    };
 
     resolveStepInputMappings =
       stepName: stepDef:
@@ -260,7 +268,11 @@ else
       value = {
         inputs = resolveStepInputMappings stepName stepDef;
         outputs = stepDef.outputs or { };
-        resource_hints = stepDef.resources or null;
+        resource_hints = common.validateResourceHints {
+          inherit pkgs;
+          resources = stepDef.resources or null;
+          contextStr = "scatter-gather stage '${groupPname}', step '${stepName}' resources";
+        };
         deps = stepDepNames.${stepName};
       };
     }) stepsDefs;
@@ -326,11 +338,10 @@ else
     };
 
     dependencyDerivations = stageDef.dependencyDerivations or [ ];
-    depders = dependencyDerivations;
-    dependencyPaths = map toString depders;
-    dependencyManifestJson = builtins.toJSON (map builtins.unsafeDiscardStringContext dependencyPaths);
-    dependencyHash = builtins.hashString "sha256" (builtins.concatStringsSep ":" dependencyPaths);
-    paramsJson = builtins.toJSON paramInputs;
+    depMeta = common.mkDependencyMeta {
+      inherit dependencyDerivations paramInputs;
+    };
+    inherit (depMeta) dependencyManifestJson dependencyHash paramsJson;
 
     stepDrvsList = builtins.attrValues stepDrvs;
 

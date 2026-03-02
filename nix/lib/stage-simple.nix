@@ -48,11 +48,11 @@ let
     paramInputs = paramsDef;
   };
 
-  depders = dependencyDerivations;
-  dependencyPaths = map toString depders;
-  dependencyManifestJson = builtins.toJSON (map builtins.unsafeDiscardStringContext dependencyPaths);
-  dependencyHash = builtins.hashString "sha256" (builtins.concatStringsSep ":" dependencyPaths);
-  paramsJson = builtins.toJSON paramsDef;
+  depMeta = common.mkDependencyMeta {
+    inherit dependencyDerivations;
+    paramInputs = paramsDef;
+  };
+  inherit (depMeta) dependencyManifestJson dependencyHash paramsJson;
 
 in
 pkgs.stdenv.mkDerivation rec {

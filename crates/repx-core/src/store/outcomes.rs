@@ -78,7 +78,12 @@ pub fn merge_stores(
 
     let entries: Vec<_> = sources
         .iter()
-        .flat_map(|path| WalkDir::new(path).into_iter().filter_map(Result::ok))
+        .flat_map(|path| {
+            WalkDir::new(path)
+                .follow_links(false)
+                .into_iter()
+                .filter_map(Result::ok)
+        })
         .collect();
 
     let total_entries = entries.len() as u64;

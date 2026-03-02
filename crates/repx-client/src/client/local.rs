@@ -70,7 +70,7 @@ pub(crate) fn build_steps_json(
         .collect();
 
     if step_entries.is_empty() {
-        return Err(ClientError::Config(ConfigError::General(
+        return Err(ClientError::Config(ConfigError::InvalidState(
             "Scatter-gather job has no step executables (expected step-<name> keys)".into(),
         )));
     }
@@ -146,7 +146,7 @@ pub(crate) fn build_steps_json(
         .collect();
 
     if sink_candidates.len() != 1 {
-        return Err(ClientError::Config(ConfigError::General(format!(
+        return Err(ClientError::Config(ConfigError::InvalidState(format!(
             "Expected exactly one sink step but found {}: {:?}",
             sink_candidates.len(),
             sink_candidates
@@ -156,13 +156,13 @@ pub(crate) fn build_steps_json(
 
     let sink_key = format!("step-{}", sink_step);
     let sink_exe = job.executables.get(&sink_key).ok_or_else(|| {
-        ClientError::Config(ConfigError::General(format!(
+        ClientError::Config(ConfigError::InvalidState(format!(
             "Sink step executable '{}' not found in job",
             sink_key
         )))
     })?;
     let last_step_outputs_json = serde_json::to_string(&sink_exe.outputs).map_err(|e| {
-        ClientError::Config(ConfigError::General(format!(
+        ClientError::Config(ConfigError::SerializationError(format!(
             "Failed to serialize sink step outputs: {}",
             e
         )))
@@ -173,7 +173,7 @@ pub(crate) fn build_steps_json(
         "sink_step": sink_step
     });
     let steps_json = serde_json::to_string(&steps_metadata).map_err(|e| {
-        ClientError::Config(ConfigError::General(format!(
+        ClientError::Config(ConfigError::SerializationError(format!(
             "Failed to serialize steps metadata: {}",
             e
         )))
@@ -309,13 +309,13 @@ fn build_sg_common_args(
 ) -> std::result::Result<Vec<String>, ClientError> {
     let artifacts_base = target.artifacts_base_path();
     let scatter_exe = job.executables.get("scatter").ok_or_else(|| {
-        ClientError::Config(ConfigError::General(format!(
+        ClientError::Config(ConfigError::InvalidState(format!(
             "Scatter-gather job '{}' missing required 'scatter' executable",
             job_id
         )))
     })?;
     let gather_exe = job.executables.get("gather").ok_or_else(|| {
-        ClientError::Config(ConfigError::General(format!(
+        ClientError::Config(ConfigError::InvalidState(format!(
             "Scatter-gather job '{}' missing required 'gather' executable",
             job_id
         )))
@@ -385,7 +385,7 @@ fn build_simple_job_args(
     image_tag: Option<&str>,
 ) -> std::result::Result<Vec<String>, ClientError> {
     let main_exe = job.executables.get("main").ok_or_else(|| {
-        ClientError::Config(ConfigError::General(format!(
+        ClientError::Config(ConfigError::InvalidState(format!(
             "Job '{}' missing required 'main' executable",
             job_id
         )))
@@ -430,27 +430,17 @@ fn build_simple_job_args(
     Ok(args)
 }
 
-fn resolve_execution_type<'a>(
+fn resolve_local_execution_type(
     image_tag: Option<&str>,
-    options: &'a SubmitOptions,
-    target: &'a dyn Target,
-) -> &'a str {
-    if options.execution_type.is_none() && image_tag.is_none() {
-        return "native";
-    }
-    options.execution_type.as_deref().unwrap_or_else(|| {
-        let scheduler_config = match target.config().local.as_ref() {
-            Some(cfg) => cfg,
-            None => return "native",
-        };
-        target
-            .config()
-            .default_execution_type
-            .as_deref()
-            .filter(|&et| scheduler_config.execution_types.contains(&et.to_string()))
-            .or_else(|| scheduler_config.execution_types.first().map(|s| s.as_str()))
-            .unwrap_or("native")
-    })
+    options: &SubmitOptions,
+    target: &dyn Target,
+) -> String {
+    super::resolve_execution_type(
+        image_tag,
+        options.execution_type.as_deref(),
+        target.config(),
+        target.config().local.as_ref(),
+    )
 }
 
 fn resolve_image_tag<'a>(job_id: &JobId, client: &'a Client) -> Option<&'a str> {
@@ -504,13 +494,13 @@ fn expand_scatter_gather<'a>(
     let job_root = base_path.join(dirs::OUTPUTS).join(&job_id.0);
     let work_items_path = job_root.join("scatter").join("out").join("work_items.json");
     let work_items_str = target.read_remote_file(&work_items_path).map_err(|e| {
-        ClientError::Config(ConfigError::General(format!(
+        ClientError::Config(ConfigError::CommandFailed(format!(
             "Failed to read work_items.json after scatter for '{}': {}",
             job_id, e
         )))
     })?;
     let work_items: Vec<Value> = serde_json::from_str(&work_items_str).map_err(|e| {
-        ClientError::Config(ConfigError::General(format!(
+        ClientError::Config(ConfigError::SerializationError(format!(
             "Failed to parse work_items.json for '{}': {}",
             job_id, e
         )))
@@ -581,7 +571,7 @@ fn expand_scatter_gather<'a>(
     let sink_step = sinks
         .first()
         .ok_or_else(|| {
-            ClientError::Config(ConfigError::General(
+            ClientError::Config(ConfigError::InvalidState(
                 "No sink step found in scatter-gather step DAG".into(),
             ))
         })?
@@ -721,14 +711,14 @@ pub fn submit_local_batch_run(
         }
 
         let image_tag = resolve_image_tag(&job_id, client);
-        let execution_type = resolve_execution_type(image_tag, options, target.as_ref());
+        let execution_type = resolve_local_execution_type(image_tag, options, target.as_ref());
 
         let entrypoint_exe = job
             .executables
             .get("main")
             .or_else(|| job.executables.get("scatter"))
             .ok_or_else(|| {
-                ClientError::Config(ConfigError::General(format!(
+                ClientError::Config(ConfigError::InvalidState(format!(
                     "Job '{}' missing required executable 'main' or 'scatter'",
                     job_id
                 )))
@@ -760,7 +750,7 @@ pub fn submit_local_batch_run(
                 job,
                 target.as_ref(),
                 client,
-                execution_type,
+                &execution_type,
                 image_tag,
             )?;
             extra_args.extend_from_slice(&["--phase".to_string(), "scatter-only".to_string()]);
@@ -789,7 +779,7 @@ pub fn submit_local_batch_run(
                 job,
                 target.as_ref(),
                 client,
-                execution_type,
+                &execution_type,
                 image_tag,
             )?;
 
@@ -855,7 +845,7 @@ pub fn submit_local_batch_run(
                                 }
                             }
                         } else {
-                            return Err(ClientError::Config(ConfigError::General(format!(
+                            return Err(ClientError::Config(ConfigError::CommandFailed(format!(
                                 "Local run failed: {}",
                                 stderr
                             ))));
@@ -870,14 +860,17 @@ pub fn submit_local_batch_run(
                                 && unit_id == WorkUnitId::scatter(&u.job_id);
                             if is_scatter {
                                 let image_tag = resolve_image_tag(&u.job_id, client);
-                                let execution_type =
-                                    resolve_execution_type(image_tag, options, target.as_ref());
+                                let execution_type = resolve_local_execution_type(
+                                    image_tag,
+                                    options,
+                                    target.as_ref(),
+                                );
                                 let expanded = expand_scatter_gather(
                                     &u.job_id,
                                     u.job,
                                     target.as_ref(),
                                     client,
-                                    execution_type,
+                                    &execution_type,
                                     image_tag,
                                     &options.resources,
                                 )?;
@@ -901,7 +894,7 @@ pub fn submit_local_batch_run(
                     if options.continue_on_failure {
                         failed_units.push((unit_id, format!("Process panicked: {:?}", e)));
                     } else {
-                        return Err(ClientError::Config(ConfigError::General(format!(
+                        return Err(ClientError::Config(ConfigError::CommandFailed(format!(
                             "Process panicked: {:?}",
                             e
                         ))));
@@ -1041,7 +1034,7 @@ pub fn submit_local_batch_run(
         for (uid, stderr) in &failed_units {
             error_msg.push_str(&format!("\n=== {} ===\n{}\n", uid, stderr));
         }
-        return Err(ClientError::Config(ConfigError::General(error_msg)));
+        return Err(ClientError::Config(ConfigError::CommandFailed(error_msg)));
     }
 
     Ok(format!(

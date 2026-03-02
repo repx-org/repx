@@ -29,6 +29,18 @@ pub enum ConfigError {
     #[error("Invalid configuration: {0}")]
     General(String),
 
+    #[error("Command failed: {0}")]
+    CommandFailed(String),
+
+    #[error("Target setup failed: {0}")]
+    TargetSetupFailed(String),
+
+    #[error("Invalid state: {0}")]
+    InvalidState(String),
+
+    #[error("Serialization error: {0}")]
+    SerializationError(String),
+
     #[error("No result store is configured. Please add one to your config file or use the --stores flag.")]
     StoreNotConfigured,
 
@@ -55,6 +67,9 @@ pub enum ConfigError {
 
     #[error("Path traversal rejected: '{path}' escapes the expected base directory.")]
     PathTraversal { path: String },
+
+    #[error("Symlink '{link}' points outside the lab root (target: '{target}').")]
+    SymlinkEscape { link: PathBuf, target: PathBuf },
 }
 
 #[derive(Error, Debug)]

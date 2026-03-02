@@ -84,14 +84,20 @@ impl SshTarget {
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(ClientError::Config(ConfigError::General(format!(
+            return Err(ClientError::Config(ConfigError::CommandFailed(format!(
                 "scp failed for rsync binary to {}: {}",
                 self.address, stderr
             ))));
         }
 
         let chmod_cmd = RemoteCommand::new("chmod").arg("755").arg(&remote_dest_str);
-        let _ = self.run_command("sh", &["-c", &chmod_cmd.to_shell_string()]);
+        if let Err(e) = self.run_command("sh", &["-c", &chmod_cmd.to_shell_string()]) {
+            tracing::debug!(
+                "Failed to chmod rsync binary on remote '{}': {}",
+                self.address,
+                e
+            );
+        }
 
         Ok(remote_dest_str)
     }
@@ -147,7 +153,7 @@ impl CommandRunner for SshTarget {
             let stderr = String::from_utf8_lossy(&output.stderr);
             return Err(ClientError::TargetCommandFailed {
                 target: self.name.clone(),
-                source: ConfigError::General(format!(
+                source: ConfigError::CommandFailed(format!(
                     "Command '{}' failed on target '{}': {}",
                     remote_command_string, self.name, stderr
                 )),
@@ -208,7 +214,7 @@ impl SshTarget {
             return Ok(fallback);
         }
 
-        Err(ClientError::Config(ConfigError::General(format!(
+        Err(ClientError::Config(ConfigError::InvalidState(format!(
             "No lab manifest found for hash '{}'",
             lab_hash
         ))))
@@ -239,7 +245,7 @@ impl SshTarget {
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(ClientError::Config(ConfigError::General(format!(
+            return Err(ClientError::Config(ConfigError::CommandFailed(format!(
                 "rsync directory sync failed: {}",
                 stderr
             ))));
@@ -296,7 +302,13 @@ impl ArtifactSync for SshTarget {
             return Ok(());
         }
 
-        let _ = fs_err::create_dir_all(&self.local_temp_path);
+        if let Err(e) = fs_err::create_dir_all(&self.local_temp_path) {
+            tracing::debug!(
+                "Failed to create local temp dir '{}': {}",
+                self.local_temp_path.display(),
+                e
+            );
+        }
         let mut temp_file = tempfile::Builder::new()
             .prefix("repx-sync-list-")
             .tempfile_in(&self.local_temp_path)
@@ -334,7 +346,7 @@ impl ArtifactSync for SshTarget {
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(ClientError::Config(ConfigError::General(format!(
+            return Err(ClientError::Config(ConfigError::CommandFailed(format!(
                 "rsync batch sync failed: {}",
                 stderr
             ))));
@@ -342,9 +354,11 @@ impl ArtifactSync for SshTarget {
 
         if let Some(sender) = event_sender {
             for path in artifacts {
-                let _ = sender.send(super::super::ClientEvent::SyncingArtifactProgress {
-                    path: path.clone(),
-                });
+                if let Err(e) = sender
+                    .send(super::super::ClientEvent::SyncingArtifactProgress { path: path.clone() })
+                {
+                    tracing::debug!("Failed to send artifact sync progress event: {}", e);
+                }
             }
         }
 
@@ -375,7 +389,7 @@ impl ArtifactSync for SshTarget {
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(ClientError::Config(ConfigError::General(format!(
+            return Err(ClientError::Config(ConfigError::CommandFailed(format!(
                 "scp failed for {}: {}",
                 relative_path.display(),
                 stderr
@@ -390,7 +404,9 @@ impl ArtifactSync for SshTarget {
                     let chmod_cmd = RemoteCommand::new("chmod")
                         .arg("755")
                         .arg(&dest.to_string_lossy());
-                    let _ = self.run_command("sh", &["-c", &chmod_cmd.to_shell_string()]);
+                    if let Err(e) = self.run_command("sh", &["-c", &chmod_cmd.to_shell_string()]) {
+                        tracing::debug!("Failed to chmod file on remote: {}", e);
+                    }
                 }
             }
         }
@@ -562,7 +578,7 @@ impl ArtifactSync for SshTarget {
 
                 if !output.status.success() {
                     let stderr = String::from_utf8_lossy(&output.stderr);
-                    return Err(ClientError::Config(ConfigError::General(format!(
+                    return Err(ClientError::Config(ConfigError::CommandFailed(format!(
                         "rsync failed for layer {}: {}",
                         layer_name, stderr
                     ))));
@@ -685,11 +701,13 @@ impl FileOps for SshTarget {
         let mut stdin = child.stdin.take().expect("Failed to open stdin");
         let content_bytes = content.as_bytes().to_vec();
         std::thread::spawn(move || {
-            let _ = stdin.write_all(&content_bytes);
+            if let Err(e) = stdin.write_all(&content_bytes) {
+                tracing::debug!("Failed to write to remote stdin pipe: {}", e);
+            }
         });
 
         let output = child.wait_with_output().map_err(|e| {
-            ClientError::Config(ConfigError::General(format!(
+            ClientError::Config(ConfigError::CommandFailed(format!(
                 "Failed to wait for remote write: {}",
                 e
             )))
@@ -699,7 +717,7 @@ impl FileOps for SshTarget {
             let stderr = String::from_utf8_lossy(&output.stderr);
             return Err(ClientError::TargetCommandFailed {
                 target: self.name.clone(),
-                source: ConfigError::General(format!(
+                source: ConfigError::CommandFailed(format!(
                     "Failed to write '{}': {}",
                     path.display(),
                     stderr
@@ -725,7 +743,7 @@ impl JobRunner for SshTarget {
                 Ok(_) => Ok(()),
                 Err(e) => Err(ClientError::TargetCommandFailed {
                     target: self.name.clone(),
-                    source: ConfigError::General(format!(
+                    source: ConfigError::TargetSetupFailed(format!(
                         "Binary verification failed. The deployed binary failed to execute. Check architecture compatibility.\nError: {}",
                         e
                     )),
@@ -764,7 +782,7 @@ impl JobRunner for SshTarget {
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(ClientError::Config(ConfigError::General(format!(
+            return Err(ClientError::Config(ConfigError::CommandFailed(format!(
                 "scp failed for repx binary to {}: {}",
                 self.address, stderr
             ))));
@@ -795,7 +813,7 @@ impl JobRunner for SshTarget {
         logging::log_and_print_command(&cmd);
 
         cmd.spawn().map_err(|e| {
-            ClientError::Config(ConfigError::General(format!(
+            ClientError::Config(ConfigError::CommandFailed(format!(
                 "Failed to spawn SSH process: {}",
                 e
             )))

@@ -78,7 +78,13 @@ pub fn submit_slurm_batch_run(
     let client_temp_dir = local_target.base_path().join("repx").join("temp");
     let local_batch_dir = client_temp_dir.join("slurm_batch");
     if local_batch_dir.exists() {
-        let _ = fs_err::remove_dir_all(&local_batch_dir);
+        if let Err(e) = fs_err::remove_dir_all(&local_batch_dir) {
+            tracing::debug!(
+                "Failed to remove old batch dir '{}': {}",
+                local_batch_dir.display(),
+                e
+            );
+        }
     }
     fs_err::create_dir_all(&local_batch_dir)
         .map_err(|e| ClientError::Config(ConfigError::Io(e)))?;
@@ -98,27 +104,16 @@ pub fn submit_slurm_batch_run(
             .and_then(|p| p.file_stem())
             .and_then(|s| s.to_str());
 
-        let execution_type = if options.execution_type.is_none() && image_tag.is_none() {
-            "native"
-        } else {
-            options.execution_type.as_deref().unwrap_or_else(|| {
-                let scheduler_config = match target.config().slurm.as_ref() {
-                    Some(cfg) => cfg,
-                    None => return "native",
-                };
-                target
-                    .config()
-                    .default_execution_type
-                    .as_deref()
-                    .filter(|&et| scheduler_config.execution_types.contains(&et.to_string()))
-                    .or_else(|| scheduler_config.execution_types.first().map(|s| s.as_str()))
-                    .unwrap_or("native")
-            })
-        };
+        let execution_type = super::resolve_execution_type(
+            image_tag,
+            options.execution_type.as_deref(),
+            target.config(),
+            target.config().slurm.as_ref(),
+        );
         let mut repx_args = format!(
             "--job-id {} --runtime {} {} --base-path {} --host-tools-dir {}",
             shell_quote(&job_id.0),
-            shell_quote(execution_type),
+            shell_quote(&execution_type),
             image_tag
                 .map(|t| format!("--image-tag {}", shell_quote(t)))
                 .unwrap_or_default(),
@@ -147,12 +142,12 @@ pub fn submit_slurm_batch_run(
             == repx_core::model::StageType::ScatterGather
         {
             let scatter_exe = job.executables.get("scatter").ok_or_else(|| {
-                ClientError::Config(ConfigError::General(
+                ClientError::Config(ConfigError::InvalidState(
                     "Scatter-gather job missing 'scatter' executable".into(),
                 ))
             })?;
             let gather_exe = job.executables.get("gather").ok_or_else(|| {
-                ClientError::Config(ConfigError::General(
+                ClientError::Config(ConfigError::InvalidState(
                     "Scatter-gather job missing 'gather' executable".into(),
                 ))
             })?;
@@ -183,7 +178,7 @@ pub fn submit_slurm_batch_run(
                     })
                     .collect();
                 sink_candidates.first().cloned().cloned().ok_or_else(|| {
-                    ClientError::Config(ConfigError::General(format!(
+                    ClientError::Config(ConfigError::InvalidState(format!(
                         "Scatter-gather job '{}' has no sink step in its step DAG",
                         job_id
                     )))
@@ -238,7 +233,7 @@ pub fn submit_slurm_batch_run(
             (command, main_directives)
         } else {
             let main_exe = job.executables.get("main").ok_or_else(|| {
-                ClientError::Config(ConfigError::General(format!(
+                ClientError::Config(ConfigError::InvalidState(format!(
                     "Job '{}' missing required executable 'main'",
                     job_id
                 )))

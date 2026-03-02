@@ -12,6 +12,59 @@ use std::path::{Path, PathBuf};
 
 const EXPECTED_REPX_VERSION: &str = env!("CARGO_PKG_VERSION");
 
+fn reject_external_symlink(path: &Path, lab_root: &Path) -> Result<(), ConfigError> {
+    let meta = fs::symlink_metadata(path).map_err(|e| {
+        ConfigError::Io(std::io::Error::new(
+            e.kind(),
+            format!(
+                "Failed to read symlink metadata for '{}': {}",
+                path.display(),
+                e
+            ),
+        ))
+    })?;
+    if meta.file_type().is_symlink() {
+        let target = fs::read_link(path).map_err(|e| {
+            ConfigError::Io(std::io::Error::new(
+                e.kind(),
+                format!(
+                    "Failed to read symlink target for '{}': {}",
+                    path.display(),
+                    e
+                ),
+            ))
+        })?;
+        let resolved = if target.is_absolute() {
+            target.clone()
+        } else {
+            path.parent().unwrap_or(Path::new(".")).join(&target)
+        };
+        let canonical_target = resolved
+            .canonicalize()
+            .map_err(|_| ConfigError::SymlinkEscape {
+                link: path.to_path_buf(),
+                target: target.clone(),
+            })?;
+        let canonical_root = lab_root.canonicalize().map_err(|e| {
+            ConfigError::Io(std::io::Error::new(
+                e.kind(),
+                format!(
+                    "Failed to canonicalize lab root '{}': {}",
+                    lab_root.display(),
+                    e
+                ),
+            ))
+        })?;
+        if !canonical_target.starts_with(&canonical_root) {
+            return Err(ConfigError::SymlinkEscape {
+                link: path.to_path_buf(),
+                target: canonical_target,
+            });
+        }
+    }
+    Ok(())
+}
+
 fn verify_file_integrity(lab_path: &Path, files: &[FileEntry]) -> Result<(), ConfigError> {
     tracing::debug!(
         "Verifying integrity of {} files in parallel...",
@@ -127,6 +180,7 @@ pub fn load_from_path(initial_path: &Path) -> Result<Lab, ConfigError> {
     };
 
     tracing::debug!("Found lab manifest at: '{}'", manifest_path.display());
+    reject_external_symlink(&manifest_path, &lab_path)?;
 
     let manifest_content = fs::read_to_string(&manifest_path)?;
     let manifest: LabManifest = serde_json::from_str(&manifest_content)?;
@@ -149,6 +203,7 @@ pub fn load_from_path(initial_path: &Path) -> Result<Lab, ConfigError> {
         )));
     }
 
+    reject_external_symlink(&root_metadata_path, &lab_path)?;
     tracing::debug!(
         "Loading root metadata from '{}'",
         root_metadata_path.display()
@@ -231,6 +286,7 @@ pub fn load_from_path(initial_path: &Path) -> Result<Lab, ConfigError> {
             run_metadata_path.display()
         );
 
+        reject_external_symlink(&run_metadata_path, &lab_path)?;
         let run_meta_content = fs::read_to_string(&run_metadata_path).map_err(|e| {
             ConfigError::Io(std::io::Error::new(
                 e.kind(),
@@ -288,6 +344,7 @@ pub fn load_from_path(initial_path: &Path) -> Result<Lab, ConfigError> {
                     image_full_path.display()
                 )));
             }
+            reject_external_symlink(&image_full_path, &lab_path)?;
         }
     }
 
@@ -300,6 +357,7 @@ pub fn load_from_path(initial_path: &Path) -> Result<Lab, ConfigError> {
                 job_pkg_path.display()
             )));
         }
+        reject_external_symlink(&job_pkg_path, &lab_path)?;
     }
 
     tracing::debug!("Lab validation successful.");
