@@ -618,6 +618,12 @@ impl ArtifactSync for SshTarget {
 }
 
 impl FileOps for SshTarget {
+    fn read_remote_file(&self, path: &Path) -> Result<String> {
+        let cat_bin = self.remote_tool("cat");
+        let cmd = RemoteCommand::new(&cat_bin).arg(&path.to_string_lossy());
+        self.run_command("sh", &["-c", &cmd.to_shell_string()])
+    }
+
     fn read_remote_file_tail(&self, path: &Path, line_count: u32) -> Result<Vec<String>> {
         let quoted_path = path.to_string_lossy();
         let tail_bin = self.remote_tool("tail");

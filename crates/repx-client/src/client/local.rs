@@ -4,10 +4,12 @@ use crate::resources;
 use crate::targets::Target;
 use num_cpus;
 use repx_core::{
+    constants::dirs,
     engine,
     errors::ConfigError,
     model::{Job, JobId},
 };
+use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::Arc;
@@ -170,7 +172,7 @@ struct ResourceTracker {
     total_cpus: usize,
     used_mem_bytes: u64,
     used_cpus: usize,
-    in_flight: HashMap<JobId, (u64, u32)>,
+    in_flight: HashMap<WorkUnitId, (u64, u32)>,
 }
 
 impl ResourceTracker {
@@ -194,12 +196,12 @@ impl ResourceTracker {
         }
     }
 
-    fn can_fit(&self, job_id: &JobId, mem_bytes: u64, cpus: u32) -> bool {
+    fn can_fit(&self, id: &WorkUnitId, mem_bytes: u64, cpus: u32) -> bool {
         if self.in_flight.is_empty() {
             if mem_bytes > self.total_mem_bytes || cpus as usize > self.total_cpus {
                 tracing::warn!(
-                    "Job '{}' requests {} RAM and {} CPUs, which exceeds system limits ({} RAM, {} CPUs). Running anyway.",
-                    job_id.short_id(),
+                    "Unit '{}' requests {} RAM and {} CPUs, which exceeds system limits ({} RAM, {} CPUs). Running anyway.",
+                    id.short_id(),
                     format_bytes(mem_bytes),
                     cpus,
                     format_bytes(self.total_mem_bytes),
@@ -214,18 +216,58 @@ impl ResourceTracker {
         mem_fits && cpus_fit
     }
 
-    fn reserve(&mut self, job_id: JobId, mem_bytes: u64, cpus: u32) {
+    fn reserve(&mut self, id: WorkUnitId, mem_bytes: u64, cpus: u32) {
         self.used_mem_bytes += mem_bytes;
         self.used_cpus += cpus as usize;
-        self.in_flight.insert(job_id, (mem_bytes, cpus));
+        self.in_flight.insert(id, (mem_bytes, cpus));
     }
 
-    fn release(&mut self, job_id: &JobId) {
-        if let Some((mem, cpus)) = self.in_flight.remove(job_id) {
+    fn release(&mut self, id: &WorkUnitId) {
+        if let Some((mem, cpus)) = self.in_flight.remove(id) {
             self.used_mem_bytes = self.used_mem_bytes.saturating_sub(mem);
             self.used_cpus = self.used_cpus.saturating_sub(cpus as usize);
         }
     }
+}
+
+#[derive(Debug, Clone, Hash, Eq, PartialEq, Ord, PartialOrd)]
+struct WorkUnitId(String);
+
+impl WorkUnitId {
+    fn from_job(id: &JobId) -> Self {
+        Self(id.0.clone())
+    }
+    fn scatter(job_id: &JobId) -> Self {
+        Self(format!("{}::scatter", job_id.0))
+    }
+    fn step(job_id: &JobId, branch: usize, step: &str) -> Self {
+        Self(format!("{}::b{}::s-{}", job_id.0, branch, step))
+    }
+    fn gather(job_id: &JobId) -> Self {
+        Self(format!("{}::gather", job_id.0))
+    }
+    fn short_id(&self) -> &str {
+        if self.0.len() > 40 {
+            &self.0[..40]
+        } else {
+            &self.0
+        }
+    }
+}
+
+impl std::fmt::Display for WorkUnitId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+struct WorkUnit<'a> {
+    deps: Vec<WorkUnitId>,
+    mem_bytes: u64,
+    cpus: u32,
+    job: &'a Job,
+    job_id: JobId,
+    extra_args: Vec<String>,
 }
 
 fn format_bytes(bytes: u64) -> String {
@@ -242,6 +284,339 @@ fn format_bytes(bytes: u64) -> String {
     }
 }
 
+fn build_sg_common_args(
+    job_id: &JobId,
+    job: &Job,
+    target: &dyn Target,
+    client: &Client,
+    execution_type: &str,
+    image_tag: Option<&str>,
+) -> std::result::Result<Vec<String>, ClientError> {
+    let artifacts_base = target.artifacts_base_path();
+    let scatter_exe = job.executables.get("scatter").unwrap();
+    let gather_exe = job.executables.get("gather").unwrap();
+    let job_package_path = artifacts_base.join(format!("jobs/{}", job_id));
+    let scatter_exe_path = artifacts_base.join(&scatter_exe.path);
+    let gather_exe_path = artifacts_base.join(&gather_exe.path);
+
+    let (steps_json, last_step_outputs_json) = build_steps_json(job, &artifacts_base)
+        .map_err(|e| ClientError::Config(ConfigError::General(e)))?;
+
+    let mut args = vec![
+        "internal-scatter-gather".to_string(),
+        "--job-id".to_string(),
+        job_id.0.clone(),
+        "--runtime".to_string(),
+        execution_type.to_string(),
+    ];
+    if let Some(tag) = image_tag {
+        args.push("--image-tag".to_string());
+        args.push(tag.to_string());
+    }
+    args.extend_from_slice(&[
+        "--base-path".to_string(),
+        target.base_path().to_string_lossy().to_string(),
+    ]);
+    if let Some(local_path) = &target.config().node_local_path {
+        args.push("--node-local-path".to_string());
+        args.push(local_path.to_string_lossy().to_string());
+    }
+    args.extend_from_slice(&[
+        "--host-tools-dir".to_string(),
+        client.lab.host_tools_dir_name.clone(),
+    ]);
+    if target.config().mount_host_paths {
+        args.push("--mount-host-paths".to_string());
+    } else {
+        for path in &target.config().mount_paths {
+            args.push("--mount-paths".to_string());
+            args.push(path.clone());
+        }
+    }
+    args.extend_from_slice(&[
+        "--job-package-path".to_string(),
+        job_package_path.to_string_lossy().to_string(),
+        "--scatter-exe-path".to_string(),
+        scatter_exe_path.to_string_lossy().to_string(),
+        "--gather-exe-path".to_string(),
+        gather_exe_path.to_string_lossy().to_string(),
+        "--steps-json".to_string(),
+        steps_json,
+        "--last-step-outputs-json".to_string(),
+        last_step_outputs_json,
+        "--scheduler".to_string(),
+        "local".to_string(),
+        "--step-sbatch-opts".to_string(),
+        String::new(),
+    ]);
+    Ok(args)
+}
+
+fn build_simple_job_args(
+    job_id: &JobId,
+    job: &Job,
+    target: &dyn Target,
+    client: &Client,
+    execution_type: &str,
+    image_tag: Option<&str>,
+) -> Vec<String> {
+    let main_exe = job.executables.get("main").unwrap();
+    let executable_path = target.artifacts_base_path().join(&main_exe.path);
+
+    let mut args = vec![
+        "internal-execute".to_string(),
+        "--job-id".to_string(),
+        job_id.0.clone(),
+        "--runtime".to_string(),
+        execution_type.to_string(),
+    ];
+    if let Some(tag) = image_tag {
+        args.push("--image-tag".to_string());
+        args.push(tag.to_string());
+    }
+    args.extend_from_slice(&[
+        "--base-path".to_string(),
+        target.base_path().to_string_lossy().to_string(),
+    ]);
+    if let Some(local_path) = &target.config().node_local_path {
+        args.push("--node-local-path".to_string());
+        args.push(local_path.to_string_lossy().to_string());
+    }
+    args.extend_from_slice(&[
+        "--host-tools-dir".to_string(),
+        client.lab.host_tools_dir_name.clone(),
+    ]);
+    if target.config().mount_host_paths {
+        args.push("--mount-host-paths".to_string());
+    } else {
+        for path in &target.config().mount_paths {
+            args.push("--mount-paths".to_string());
+            args.push(path.clone());
+        }
+    }
+    args.extend_from_slice(&[
+        "--executable-path".to_string(),
+        executable_path.to_string_lossy().to_string(),
+    ]);
+    args
+}
+
+fn resolve_execution_type<'a>(
+    image_tag: Option<&str>,
+    options: &'a SubmitOptions,
+    target: &'a dyn Target,
+) -> &'a str {
+    if options.execution_type.is_none() && image_tag.is_none() {
+        return "native";
+    }
+    options.execution_type.as_deref().unwrap_or_else(|| {
+        let scheduler_config = target.config().local.as_ref().unwrap();
+        target
+            .config()
+            .default_execution_type
+            .as_deref()
+            .filter(|&et| scheduler_config.execution_types.contains(&et.to_string()))
+            .or_else(|| scheduler_config.execution_types.first().map(|s| s.as_str()))
+            .unwrap_or("native")
+    })
+}
+
+fn resolve_image_tag<'a>(job_id: &JobId, client: &'a Client) -> Option<&'a str> {
+    client
+        .lab
+        .runs
+        .values()
+        .find(|r| r.jobs.contains(job_id))
+        .and_then(|r| r.image.as_deref())
+        .and_then(|p| p.file_stem())
+        .and_then(|s| s.to_str())
+}
+
+fn get_step_resources(
+    job: &Job,
+    step_exe_key: &str,
+    resources_config: &Option<repx_core::config::Resources>,
+    job_id: &JobId,
+) -> (u64, u32) {
+    let step_exe = job.executables.get(step_exe_key);
+    let worker_hints = step_exe.and_then(|e| e.resource_hints.as_ref());
+    let orchestrator_hints = job.resource_hints.as_ref();
+
+    let directives = resources::resolve_worker_resources(
+        job_id,
+        "",
+        resources_config,
+        orchestrator_hints,
+        worker_hints,
+    );
+
+    let mem = directives
+        .mem
+        .as_ref()
+        .and_then(|m| parse_mem_to_bytes(m))
+        .unwrap_or(DEFAULT_JOB_MEM_BYTES);
+    let cpus = directives.cpus_per_task.unwrap_or(DEFAULT_JOB_CPUS);
+    (mem, cpus)
+}
+
+fn expand_scatter_gather<'a>(
+    job_id: &JobId,
+    job: &'a Job,
+    target: &dyn Target,
+    client: &Client,
+    execution_type: &str,
+    image_tag: Option<&str>,
+    resources_config: &Option<repx_core::config::Resources>,
+) -> std::result::Result<Vec<(WorkUnitId, WorkUnit<'a>)>, ClientError> {
+    let base_path = target.base_path();
+    let job_root = base_path.join(dirs::OUTPUTS).join(&job_id.0);
+    let work_items_path = job_root.join("scatter").join("out").join("work_items.json");
+    let work_items_str = target.read_remote_file(&work_items_path).map_err(|e| {
+        ClientError::Config(ConfigError::General(format!(
+            "Failed to read work_items.json after scatter for '{}': {}",
+            job_id, e
+        )))
+    })?;
+    let work_items: Vec<Value> = serde_json::from_str(&work_items_str).map_err(|e| {
+        ClientError::Config(ConfigError::General(format!(
+            "Failed to parse work_items.json for '{}': {}",
+            job_id, e
+        )))
+    })?;
+
+    let step_exes: Vec<(String, &repx_core::model::Executable)> = job
+        .executables
+        .iter()
+        .filter(|(k, _)| k.starts_with("step-"))
+        .map(|(k, v)| (k.strip_prefix("step-").unwrap().to_string(), v))
+        .collect();
+
+    let mut in_degree: HashMap<&str, usize> = HashMap::new();
+    let mut dependents: HashMap<&str, Vec<&str>> = HashMap::new();
+    let step_names_owned: Vec<String> = step_exes.iter().map(|(n, _)| n.clone()).collect();
+    for (name, exe) in &step_exes {
+        in_degree.entry(name.as_str()).or_insert(0);
+        for dep in &exe.deps {
+            *in_degree.entry(name.as_str()).or_insert(0) += 1;
+            dependents
+                .entry(dep.as_str())
+                .or_default()
+                .push(name.as_str());
+        }
+    }
+    let mut queue: Vec<&str> = in_degree
+        .iter()
+        .filter(|(_, &d)| d == 0)
+        .map(|(&n, _)| n)
+        .collect();
+    queue.sort();
+    let mut topo_order = Vec::new();
+    while let Some(name) = queue.pop() {
+        topo_order.push(name.to_string());
+        if let Some(deps) = dependents.get(name) {
+            let mut newly_ready: Vec<&str> = Vec::new();
+            for &dep_name in deps {
+                let deg = in_degree.get_mut(dep_name).unwrap();
+                *deg -= 1;
+                if *deg == 0 {
+                    newly_ready.push(dep_name);
+                }
+            }
+            newly_ready.sort();
+            newly_ready.reverse();
+            queue.extend(newly_ready);
+        }
+    }
+
+    let all_deps_set: HashSet<&str> = step_exes
+        .iter()
+        .flat_map(|(_, exe)| exe.deps.iter().map(|d| d.as_str()))
+        .collect();
+    let sinks: Vec<&str> = step_names_owned
+        .iter()
+        .map(|s| s.as_str())
+        .filter(|n| !all_deps_set.contains(n))
+        .collect();
+    let sink_step = sinks
+        .first()
+        .ok_or_else(|| {
+            ClientError::Config(ConfigError::General(
+                "No sink step found in scatter-gather step DAG".into(),
+            ))
+        })?
+        .to_string();
+
+    let scatter_id = WorkUnitId::scatter(job_id);
+
+    let sg_common = build_sg_common_args(job_id, job, target, client, execution_type, image_tag)?;
+
+    let mut units = Vec::new();
+
+    for branch_idx in 0..work_items.len() {
+        for step_name in &topo_order {
+            let step_id = WorkUnitId::step(job_id, branch_idx, step_name);
+            let exe_key = format!("step-{}", step_name);
+
+            let step_exe = job.executables.get(&exe_key);
+            let intra_deps: Vec<String> = step_exe.map(|e| e.deps.clone()).unwrap_or_default();
+            let mut deps: Vec<WorkUnitId> = intra_deps
+                .iter()
+                .map(|dep| WorkUnitId::step(job_id, branch_idx, dep))
+                .collect();
+            if deps.is_empty() {
+                deps.push(scatter_id.clone());
+            }
+
+            let (mem, cpus) = get_step_resources(job, &exe_key, resources_config, job_id);
+
+            let mut extra_args = sg_common.clone();
+            extra_args.extend_from_slice(&[
+                "--phase".to_string(),
+                "step".to_string(),
+                "--branch-idx".to_string(),
+                branch_idx.to_string(),
+                "--step-name".to_string(),
+                step_name.clone(),
+            ]);
+
+            units.push((
+                step_id,
+                WorkUnit {
+                    deps,
+                    mem_bytes: mem,
+                    cpus,
+                    job,
+                    job_id: job_id.clone(),
+                    extra_args,
+                },
+            ));
+        }
+    }
+
+    let gather_deps: Vec<WorkUnitId> = (0..work_items.len())
+        .map(|b| WorkUnitId::step(job_id, b, &sink_step))
+        .collect();
+    let gather_mem = get_job_mem_bytes(job, resources_config);
+    let gather_cpus = get_job_cpus(job, resources_config);
+
+    let mut gather_extra = sg_common;
+    gather_extra.extend_from_slice(&["--phase".to_string(), "gather".to_string()]);
+
+    units.push((
+        WorkUnitId::gather(job_id),
+        WorkUnit {
+            deps: gather_deps,
+            mem_bytes: gather_mem,
+            cpus: gather_cpus,
+            job,
+            job_id: job_id.clone(),
+            extra_args: gather_extra,
+        },
+    ));
+
+    Ok(units)
+}
+
 pub fn submit_local_batch_run(
     client: &Client,
     jobs_in_batch: HashMap<JobId, &Job>,
@@ -251,9 +626,8 @@ pub fn submit_local_batch_run(
     options: &SubmitOptions,
     send: impl Fn(ClientEvent),
 ) -> Result<String> {
-    send(ClientEvent::SubmittingJobs {
-        total: jobs_in_batch.len(),
-    });
+    let total_jobs = jobs_in_batch.len();
+    send(ClientEvent::SubmittingJobs { total: total_jobs });
 
     let all_deps: HashSet<JobId> = jobs_in_batch
         .values()
@@ -269,7 +643,7 @@ pub fn submit_local_batch_run(
         Some(repx_core::model::SchedulerType::Local),
     )?;
     let all_job_statuses = engine::determine_job_statuses(&client.lab, &raw_statuses);
-    let mut completed_jobs: HashSet<JobId> = all_job_statuses
+    let completed_job_ids: HashSet<JobId> = all_job_statuses
         .into_iter()
         .filter(|(id, status)| {
             matches!(status, repx_core::engine::JobStatus::Succeeded { .. })
@@ -278,19 +652,139 @@ pub fn submit_local_batch_run(
         .map(|(id, _)| id)
         .collect();
 
-    let mut jobs_left: HashSet<JobId> = jobs_in_batch.keys().cloned().collect();
-    let total_to_submit = jobs_in_batch.len();
-    let mut submitted_count = 0;
-    let mut active_handles: Vec<(
-        JobId,
-        std::thread::JoinHandle<std::io::Result<std::process::Output>>,
-    )> = vec![];
+    let mut completion_map: HashMap<JobId, WorkUnitId> = HashMap::new();
+
+    let mut work_units: HashMap<WorkUnitId, WorkUnit> = HashMap::new();
+    let mut units_left: HashSet<WorkUnitId> = HashSet::new();
+    let mut completed: HashSet<WorkUnitId> = HashSet::new();
     let concurrency = options.num_jobs.unwrap_or_else(num_cpus::get);
 
-    let mut resource_tracker = ResourceTracker::new();
+    for (job_id_ref, &job) in &jobs_in_batch {
+        let job_id = job_id_ref.clone();
 
-    let mut failed_jobs: Vec<(JobId, String)> = vec![];
-    let mut blocked_jobs: HashSet<JobId> = HashSet::new();
+        if job.stage_type == repx_core::model::StageType::Worker
+            || job.stage_type == repx_core::model::StageType::Gather
+        {
+            continue;
+        }
+
+        if completed_job_ids.contains(&job_id) {
+            let unit_id = if job.stage_type == repx_core::model::StageType::ScatterGather {
+                WorkUnitId::gather(&job_id)
+            } else {
+                WorkUnitId::from_job(&job_id)
+            };
+            completed.insert(unit_id.clone());
+            completion_map.insert(job_id, unit_id);
+            continue;
+        }
+
+        let image_tag = resolve_image_tag(&job_id, client);
+        let execution_type = resolve_execution_type(image_tag, options, target.as_ref());
+
+        let entrypoint_exe = job
+            .executables
+            .get("main")
+            .or_else(|| job.executables.get("scatter"))
+            .unwrap_or_else(|| {
+                panic!(
+                    "Job '{}' missing required executable 'main' or 'scatter'",
+                    job_id
+                )
+            });
+        let job_deps: Vec<WorkUnitId> = entrypoint_exe
+            .inputs
+            .iter()
+            .filter_map(|m| m.job_id.as_ref())
+            .map(|dep_job_id| {
+                if let Some(dep_job) = jobs_in_batch.get(dep_job_id) {
+                    if dep_job.stage_type == repx_core::model::StageType::ScatterGather {
+                        WorkUnitId::gather(dep_job_id)
+                    } else {
+                        WorkUnitId::from_job(dep_job_id)
+                    }
+                } else {
+                    WorkUnitId::from_job(dep_job_id)
+                }
+            })
+            .collect();
+
+        if job.stage_type == repx_core::model::StageType::ScatterGather {
+            let scatter_id = WorkUnitId::scatter(&job_id);
+            let mem = get_job_mem_bytes(job, &options.resources);
+            let cpus = get_job_cpus(job, &options.resources);
+
+            let mut extra_args = build_sg_common_args(
+                &job_id,
+                job,
+                target.as_ref(),
+                client,
+                execution_type,
+                image_tag,
+            )?;
+            extra_args.extend_from_slice(&["--phase".to_string(), "scatter-only".to_string()]);
+
+            work_units.insert(
+                scatter_id.clone(),
+                WorkUnit {
+                    deps: job_deps,
+                    mem_bytes: mem,
+                    cpus,
+                    job,
+                    job_id: job_id.clone(),
+                    extra_args,
+                },
+            );
+            units_left.insert(scatter_id);
+
+            completion_map.insert(job_id, WorkUnitId::gather(job_id_ref));
+        } else {
+            let unit_id = WorkUnitId::from_job(&job_id);
+            let mem = get_job_mem_bytes(job, &options.resources);
+            let cpus = get_job_cpus(job, &options.resources);
+
+            let extra_args = build_simple_job_args(
+                &job_id,
+                job,
+                target.as_ref(),
+                client,
+                execution_type,
+                image_tag,
+            );
+
+            work_units.insert(
+                unit_id.clone(),
+                WorkUnit {
+                    deps: job_deps,
+                    mem_bytes: mem,
+                    cpus,
+                    job,
+                    job_id: job_id.clone(),
+                    extra_args,
+                },
+            );
+            units_left.insert(unit_id.clone());
+
+            completion_map.insert(job_id, unit_id);
+        }
+    }
+
+    for dep_id in &completed_job_ids {
+        if !completion_map.contains_key(dep_id) {
+            let unit_id = WorkUnitId::from_job(dep_id);
+            completed.insert(unit_id.clone());
+            completion_map.insert(dep_id.clone(), unit_id);
+        }
+    }
+
+    let mut resource_tracker = ResourceTracker::new();
+    let mut active_handles: Vec<(
+        WorkUnitId,
+        std::thread::JoinHandle<std::io::Result<std::process::Output>>,
+    )> = vec![];
+    let mut failed_units: Vec<(WorkUnitId, String)> = vec![];
+    let mut blocked_units: HashSet<WorkUnitId> = HashSet::new();
+    let mut submitted_count: usize = 0;
 
     loop {
         let mut finished_indices = Vec::new();
@@ -299,63 +793,75 @@ pub fn submit_local_batch_run(
                 finished_indices.push(i);
             }
         }
-        let finished_indices_nonempty = !finished_indices.is_empty();
+        let any_finished = !finished_indices.is_empty();
 
         for i in finished_indices.into_iter().rev() {
-            let (job_id, handle) = active_handles.remove(i);
+            let (unit_id, handle) = active_handles.remove(i);
+            resource_tracker.release(&unit_id);
 
-            resource_tracker.release(&job_id);
-
-            let join_res = handle.join();
-            match join_res {
+            match handle.join() {
                 Ok(output_res) => {
                     let output = output_res.map_err(|e| ClientError::Config(ConfigError::Io(e)))?;
-
                     if !output.status.success() {
                         let stderr = String::from_utf8_lossy(&output.stderr).to_string();
                         if options.continue_on_failure {
-                            failed_jobs.push((job_id.clone(), stderr));
-                            send(ClientEvent::JobFailed {
-                                job_id: job_id.clone(),
-                            });
-                            for (candidate_id, candidate_job) in &jobs_in_batch {
-                                if jobs_left.contains(candidate_id) {
-                                    let depends_on_failed =
-                                        candidate_job.executables.values().any(|exe| {
-                                            exe.inputs
-                                                .iter()
-                                                .filter_map(|m| m.job_id.as_ref())
-                                                .any(|dep_id| dep_id == &job_id)
-                                        });
-                                    if depends_on_failed {
-                                        blocked_jobs.insert(candidate_id.clone());
-                                        send(ClientEvent::JobBlocked {
-                                            job_id: candidate_id.clone(),
-                                            blocked_by: job_id.clone(),
-                                        });
-                                    }
+                            failed_units.push((unit_id.clone(), stderr));
+                            for (candidate_id, candidate) in &work_units {
+                                if units_left.contains(candidate_id)
+                                    && candidate.deps.contains(&unit_id)
+                                {
+                                    blocked_units.insert(candidate_id.clone());
                                 }
                             }
                         } else {
                             return Err(ClientError::Config(ConfigError::General(format!(
-                                "Local run script failed: {}",
+                                "Local run failed: {}",
                                 stderr
                             ))));
                         }
                     } else {
-                        completed_jobs.insert(job_id.clone());
-                        send(ClientEvent::JobSucceeded {
-                            job_id: job_id.clone(),
-                        });
+                        completed.insert(unit_id.clone());
+
+                        let unit = work_units.get(&unit_id);
+                        if let Some(u) = unit {
+                            let is_scatter = u.job.stage_type
+                                == repx_core::model::StageType::ScatterGather
+                                && unit_id == WorkUnitId::scatter(&u.job_id);
+                            if is_scatter {
+                                let image_tag = resolve_image_tag(&u.job_id, client);
+                                let execution_type =
+                                    resolve_execution_type(image_tag, options, target.as_ref());
+                                let expanded = expand_scatter_gather(
+                                    &u.job_id,
+                                    u.job,
+                                    target.as_ref(),
+                                    client,
+                                    execution_type,
+                                    image_tag,
+                                    &options.resources,
+                                )?;
+                                for (new_id, new_unit) in expanded {
+                                    units_left.insert(new_id.clone());
+                                    work_units.insert(new_id, new_unit);
+                                }
+                            }
+                        }
+
+                        for (jid, comp_uid) in &completion_map {
+                            if comp_uid == &unit_id && jobs_in_batch.contains_key(jid) {
+                                send(ClientEvent::JobSucceeded {
+                                    job_id: jid.clone(),
+                                });
+                            }
+                        }
                     }
                 }
                 Err(e) => {
                     if options.continue_on_failure {
-                        failed_jobs
-                            .push((job_id, format!("Failed to launch local process: {:?}", e)));
+                        failed_units.push((unit_id, format!("Process panicked: {:?}", e)));
                     } else {
                         return Err(ClientError::Config(ConfigError::General(format!(
-                            "Failed to launch local process: {:?}",
+                            "Process panicked: {:?}",
                             e
                         ))));
                     }
@@ -363,242 +869,104 @@ pub fn submit_local_batch_run(
             }
         }
 
-        if jobs_left.is_empty() && active_handles.is_empty() {
+        if units_left.is_empty() && active_handles.is_empty() {
             break;
         }
 
-        let slots_available = concurrency.saturating_sub(active_handles.len());
-
-        for blocked_id in &blocked_jobs {
-            jobs_left.remove(blocked_id);
+        for blocked_id in &blocked_units {
+            units_left.remove(blocked_id);
         }
+        blocked_units.clear();
 
-        let succeeded_count = completed_jobs
-            .iter()
-            .filter(|id| jobs_in_batch.contains_key(id))
-            .count();
-        let failed_count = failed_jobs.len();
-        let running_count = active_handles.len();
-        let blocked_count =
-            total_to_submit - succeeded_count - failed_count - running_count - jobs_left.len();
-        let pending_count = jobs_left.len();
+        if any_finished {
+            let succeeded_count = completed_job_ids
+                .iter()
+                .chain(
+                    completion_map
+                        .iter()
+                        .filter(|(_, uid)| completed.contains(uid))
+                        .map(|(jid, _)| jid),
+                )
+                .filter(|id| jobs_in_batch.contains_key(id))
+                .collect::<HashSet<_>>()
+                .len();
+            let failed_count = failed_units.len();
+            let running_count = active_handles.len();
+            let pending_count =
+                total_jobs.saturating_sub(succeeded_count + failed_count + running_count);
+            let blocked_count = total_jobs
+                .saturating_sub(succeeded_count + failed_count + running_count + pending_count);
 
-        if !finished_indices_nonempty {
-        } else {
             send(ClientEvent::LocalProgress {
                 running: running_count,
                 succeeded: succeeded_count,
                 failed: failed_count,
                 blocked: blocked_count,
                 pending: pending_count,
-                total: total_to_submit,
+                total: total_jobs,
             });
         }
 
-        blocked_jobs.clear();
+        let slots_available = concurrency.saturating_sub(active_handles.len());
+        if slots_available > 0 && !units_left.is_empty() {
+            let failed_ids: HashSet<&WorkUnitId> = failed_units.iter().map(|(id, _)| id).collect();
 
-        if slots_available > 0 && !jobs_left.is_empty() {
-            let failed_job_ids: HashSet<&JobId> = failed_jobs.iter().map(|(id, _)| id).collect();
-
-            let mut ready_candidates: Vec<JobId> = jobs_left
+            let mut ready: Vec<WorkUnitId> = units_left
                 .iter()
-                .filter(|job_id| {
-                    let job = jobs_in_batch.get(job_id).unwrap();
-                    let is_schedulable_type = job.stage_type != repx_core::model::StageType::Worker
-                        && job.stage_type != repx_core::model::StageType::Gather;
-
-                    let entrypoint_exe = job
-                        .executables
-                        .get("main")
-                        .or_else(|| job.executables.get("scatter"))
-                        .unwrap_or_else(|| {
-                            panic!(
-                                "Job '{}' missing required executable 'main' or 'scatter'",
-                                job_id
-                            )
-                        });
-
-                    let deps_are_met = entrypoint_exe
-                        .inputs
-                        .iter()
-                        .filter_map(|m| m.job_id.as_ref())
-                        .all(|dep_id| completed_jobs.contains(dep_id));
-
-                    let no_failed_deps = entrypoint_exe
-                        .inputs
-                        .iter()
-                        .filter_map(|m| m.job_id.as_ref())
-                        .all(|dep_id| !failed_job_ids.contains(dep_id));
-
-                    is_schedulable_type && deps_are_met && no_failed_deps
+                .filter(|uid| {
+                    let unit = work_units.get(uid).unwrap();
+                    let deps_met = unit.deps.iter().all(|d| completed.contains(d));
+                    let no_failed = unit.deps.iter().all(|d| !failed_ids.contains(d));
+                    deps_met && no_failed
                 })
                 .cloned()
                 .collect();
 
-            ready_candidates.sort();
+            ready.sort();
 
-            if ready_candidates.is_empty() && active_handles.is_empty() {
-                if !failed_jobs.is_empty() {
+            if ready.is_empty() && active_handles.is_empty() {
+                if !failed_units.is_empty() {
                     break;
                 }
                 return Err(ClientError::Config(ConfigError::General(
-                    "Cycle detected in job dependency graph or missing dependency.".to_string(),
+                    "Cycle detected in dependency graph or missing dependency.".to_string(),
                 )));
             }
 
-            let mut spawned_this_iteration = 0;
-            for job_id in ready_candidates.into_iter() {
-                if spawned_this_iteration >= slots_available {
+            let mut spawned = 0;
+            for uid in ready {
+                if spawned >= slots_available {
                     break;
                 }
+                let unit = work_units.get(&uid).unwrap();
 
-                let job = jobs_in_batch.get(&job_id).unwrap();
-
-                let job_mem = get_job_mem_bytes(job, &options.resources);
-                let job_cpus = get_job_cpus(job, &options.resources);
-
-                if !resource_tracker.can_fit(&job_id, job_mem, job_cpus) {
+                if !resource_tracker.can_fit(&uid, unit.mem_bytes, unit.cpus) {
                     tracing::debug!(
-                        "Job '{}' waiting for resources ({} RAM, {} CPUs needed)",
-                        job_id.short_id(),
-                        format_bytes(job_mem),
-                        job_cpus
+                        "Unit '{}' waiting for resources ({} RAM, {} CPUs needed)",
+                        uid.short_id(),
+                        format_bytes(unit.mem_bytes),
+                        unit.cpus
                     );
                     continue;
                 }
 
-                jobs_left.remove(&job_id);
-                resource_tracker.reserve(job_id.clone(), job_mem, job_cpus);
+                units_left.remove(&uid);
+                resource_tracker.reserve(uid.clone(), unit.mem_bytes, unit.cpus);
 
-                let image_path_opt = client
-                    .lab
-                    .runs
-                    .values()
-                    .find(|r| r.jobs.contains(&job_id))
-                    .and_then(|r| r.image.as_deref());
-                let image_tag = image_path_opt
-                    .and_then(|p| p.file_stem())
-                    .and_then(|s| s.to_str());
-
-                let execution_type = if options.execution_type.is_none() && image_tag.is_none() {
-                    "native"
-                } else {
-                    options.execution_type.as_deref().unwrap_or_else(|| {
-                        let scheduler_config = target.config().local.as_ref().unwrap();
-                        target
-                            .config()
-                            .default_execution_type
-                            .as_deref()
-                            .filter(|&et| {
-                                scheduler_config.execution_types.contains(&et.to_string())
-                            })
-                            .or_else(|| {
-                                scheduler_config.execution_types.first().map(|s| s.as_str())
-                            })
-                            .unwrap_or("native")
-                    })
-                };
-                let mut args = Vec::new();
-
-                if job.stage_type == repx_core::model::StageType::ScatterGather {
-                    args.push("internal-scatter-gather".to_string());
-                } else {
-                    args.push("internal-execute".to_string());
-                };
-
-                args.push("--job-id".to_string());
-                args.push(job_id.0.clone());
-
-                args.push("--runtime".to_string());
-                args.push(execution_type.to_string());
-
-                if let Some(tag) = image_tag {
-                    args.push("--image-tag".to_string());
-                    args.push(tag.to_string());
-                }
-
-                args.push("--base-path".to_string());
-                args.push(target.base_path().to_string_lossy().to_string());
-
-                if let Some(local_path) = &target.config().node_local_path {
-                    args.push("--node-local-path".to_string());
-                    args.push(local_path.to_string_lossy().to_string());
-                }
-
-                args.push("--host-tools-dir".to_string());
-                args.push(client.lab.host_tools_dir_name.clone());
-
-                if target.config().mount_host_paths {
-                    if !target.config().mount_paths.is_empty() {
-                        return Err(ClientError::Config(ConfigError::General(format!(
-                            "Cannot specify both 'mount_host_paths = true' and 'mount_paths' for job '{}'.",
-                            job_id
-                        ))));
-                    }
-                    args.push("--mount-host-paths".to_string());
-                } else {
-                    for path in &target.config().mount_paths {
-                        args.push("--mount-paths".to_string());
-                        args.push(path.clone());
-                    }
-                }
-
-                if job.stage_type == repx_core::model::StageType::ScatterGather {
-                    let scatter_exe = job.executables.get("scatter").unwrap();
-                    let gather_exe = job.executables.get("gather").unwrap();
-
-                    let artifacts_base = target.artifacts_base_path();
-                    let job_package_path_on_target =
-                        artifacts_base.join(format!("jobs/{}", job_id));
-                    let scatter_exe_path = artifacts_base.join(&scatter_exe.path);
-                    let gather_exe_path = artifacts_base.join(&gather_exe.path);
-
-                    let (steps_json, last_step_outputs_json) =
-                        build_steps_json(job, &artifacts_base)
-                            .map_err(|e| ClientError::Config(ConfigError::General(e)))?;
-
-                    args.push("--job-package-path".to_string());
-                    args.push(job_package_path_on_target.to_string_lossy().to_string());
-
-                    args.push("--scatter-exe-path".to_string());
-                    args.push(scatter_exe_path.to_string_lossy().to_string());
-
-                    args.push("--gather-exe-path".to_string());
-                    args.push(gather_exe_path.to_string_lossy().to_string());
-
-                    args.push("--steps-json".to_string());
-                    args.push(steps_json);
-
-                    args.push("--last-step-outputs-json".to_string());
-                    args.push(last_step_outputs_json);
-
-                    args.push("--scheduler".to_string());
-                    args.push("local".to_string());
-
-                    args.push("--step-sbatch-opts".to_string());
-                    args.push("".to_string());
-                } else {
-                    let main_exe = job.executables.get("main").unwrap();
-                    let executable_path_on_target =
-                        target.artifacts_base_path().join(&main_exe.path);
-                    args.push("--executable-path".to_string());
-                    args.push(executable_path_on_target.to_string_lossy().to_string());
-                }
-
-                let child = target.spawn_repx_job(repx_binary_path, &args)?;
+                let child = target.spawn_repx_job(repx_binary_path, &unit.extra_args)?;
                 submitted_count += 1;
-                spawned_this_iteration += 1;
-                let pid = child.id();
+                spawned += 1;
 
+                let pid = child.id();
                 send(ClientEvent::JobStarted {
-                    job_id: job_id.clone(),
+                    job_id: unit.job_id.clone(),
                     pid,
-                    total: total_to_submit,
+                    total: total_jobs,
                     current: submitted_count,
                 });
 
                 let handle = thread::spawn(move || child.wait_with_output());
-                active_handles.push((job_id, handle));
+                active_handles.push((uid, handle));
             }
         }
 
@@ -607,24 +975,18 @@ pub fn submit_local_batch_run(
         }
     }
 
-    if !failed_jobs.is_empty() {
-        let num_failed = failed_jobs.len();
-        let num_succeeded = submitted_count - num_failed;
-        let num_skipped = total_to_submit - submitted_count;
-
-        let mut error_msg = format!(
-            "{} job(s) failed, {} succeeded, {} skipped due to failed dependencies:\n",
-            num_failed, num_succeeded, num_skipped
-        );
-        for (job_id, stderr) in &failed_jobs {
-            error_msg.push_str(&format!("\n=== {} ===\n{}\n", job_id, stderr));
+    if !failed_units.is_empty() {
+        let num_failed = failed_units.len();
+        let mut error_msg = format!("{} unit(s) failed:\n", num_failed);
+        for (uid, stderr) in &failed_units {
+            error_msg.push_str(&format!("\n=== {} ===\n{}\n", uid, stderr));
         }
         return Err(ClientError::Config(ConfigError::General(error_msg)));
     }
 
     Ok(format!(
         "Successfully executed {} jobs locally.",
-        submitted_count
+        total_jobs
     ))
 }
 
@@ -673,24 +1035,24 @@ mod tests {
             in_flight: HashMap::new(),
         };
 
-        let job1 = JobId("job1".into());
-        let job2 = JobId("job2".into());
-        let job3 = JobId("job3".into());
+        let u1 = WorkUnitId::from_job(&JobId("job1".into()));
+        let u2 = WorkUnitId::from_job(&JobId("job2".into()));
+        let u3 = WorkUnitId::from_job(&JobId("job3".into()));
 
-        assert!(tracker.can_fit(&job1, 8 * 1024 * 1024 * 1024, 4));
+        assert!(tracker.can_fit(&u1, 8 * 1024 * 1024 * 1024, 4));
 
-        tracker.reserve(job1.clone(), 8 * 1024 * 1024 * 1024, 4);
+        tracker.reserve(u1.clone(), 8 * 1024 * 1024 * 1024, 4);
 
-        assert!(tracker.can_fit(&job2, 4 * 1024 * 1024 * 1024, 2));
-        tracker.reserve(job2.clone(), 4 * 1024 * 1024 * 1024, 2);
+        assert!(tracker.can_fit(&u2, 4 * 1024 * 1024 * 1024, 2));
+        tracker.reserve(u2.clone(), 4 * 1024 * 1024 * 1024, 2);
 
-        assert!(!tracker.can_fit(&job3, 8 * 1024 * 1024 * 1024, 4));
+        assert!(!tracker.can_fit(&u3, 8 * 1024 * 1024 * 1024, 4));
 
-        assert!(tracker.can_fit(&job3, 2 * 1024 * 1024 * 1024, 1));
+        assert!(tracker.can_fit(&u3, 2 * 1024 * 1024 * 1024, 1));
 
-        assert!(!tracker.can_fit(&job3, 6 * 1024 * 1024 * 1024, 1));
+        assert!(!tracker.can_fit(&u3, 6 * 1024 * 1024 * 1024, 1));
 
-        assert!(!tracker.can_fit(&job3, 2 * 1024 * 1024 * 1024, 4));
+        assert!(!tracker.can_fit(&u3, 2 * 1024 * 1024 * 1024, 4));
     }
 
     #[test]
@@ -703,25 +1065,25 @@ mod tests {
             in_flight: HashMap::new(),
         };
 
-        let job1 = JobId("job1".into());
-        let job2 = JobId("job2".into());
+        let u1 = WorkUnitId::from_job(&JobId("job1".into()));
+        let u2 = WorkUnitId::from_job(&JobId("job2".into()));
 
-        tracker.reserve(job1.clone(), 4 * 1024 * 1024 * 1024, 2);
+        tracker.reserve(u1.clone(), 4 * 1024 * 1024 * 1024, 2);
         assert_eq!(tracker.used_mem_bytes, 4 * 1024 * 1024 * 1024);
         assert_eq!(tracker.used_cpus, 2);
         assert_eq!(tracker.in_flight.len(), 1);
 
-        tracker.reserve(job2.clone(), 8 * 1024 * 1024 * 1024, 4);
+        tracker.reserve(u2.clone(), 8 * 1024 * 1024 * 1024, 4);
         assert_eq!(tracker.used_mem_bytes, 12 * 1024 * 1024 * 1024);
         assert_eq!(tracker.used_cpus, 6);
         assert_eq!(tracker.in_flight.len(), 2);
 
-        tracker.release(&job1);
+        tracker.release(&u1);
         assert_eq!(tracker.used_mem_bytes, 8 * 1024 * 1024 * 1024);
         assert_eq!(tracker.used_cpus, 4);
         assert_eq!(tracker.in_flight.len(), 1);
 
-        tracker.release(&job2);
+        tracker.release(&u2);
         assert_eq!(tracker.used_mem_bytes, 0);
         assert_eq!(tracker.used_cpus, 0);
         assert_eq!(tracker.in_flight.len(), 0);
@@ -737,9 +1099,9 @@ mod tests {
             in_flight: HashMap::new(),
         };
 
-        let big_job = JobId("big_job".into());
+        let big = WorkUnitId::from_job(&JobId("big_job".into()));
 
-        assert!(tracker.can_fit(&big_job, 32 * 1024 * 1024 * 1024, 16));
+        assert!(tracker.can_fit(&big, 32 * 1024 * 1024 * 1024, 16));
     }
 
     #[test]
@@ -752,16 +1114,16 @@ mod tests {
             in_flight: HashMap::new(),
         };
 
-        let small_job = JobId("small_job".into());
-        let big_job = JobId("big_job".into());
+        let small = WorkUnitId::from_job(&JobId("small_job".into()));
+        let big = WorkUnitId::from_job(&JobId("big_job".into()));
 
-        tracker.reserve(small_job.clone(), 1024 * 1024 * 1024, 1);
+        tracker.reserve(small.clone(), 1024 * 1024 * 1024, 1);
 
-        assert!(!tracker.can_fit(&big_job, 32 * 1024 * 1024 * 1024, 16));
+        assert!(!tracker.can_fit(&big, 32 * 1024 * 1024 * 1024, 16));
     }
 
     #[test]
-    fn test_resource_tracker_release_unknown_job_is_safe() {
+    fn test_resource_tracker_release_unknown_is_safe() {
         let mut tracker = ResourceTracker {
             total_mem_bytes: 8 * 1024 * 1024 * 1024,
             total_cpus: 4,
@@ -770,9 +1132,9 @@ mod tests {
             in_flight: HashMap::new(),
         };
 
-        let unknown_job = JobId("unknown".into());
+        let unknown = WorkUnitId::from_job(&JobId("unknown".into()));
 
-        tracker.release(&unknown_job);
+        tracker.release(&unknown);
 
         assert_eq!(tracker.used_mem_bytes, 4 * 1024 * 1024 * 1024);
         assert_eq!(tracker.used_cpus, 2);

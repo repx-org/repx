@@ -77,7 +77,7 @@ pub enum Commands {
     InternalExecute(InternalExecuteArgs),
 
     #[command(hide = true)]
-    InternalScatterGather(InternalScatterGatherArgs),
+    InternalScatterGather(Box<InternalScatterGatherArgs>),
 
     #[command(hide = true)]
     InternalGc(InternalGcArgs),
@@ -337,6 +337,12 @@ pub struct InternalScatterGatherArgs {
 
     #[arg(long, default_value = "all")]
     pub phase: String,
+
+    #[arg(long)]
+    pub branch_idx: Option<usize>,
+
+    #[arg(long)]
+    pub step_name: Option<String>,
 
     #[arg(long, default_value_t = false)]
     pub mount_host_paths: bool,

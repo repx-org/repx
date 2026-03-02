@@ -1,5 +1,4 @@
 use crate::{cli::InternalScatterGatherArgs, error::CliError};
-use futures::future::join_all;
 use repx_core::{
     constants::{dirs, manifests, markers},
     errors::ConfigError,
@@ -14,6 +13,8 @@ use std::{
     path::{Path, PathBuf},
 };
 use tokio::{process::Command as TokioCommand, runtime::Runtime as TokioRuntime};
+
+use super::write_marker;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StepMeta {
@@ -212,6 +213,11 @@ impl ScatterGatherOrchestrator {
         let _ = fs::remove_file(self.repx_dir.join(markers::SUCCESS));
         let _ = fs::remove_file(self.repx_dir.join(markers::FAIL));
 
+        self.load_static_inputs()?;
+        Ok(())
+    }
+
+    fn load_static_inputs(&mut self) -> Result<(), CliError> {
         if self.inputs_json_path.exists() {
             self.static_inputs =
                 serde_json::from_str(&fs::read_to_string(&self.inputs_json_path)?)?;
@@ -403,6 +409,213 @@ async fn cancel_workers_from_manifest(repx_dir: &Path) {
     }
 }
 
+async fn handle_phase_scatter_only(
+    orch: &mut ScatterGatherOrchestrator,
+    args: &InternalScatterGatherArgs,
+) -> Result<(), CliError> {
+    orch.init_dirs()?;
+
+    let scatter_already_succeeded = orch.scatter_repx_dir.join(markers::SUCCESS).exists()
+        && orch.scatter_out_dir.join("work_items.json").exists();
+
+    if scatter_already_succeeded {
+        tracing::info!("Scatter already succeeded (SUCCESS marker exists), skipping re-execution.");
+    } else {
+        if let Err(e) = orch.run_scatter(&args.scatter_exe_path).await {
+            write_marker(&orch.scatter_repx_dir.join(markers::FAIL))?;
+            write_marker(&orch.repx_dir.join(markers::FAIL))?;
+            tracing::error!("Scatter failed: {}", e);
+            return Err(e);
+        }
+        write_marker(&orch.scatter_repx_dir.join(markers::SUCCESS))?;
+    }
+    Ok(())
+}
+
+async fn handle_phase_step(
+    orch: &mut ScatterGatherOrchestrator,
+    args: &InternalScatterGatherArgs,
+    steps_meta: &StepsMetadata,
+) -> Result<(), CliError> {
+    orch.load_static_inputs()?;
+    let branch_idx = args.branch_idx.ok_or_else(|| {
+        CliError::Config(ConfigError::General(
+            "--branch-idx is required for --phase step".into(),
+        ))
+    })?;
+    let step_name = args.step_name.as_ref().ok_or_else(|| {
+        CliError::Config(ConfigError::General(
+            "--step-name is required for --phase step".into(),
+        ))
+    })?;
+    let step_meta = steps_meta.steps.get(step_name).ok_or_else(|| {
+        CliError::Config(ConfigError::General(format!(
+            "Step '{}' not found in steps metadata",
+            step_name
+        )))
+    })?;
+
+    let branch_root = orch.job_root.join(format!("branch-{}", branch_idx));
+    let branch_repx = branch_root.join(dirs::REPX);
+    fs::create_dir_all(&branch_repx)?;
+
+    let work_items_str = fs::read_to_string(orch.scatter_out_dir.join("work_items.json"))?;
+    let work_items: Vec<Value> = serde_json::from_str(&work_items_str)?;
+    let item = work_items.get(branch_idx).ok_or_else(|| {
+        CliError::Config(ConfigError::General(format!(
+            "Branch index {} out of range (only {} work items)",
+            branch_idx,
+            work_items.len()
+        )))
+    })?;
+    let new_work_item_json = serde_json::to_string(item)?;
+
+    let work_item_path = branch_repx.join("work_item.json");
+    if work_item_path.exists() {
+        let old = fs::read_to_string(&work_item_path).unwrap_or_default();
+        if old != new_work_item_json {
+            tracing::info!(
+                "Branch {} work item changed, invalidating step markers",
+                branch_idx
+            );
+            let topo_order = toposort_steps(&steps_meta.steps)?;
+            for s in &topo_order {
+                let sr = branch_root.join(format!("step-{}", s)).join(dirs::REPX);
+                let _ = fs::remove_file(sr.join(markers::SUCCESS));
+                let _ = fs::remove_file(sr.join(markers::FAIL));
+            }
+        }
+    }
+    fs::write(&work_item_path, &new_work_item_json)?;
+
+    let step_out = branch_root
+        .join(format!("step-{}", step_name))
+        .join(dirs::OUT);
+    let step_repx = branch_root
+        .join(format!("step-{}", step_name))
+        .join(dirs::REPX);
+    fs::create_dir_all(&step_out)?;
+    fs::create_dir_all(&step_repx)?;
+
+    let _ = fs::remove_file(step_repx.join(markers::SUCCESS));
+    let _ = fs::remove_file(step_repx.join(markers::FAIL));
+
+    let inputs = resolve_step_inputs(
+        step_meta,
+        &branch_root,
+        &work_item_path,
+        &orch.static_inputs,
+        &steps_meta.steps,
+    )?;
+    let step_inputs_path = step_repx.join("inputs.json");
+    fs::write(&step_inputs_path, serde_json::to_string_pretty(&inputs)?)?;
+
+    let executor = orch.create_executor(step_out.clone(), step_repx.clone());
+    let exec_args = vec![
+        step_out.to_string_lossy().to_string(),
+        step_inputs_path.to_string_lossy().to_string(),
+    ];
+
+    match executor
+        .execute_script(&step_meta.exe_path, &exec_args)
+        .await
+    {
+        Ok(_) => {
+            write_marker(&step_repx.join(markers::SUCCESS))?;
+            tracing::info!(
+                "Branch #{} step '{}' completed successfully.",
+                branch_idx,
+                step_name
+            );
+        }
+        Err(e) => {
+            let _ = write_marker(&step_repx.join(markers::FAIL));
+            return Err(CliError::ExecutionFailed {
+                message: format!("Branch #{} step '{}' failed", branch_idx, step_name),
+                log_path: Some(step_repx),
+                log_summary: e.to_string(),
+            });
+        }
+    }
+    Ok(())
+}
+
+async fn handle_phase_gather(
+    orch: &mut ScatterGatherOrchestrator,
+    args: &InternalScatterGatherArgs,
+    sink_step: &str,
+) -> Result<(), CliError> {
+    orch.init_dirs()?;
+    let work_items_str = fs::read_to_string(orch.scatter_out_dir.join("work_items.json"))?;
+    let work_items: Vec<Value> = serde_json::from_str(&work_items_str)?;
+
+    let mut branch_sink_out_dirs = Vec::new();
+    for i in 0..work_items.len() {
+        let branch_root = orch.job_root.join(format!("branch-{}", i));
+        let sink_step_repx = branch_root
+            .join(format!("step-{}", sink_step))
+            .join(dirs::REPX);
+        if !sink_step_repx.join(markers::SUCCESS).exists() {
+            let msg = format!(
+                "Branch #{} sink step '{}' SUCCESS marker not found.",
+                i, sink_step
+            );
+            tracing::error!("{}", msg);
+            write_marker(&orch.repx_dir.join(markers::FAIL))?;
+            cancel_workers_from_manifest(&orch.repx_dir).await;
+            if let Some(anchor) = args.anchor_id {
+                let _ = TokioCommand::new("scancel")
+                    .arg(anchor.to_string())
+                    .output()
+                    .await;
+            }
+            return Err(CliError::ExecutionFailed {
+                message: msg,
+                log_path: Some(sink_step_repx),
+                log_summary: "Branch did not complete all steps successfully".into(),
+            });
+        }
+        branch_sink_out_dirs.push(
+            branch_root
+                .join(format!("step-{}", sink_step))
+                .join(dirs::OUT),
+        );
+    }
+
+    match orch
+        .run_gather(
+            &args.gather_exe_path,
+            &branch_sink_out_dirs,
+            &args.last_step_outputs_json,
+        )
+        .await
+    {
+        Ok(_) => {
+            write_marker(&orch.repx_dir.join(markers::SUCCESS))?;
+            if let Some(anchor) = args.anchor_id {
+                tracing::info!("Releasing anchor job {}", anchor);
+                let _ = TokioCommand::new("scontrol")
+                    .arg("release")
+                    .arg(anchor.to_string())
+                    .output()
+                    .await;
+            }
+        }
+        Err(e) => {
+            write_marker(&orch.repx_dir.join(markers::FAIL))?;
+            cancel_workers_from_manifest(&orch.repx_dir).await;
+            if let Some(anchor) = args.anchor_id {
+                let _ = TokioCommand::new("scancel")
+                    .arg(anchor.to_string())
+                    .output()
+                    .await;
+            }
+            return Err(e);
+        }
+    }
+    Ok(())
+}
+
 async fn async_handle_scatter_gather(args: InternalScatterGatherArgs) -> Result<(), CliError> {
     tracing::debug!(
         "INTERNAL SCATTER-GATHER (Phase: {}) starting for job '{}'",
@@ -435,76 +648,23 @@ async fn async_handle_scatter_gather(args: InternalScatterGatherArgs) -> Result<
 
     let mut orch = ScatterGatherOrchestrator::new(&args)?;
 
-    if args.phase == "gather" {
-        orch.init_dirs()?;
-        let work_items_str = fs::read_to_string(orch.scatter_out_dir.join("work_items.json"))?;
-        let work_items: Vec<Value> = serde_json::from_str(&work_items_str)?;
-
-        let mut branch_sink_out_dirs = Vec::new();
-        for i in 0..work_items.len() {
-            let branch_root = orch.job_root.join(format!("branch-{}", i));
-            let sink_step_repx = branch_root
-                .join(format!("step-{}", sink_step))
-                .join(dirs::REPX);
-            if !sink_step_repx.join(markers::SUCCESS).exists() {
-                let msg = format!(
-                    "Branch #{} sink step '{}' SUCCESS marker not found.",
-                    i, sink_step
-                );
-                tracing::error!("{}", msg);
-                fs::File::create(orch.repx_dir.join(markers::FAIL))?;
-                cancel_workers_from_manifest(&orch.repx_dir).await;
-                if let Some(anchor) = args.anchor_id {
-                    let _ = TokioCommand::new("scancel")
-                        .arg(anchor.to_string())
-                        .output()
-                        .await;
-                }
-                return Err(CliError::ExecutionFailed {
-                    message: msg,
-                    log_path: Some(sink_step_repx),
-                    log_summary: "Branch did not complete all steps successfully".into(),
-                });
-            }
-            branch_sink_out_dirs.push(
-                branch_root
-                    .join(format!("step-{}", sink_step))
-                    .join(dirs::OUT),
-            );
+    match args.phase.as_str() {
+        "scatter-only" => {
+            return handle_phase_scatter_only(&mut orch, &args).await;
         }
-
-        match orch
-            .run_gather(
-                &args.gather_exe_path,
-                &branch_sink_out_dirs,
-                &args.last_step_outputs_json,
-            )
-            .await
-        {
-            Ok(_) => {
-                fs::File::create(orch.repx_dir.join(markers::SUCCESS))?;
-                if let Some(anchor) = args.anchor_id {
-                    tracing::info!("Releasing anchor job {}", anchor);
-                    let _ = TokioCommand::new("scontrol")
-                        .arg("release")
-                        .arg(anchor.to_string())
-                        .output()
-                        .await;
-                }
-            }
-            Err(e) => {
-                fs::File::create(orch.repx_dir.join(markers::FAIL))?;
-                cancel_workers_from_manifest(&orch.repx_dir).await;
-                if let Some(anchor) = args.anchor_id {
-                    let _ = TokioCommand::new("scancel")
-                        .arg(anchor.to_string())
-                        .output()
-                        .await;
-                }
-                return Err(e);
-            }
+        "step" => {
+            return handle_phase_step(&mut orch, &args, &steps_meta).await;
         }
-        return Ok(());
+        "gather" => {
+            return handle_phase_gather(&mut orch, &args, sink_step).await;
+        }
+        "all" => {}
+        other => {
+            return Err(CliError::Config(ConfigError::General(format!(
+                "Unknown phase: '{}'. Expected 'all', 'scatter-only', 'step', or 'gather'.",
+                other
+            ))));
+        }
     }
 
     orch.init_dirs()?;
@@ -515,42 +675,35 @@ async fn async_handle_scatter_gather(args: InternalScatterGatherArgs) -> Result<
         topo_order
     );
 
-    if let Err(e) = orch.run_scatter(&args.scatter_exe_path).await {
-        let _ = fs::File::create(orch.scatter_repx_dir.join(markers::FAIL));
-        fs::File::create(orch.repx_dir.join(markers::FAIL))?;
-        cancel_workers_from_manifest(&orch.repx_dir).await;
-        if let Some(anchor) = args.anchor_id {
-            let _ = TokioCommand::new("scancel")
-                .arg(anchor.to_string())
-                .output()
-                .await;
+    let scatter_already_succeeded = orch.scatter_repx_dir.join(markers::SUCCESS).exists()
+        && orch.scatter_out_dir.join("work_items.json").exists();
+
+    if scatter_already_succeeded {
+        tracing::info!(
+            "[1/4] Scatter already succeeded (SUCCESS marker exists), skipping re-execution."
+        );
+    } else {
+        if let Err(e) = orch.run_scatter(&args.scatter_exe_path).await {
+            write_marker(&orch.scatter_repx_dir.join(markers::FAIL))?;
+            write_marker(&orch.repx_dir.join(markers::FAIL))?;
+            cancel_workers_from_manifest(&orch.repx_dir).await;
+            if let Some(anchor) = args.anchor_id {
+                let _ = TokioCommand::new("scancel")
+                    .arg(anchor.to_string())
+                    .output()
+                    .await;
+            }
+            tracing::error!("Scatter failed: {}", e);
+            return Err(e);
         }
-        tracing::error!("Scatter failed: {}", e);
-        return Err(e);
+        write_marker(&orch.scatter_repx_dir.join(markers::SUCCESS))?;
     }
-    let _ = fs::File::create(orch.scatter_repx_dir.join(markers::SUCCESS));
 
     tracing::info!("[2/4] Scatter finished. Reading work items...");
     let work_items_str = fs::read_to_string(orch.scatter_out_dir.join("work_items.json"))?;
     let work_items: Vec<Value> = serde_json::from_str(&work_items_str)?;
 
-    if args.scheduler == "local" {
-        let branch_sink_out_dirs =
-            run_local_branches(&orch, &work_items, &steps_meta, &topo_order).await?;
-
-        if let Err(e) = orch
-            .run_gather(
-                &args.gather_exe_path,
-                &branch_sink_out_dirs,
-                &args.last_step_outputs_json,
-            )
-            .await
-        {
-            fs::File::create(orch.repx_dir.join(markers::FAIL))?;
-            return Err(e);
-        }
-        fs::File::create(orch.repx_dir.join(markers::SUCCESS))?;
-    } else if args.scheduler == "slurm" {
+    if args.scheduler == "slurm" {
         let (last_step_slurm_ids, all_worker_slurm_ids) = submit_slurm_branches(
             &orch,
             &work_items,
@@ -582,218 +735,6 @@ async fn async_handle_scatter_gather(args: InternalScatterGatherArgs) -> Result<
     }
 
     Ok(())
-}
-
-async fn run_local_branches(
-    orch: &ScatterGatherOrchestrator,
-    work_items: &[Value],
-    steps_meta: &StepsMetadata,
-    topo_order: &[String],
-) -> Result<Vec<PathBuf>, CliError> {
-    let num_branches = work_items.len();
-    let num_steps = steps_meta.steps.len();
-
-    tracing::info!(
-        "[3/4] Running {} branches x {} steps locally...",
-        num_branches,
-        num_steps
-    );
-
-    let mut tasks = Vec::new();
-
-    for (branch_idx, work_item) in work_items.iter().enumerate() {
-        let orch_job_root = orch.job_root.clone();
-        let orch_base_path = orch.base_path.clone();
-        let orch_job_id = orch.job_id.clone();
-        let orch_runtime = orch.runtime.clone();
-        let orch_job_package_path = orch.job_package_path.clone();
-        let orch_inputs_json_path = orch.inputs_json_path.clone();
-        let orch_host_tools_bin_dir = orch.host_tools_bin_dir.clone();
-        let orch_node_local_path = orch.node_local_path.clone();
-        let orch_mount_host_paths = orch.mount_host_paths;
-        let orch_mount_paths = orch.mount_paths.clone();
-        let orch_static_inputs = orch.static_inputs.clone();
-        let steps = steps_meta.clone();
-        let topo = topo_order.to_vec();
-        let item = work_item.clone();
-
-        tasks.push(tokio::spawn(async move {
-            run_single_branch(
-                branch_idx,
-                &item,
-                &steps,
-                &topo,
-                &orch_job_root,
-                &orch_base_path,
-                &orch_job_id,
-                &orch_runtime,
-                &orch_job_package_path,
-                &orch_inputs_json_path,
-                orch_host_tools_bin_dir.as_deref(),
-                orch_node_local_path.as_deref(),
-                orch_mount_host_paths,
-                &orch_mount_paths,
-                &orch_static_inputs,
-            )
-            .await
-        }));
-    }
-
-    let results = join_all(tasks).await;
-    let mut branch_sink_out_dirs = Vec::new();
-    let mut first_failure: Option<CliError> = None;
-
-    for (i, res) in results.into_iter().enumerate() {
-        match res {
-            Ok(Ok(sink_out)) => {
-                branch_sink_out_dirs.push(sink_out);
-            }
-            Ok(Err(e)) => {
-                tracing::error!("Branch #{} failed: {}", i, e);
-                if first_failure.is_none() {
-                    first_failure = Some(e);
-                }
-                let placeholder = orch
-                    .job_root
-                    .join(format!("branch-{}", i))
-                    .join(format!("step-{}", steps_meta.sink_step))
-                    .join(dirs::OUT);
-                branch_sink_out_dirs.push(placeholder);
-            }
-            Err(e) => {
-                tracing::error!("Branch #{} panicked: {}", i, e);
-                if first_failure.is_none() {
-                    first_failure = Some(CliError::ExecutionFailed {
-                        message: format!("Branch #{} panicked", i),
-                        log_path: None,
-                        log_summary: e.to_string(),
-                    });
-                }
-                let placeholder = orch
-                    .job_root
-                    .join(format!("branch-{}", i))
-                    .join(format!("step-{}", steps_meta.sink_step))
-                    .join(dirs::OUT);
-                branch_sink_out_dirs.push(placeholder);
-            }
-        }
-    }
-
-    if let Some(e) = first_failure {
-        fs::File::create(orch.repx_dir.join(markers::FAIL))?;
-        return Err(e);
-    }
-
-    Ok(branch_sink_out_dirs)
-}
-
-#[allow(clippy::too_many_arguments)]
-async fn run_single_branch(
-    branch_idx: usize,
-    work_item: &Value,
-    steps_meta: &StepsMetadata,
-    topo_order: &[String],
-    job_root: &Path,
-    base_path: &Path,
-    job_id: &JobId,
-    runtime: &Runtime,
-    job_package_path: &Path,
-    inputs_json_path: &Path,
-    host_tools_bin_dir: Option<&Path>,
-    node_local_path: Option<&Path>,
-    mount_host_paths: bool,
-    mount_paths: &[String],
-    static_inputs: &Value,
-) -> Result<PathBuf, CliError> {
-    let branch_root = job_root.join(format!("branch-{}", branch_idx));
-
-    let branch_repx = branch_root.join(dirs::REPX);
-    fs::create_dir_all(&branch_repx)?;
-    let work_item_path = branch_repx.join("work_item.json");
-    fs::write(&work_item_path, serde_json::to_string(work_item)?)?;
-
-    for step_name in topo_order {
-        let step_meta = steps_meta
-            .steps
-            .get(step_name)
-            .expect("toposort returned unknown step name");
-
-        let step_root = branch_root.join(format!("step-{}", step_name));
-        let step_out = step_root.join(dirs::OUT);
-        let step_repx = step_root.join(dirs::REPX);
-
-        if step_repx.join(markers::SUCCESS).exists() {
-            tracing::debug!(
-                "Branch {} step '{}' already succeeded, skipping",
-                branch_idx,
-                step_name
-            );
-            continue;
-        }
-
-        fs::create_dir_all(&step_out)?;
-        fs::create_dir_all(&step_repx)?;
-        let _ = fs::remove_file(step_repx.join(markers::SUCCESS));
-        let _ = fs::remove_file(step_repx.join(markers::FAIL));
-
-        let inputs = resolve_step_inputs(
-            step_meta,
-            &branch_root,
-            &work_item_path,
-            static_inputs,
-            &steps_meta.steps,
-        )?;
-
-        let step_inputs_path = step_repx.join("inputs.json");
-        fs::write(&step_inputs_path, serde_json::to_string_pretty(&inputs)?)?;
-
-        let executor = Executor::new(ExecutionRequest {
-            job_id: job_id.clone(),
-            runtime: runtime.clone(),
-            base_path: base_path.to_path_buf(),
-            node_local_path: node_local_path.map(|p| p.to_path_buf()),
-            job_package_path: job_package_path.to_path_buf(),
-            inputs_json_path: inputs_json_path.to_path_buf(),
-            user_out_dir: step_out.clone(),
-            repx_out_dir: step_repx.clone(),
-            host_tools_bin_dir: host_tools_bin_dir.map(|p| p.to_path_buf()),
-            mount_host_paths,
-            mount_paths: mount_paths.to_vec(),
-        });
-
-        let exe_args = vec![
-            step_out.to_string_lossy().to_string(),
-            step_inputs_path.to_string_lossy().to_string(),
-        ];
-
-        let result = executor
-            .execute_script(&step_meta.exe_path, &exe_args)
-            .await;
-
-        match result {
-            Ok(_) => {
-                let _ = fs::File::create(step_repx.join(markers::SUCCESS));
-                tracing::debug!(
-                    "Branch {} step '{}' completed successfully",
-                    branch_idx,
-                    step_name
-                );
-            }
-            Err(e) => {
-                let _ = fs::File::create(step_repx.join(markers::FAIL));
-                return Err(CliError::ExecutionFailed {
-                    message: format!("Branch #{} step '{}' failed", branch_idx, step_name),
-                    log_path: Some(step_repx),
-                    log_summary: e.to_string(),
-                });
-            }
-        }
-    }
-
-    let sink_out = branch_root
-        .join(format!("step-{}", steps_meta.sink_step))
-        .join(dirs::OUT);
-    Ok(sink_out)
 }
 
 async fn submit_slurm_gather_job(
@@ -1415,5 +1356,384 @@ mod tests {
     async fn test_cancel_workers_from_manifest_no_file() {
         let tmp = tempfile::tempdir().unwrap();
         cancel_workers_from_manifest(tmp.path()).await;
+    }
+
+    fn make_script(path: &Path, body: &str) {
+        fs::write(path, format!("#!/bin/sh\n{body}\n")).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
+        }
+    }
+
+    fn step(exe: PathBuf, deps: &[&str], out_name: &str, input_src: &str) -> StepMeta {
+        let inputs = if input_src == "scatter" {
+            vec![StepInputMapping {
+                source: Some("scatter:work_item".to_string()),
+                source_output: None,
+                target_input: "worker__item".to_string(),
+                job_id: None,
+                mapping_type: None,
+            }]
+        } else {
+            let (src_step, src_out) = input_src.split_once(':').unwrap_or((input_src, out_name));
+            vec![StepInputMapping {
+                source: Some(format!("step:{src_step}")),
+                source_output: Some(src_out.to_string()),
+                target_input: "input_data".to_string(),
+                job_id: None,
+                mapping_type: None,
+            }]
+        };
+        StepMeta {
+            exe_path: exe,
+            deps: deps.iter().map(|s| s.to_string()).collect(),
+            outputs: HashMap::from([(out_name.to_string(), format!("$out/{out_name}.txt"))]),
+            inputs,
+            resource_hints: None,
+        }
+    }
+
+    fn single_step_metadata(exe: PathBuf) -> StepsMetadata {
+        let mut steps = HashMap::new();
+        steps.insert("only".into(), step(exe, &[], "result", "scatter"));
+        StepsMetadata {
+            steps,
+            sink_step: "only".into(),
+        }
+    }
+
+    fn diamond_step_metadata(exe: PathBuf) -> StepsMetadata {
+        let mut steps = HashMap::new();
+        steps.insert("root".into(), step(exe.clone(), &[], "data", "scatter"));
+        steps.insert(
+            "left".into(),
+            step(exe.clone(), &["root"], "left", "root:data"),
+        );
+        steps.insert(
+            "right".into(),
+            step(exe.clone(), &["root"], "right", "root:data"),
+        );
+        steps.insert(
+            "sink".into(),
+            step(exe, &["left", "right"], "final", "left:left"),
+        );
+        steps
+            .get_mut("sink")
+            .unwrap()
+            .inputs
+            .push(StepInputMapping {
+                source: Some("step:right".into()),
+                source_output: Some("right".into()),
+                target_input: "right_data".into(),
+                job_id: None,
+                mapping_type: None,
+            });
+        StepsMetadata {
+            steps,
+            sink_step: "sink".into(),
+        }
+    }
+
+    async fn run_branch(
+        tmp: &Path,
+        job_root: &Path,
+        branch_idx: usize,
+        work_item: &Value,
+        steps_meta: &StepsMetadata,
+        topo_order: &[String],
+    ) -> Result<PathBuf, CliError> {
+        let scatter_out = job_root.join("scatter").join(dirs::OUT);
+        fs::create_dir_all(&scatter_out).unwrap();
+        let mut items = Vec::new();
+        for _ in 0..=branch_idx {
+            items.push(work_item.clone());
+        }
+        fs::write(
+            scatter_out.join("work_items.json"),
+            serde_json::to_string(&items).unwrap(),
+        )
+        .unwrap();
+
+        let scripts = tmp.join("scripts");
+        let repx_dir = job_root.join(dirs::REPX);
+        fs::create_dir_all(&repx_dir).unwrap();
+
+        let steps_json = serde_json::to_string(steps_meta).unwrap();
+
+        for step_name in topo_order {
+            let args = InternalScatterGatherArgs {
+                job_id: "test-job".into(),
+                runtime: "native".into(),
+                image_tag: None,
+                base_path: tmp.to_path_buf(),
+                node_local_path: None,
+                host_tools_dir: String::new(),
+                scheduler: "local".into(),
+                step_sbatch_opts: String::new(),
+                job_package_path: scripts.clone(),
+                scatter_exe_path: scripts.join("scatter.sh"),
+                gather_exe_path: scripts.join("gather.sh"),
+                steps_json: steps_json.clone(),
+                last_step_outputs_json: "{}".into(),
+                anchor_id: None,
+                phase: "step".into(),
+                branch_idx: Some(branch_idx),
+                step_name: Some(step_name.clone()),
+                mount_host_paths: false,
+                mount_paths: vec![],
+            };
+            let mut orch = ScatterGatherOrchestrator::new(&args)?;
+            orch.load_static_inputs()?;
+            handle_phase_step(&mut orch, &args, steps_meta).await?;
+        }
+
+        let sink_out = job_root
+            .join(format!("branch-{}", branch_idx))
+            .join(format!("step-{}", steps_meta.sink_step))
+            .join(dirs::OUT);
+        Ok(sink_out)
+    }
+
+    #[tokio::test]
+    async fn test_marker_write_failure_propagates_as_error() {
+        let tmp = tempfile::tempdir().unwrap();
+        let job_root = tmp.path().join("outputs/test-job");
+        let scripts = tmp.path().join("scripts");
+        fs::create_dir_all(&scripts).unwrap();
+        make_script(
+            &scripts.join("succeed.sh"),
+            "mkdir -p \"$1\"\necho done > \"$1/result.txt\"",
+        );
+
+        let meta = single_step_metadata(scripts.join("succeed.sh"));
+        let order = toposort_steps(&meta.steps).unwrap();
+        let item = serde_json::json!({"id": 0});
+
+        let r = run_branch(tmp.path(), &job_root, 0, &item, &meta, &order).await;
+        assert!(r.is_ok(), "First run should succeed");
+
+        let step_repx = job_root.join("branch-0/step-only").join(dirs::REPX);
+        assert!(step_repx.join(markers::SUCCESS).exists());
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::remove_file(step_repx.join(markers::SUCCESS)).unwrap();
+            fs::set_permissions(&step_repx, fs::Permissions::from_mode(0o555)).unwrap();
+
+            let probe = step_repx.join(".write_probe");
+            let perms_effective = fs::File::create(&probe).is_err();
+            let _ = fs::remove_file(&probe);
+
+            let r2 = run_branch(tmp.path(), &job_root, 0, &item, &meta, &order).await;
+            fs::set_permissions(&step_repx, fs::Permissions::from_mode(0o755)).unwrap();
+
+            if perms_effective {
+                assert!(
+                    r2.is_err(),
+                    "Should error when SUCCESS marker cannot be written"
+                );
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn test_scatter_skipped_on_rerun_if_already_succeeded() {
+        let tmp = tempfile::tempdir().unwrap();
+        let job_root = tmp.path().join("outputs/test-sg-job");
+        let scatter_out = job_root.join("scatter").join(dirs::OUT);
+        let scatter_repx = job_root.join("scatter").join(dirs::REPX);
+        for d in [
+            &scatter_out,
+            &scatter_repx,
+            &job_root.join(dirs::REPX),
+            &job_root.join(dirs::OUT),
+        ] {
+            fs::create_dir_all(d).unwrap();
+        }
+
+        fs::File::create(scatter_repx.join(markers::SUCCESS)).unwrap();
+        fs::write(
+            scatter_out.join("work_items.json"),
+            r#"[{"id":1},{"id":2}]"#,
+        )
+        .unwrap();
+
+        let scripts = tmp.path().join("scripts");
+        fs::create_dir_all(&scripts).unwrap();
+        make_script(
+            &scripts.join("scatter.sh"),
+            "echo '[{\"id\":99}]' > \"$1/work_items.json\"",
+        );
+
+        let mut orch = ScatterGatherOrchestrator {
+            job_id: JobId("test-sg-job".into()),
+            base_path: tmp.path().to_path_buf(),
+            job_root: job_root.clone(),
+            user_out_dir: job_root.join(dirs::OUT),
+            repx_dir: job_root.join(dirs::REPX),
+            scatter_out_dir: scatter_out.clone(),
+            scatter_repx_dir: scatter_repx.clone(),
+            inputs_json_path: job_root.join(dirs::REPX).join("inputs.json"),
+            runtime: Runtime::Native,
+            job_package_path: scripts.clone(),
+            static_inputs: Value::Object(Default::default()),
+            host_tools_bin_dir: None,
+            node_local_path: None,
+            mount_host_paths: false,
+            mount_paths: vec![],
+        };
+
+        orch.init_dirs().unwrap();
+        assert!(
+            scatter_repx.join(markers::SUCCESS).exists(),
+            "init_dirs must preserve scatter SUCCESS"
+        );
+
+        let already_done = scatter_repx.join(markers::SUCCESS).exists()
+            && scatter_out.join("work_items.json").exists();
+        if !already_done {
+            let _ = orch.run_scatter(&scripts.join("scatter.sh")).await;
+        }
+
+        let items: Vec<Value> =
+            serde_json::from_str(&fs::read_to_string(scatter_out.join("work_items.json")).unwrap())
+                .unwrap();
+        assert_eq!(
+            items,
+            vec![serde_json::json!({"id":1}), serde_json::json!({"id":2})],
+            "Scatter should be skipped; work_items.json must be preserved"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_stale_step_markers_cleared_when_work_item_changes() {
+        let tmp = tempfile::tempdir().unwrap();
+        let job_root = tmp.path().join("outputs/test-job");
+        let scripts = tmp.path().join("scripts");
+        fs::create_dir_all(&scripts).unwrap();
+        make_script(
+            &scripts.join("step.sh"),
+            "mkdir -p \"$1\"\necho done > \"$1/result.txt\"",
+        );
+
+        let meta = single_step_metadata(scripts.join("step.sh"));
+        let order = toposort_steps(&meta.steps).unwrap();
+
+        let branch_repx = job_root.join("branch-0").join(dirs::REPX);
+        let step_repx = job_root.join("branch-0/step-only").join(dirs::REPX);
+        let step_out = job_root.join("branch-0/step-only").join(dirs::OUT);
+        fs::create_dir_all(&branch_repx).unwrap();
+        fs::create_dir_all(&step_repx).unwrap();
+        fs::create_dir_all(&step_out).unwrap();
+        fs::write(branch_repx.join("work_item.json"), r#"{"id":"old_item"}"#).unwrap();
+        fs::File::create(step_repx.join(markers::SUCCESS)).unwrap();
+        fs::write(step_out.join("result.txt"), "old_item_result").unwrap();
+
+        let new_item = serde_json::json!({"id": "new_item"});
+        let r = run_branch(tmp.path(), &job_root, 0, &new_item, &meta, &order).await;
+        assert!(r.is_ok());
+
+        let output = fs::read_to_string(step_out.join("result.txt")).unwrap();
+        assert_ne!(
+            output.trim(),
+            "old_item_result",
+            "Step must re-execute when work item changes; stale markers should be invalidated"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_diamond_dag_steps_all_execute() {
+        let tmp = tempfile::tempdir().unwrap();
+        let job_root = tmp.path().join("outputs/test-job");
+        let scripts = tmp.path().join("scripts");
+        fs::create_dir_all(&scripts).unwrap();
+
+        make_script(&scripts.join("timed.sh"),
+            "mkdir -p \"$1\"\nfor f in data left right final result; do echo done > \"$1/$f.txt\"; done");
+
+        let meta = diamond_step_metadata(scripts.join("timed.sh"));
+        let order = toposort_steps(&meta.steps).unwrap();
+        let item = serde_json::json!({"id": 0});
+
+        let r = run_branch(tmp.path(), &job_root, 0, &item, &meta, &order).await;
+        assert!(r.is_ok(), "Branch should succeed: {:?}", r.err());
+
+        for step in &["root", "left", "right", "sink"] {
+            let marker = job_root
+                .join(format!("branch-0/step-{}/", step))
+                .join(dirs::REPX)
+                .join(markers::SUCCESS);
+            assert!(
+                marker.exists(),
+                "Step '{}' should have SUCCESS marker",
+                step
+            );
+        }
+    }
+
+    #[test]
+    fn test_marker_write_calls_fsync() {
+        let source = include_str!("scatter_gather.rs");
+        let prod = source.split("#[cfg(test)]").next().unwrap();
+        let has_bare = prod
+            .lines()
+            .any(|l| l.contains("let _ = fs::File::create(") && l.contains("markers::"));
+        assert!(
+            !has_bare,
+            "Production code must not use bare `let _ = fs::File::create(...markers...)`. \
+             Use write_marker() for error propagation and fsync."
+        );
+    }
+
+    #[tokio::test]
+    async fn test_rerun_preserves_scatter_output_and_skips_succeeded_steps() {
+        let tmp = tempfile::tempdir().unwrap();
+        let job_root = tmp.path().join("outputs/test-job");
+        let scripts = tmp.path().join("scripts");
+        fs::create_dir_all(&scripts).unwrap();
+        make_script(
+            &scripts.join("good.sh"),
+            "mkdir -p \"$1\"\necho done > \"$1/result.txt\"",
+        );
+
+        let meta = single_step_metadata(scripts.join("good.sh"));
+        let order = toposort_steps(&meta.steps).unwrap();
+        let items = [serde_json::json!({"id":"A"}), serde_json::json!({"id":"B"})];
+
+        let r = run_branch(tmp.path(), &job_root, 0, &items[0], &meta, &order).await;
+        assert!(r.is_ok());
+
+        let b1_repx = job_root.join("branch-1").join(dirs::REPX);
+        let s1_repx = job_root.join("branch-1/step-only").join(dirs::REPX);
+        for d in [
+            &b1_repx,
+            &s1_repx,
+            &job_root.join("branch-1/step-only").join(dirs::OUT),
+        ] {
+            fs::create_dir_all(d).unwrap();
+        }
+        fs::write(
+            b1_repx.join("work_item.json"),
+            serde_json::to_string(&items[1]).unwrap(),
+        )
+        .unwrap();
+        fs::File::create(s1_repx.join(markers::FAIL)).unwrap();
+
+        let orig = fs::read_to_string(job_root.join("branch-0/step-only/out/result.txt")).unwrap();
+
+        let r = run_branch(tmp.path(), &job_root, 0, &items[0], &meta, &order).await;
+        assert!(r.is_ok());
+        assert_eq!(
+            orig,
+            fs::read_to_string(job_root.join("branch-0/step-only/out/result.txt")).unwrap()
+        );
+
+        let r = run_branch(tmp.path(), &job_root, 1, &items[1], &meta, &order).await;
+        assert!(r.is_ok());
+        assert!(s1_repx.join(markers::SUCCESS).exists());
+        assert!(!s1_repx.join(markers::FAIL).exists());
     }
 }
