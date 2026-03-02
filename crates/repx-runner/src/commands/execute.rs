@@ -6,6 +6,8 @@ use repx_core::{
 };
 use repx_executor::{ExecutionRequest, Executor, Runtime};
 use std::fs;
+
+use super::write_marker;
 use tokio::runtime::Runtime as TokioRuntime;
 
 pub fn handle_execute(args: InternalExecuteArgs) -> Result<(), CliError> {
@@ -95,11 +97,11 @@ async fn async_handle_execute(args: InternalExecuteArgs) -> Result<(), CliError>
 
     match result {
         Ok(_) => {
-            fs::File::create(repx_dir.join(markers::SUCCESS))?;
+            write_marker(&repx_dir.join(markers::SUCCESS))?;
             tracing::info!("Job '{}' completed successfully.", job_id);
         }
         Err(e) => {
-            fs::File::create(repx_dir.join(markers::FAIL))?;
+            write_marker(&repx_dir.join(markers::FAIL))?;
             let err_msg = format!("Job '{}' failed: {}", job_id, e);
             tracing::error!("{}", err_msg);
 

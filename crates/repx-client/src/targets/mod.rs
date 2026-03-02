@@ -141,6 +141,8 @@ pub trait ArtifactSync: TargetInfo {
 pub trait FileOps: TargetInfo {
     fn write_remote_file(&self, path: &Path, content: &str) -> Result<()>;
 
+    fn read_remote_file(&self, path: &Path) -> Result<String>;
+
     fn read_remote_file_tail(&self, path: &Path, line_count: u32) -> Result<Vec<String>>;
 }
 

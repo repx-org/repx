@@ -29,7 +29,7 @@ pub fn run(cli: Cli) -> Result<(), CliError> {
         }
         Commands::InternalExecute(args) => commands::execute::handle_execute(args),
         Commands::InternalScatterGather(args) => {
-            commands::scatter_gather::handle_scatter_gather(args)
+            commands::scatter_gather::handle_scatter_gather(*args)
         }
         Commands::InternalGc(args) => {
             let rt = tokio::runtime::Runtime::new().unwrap();

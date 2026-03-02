@@ -278,6 +278,10 @@ impl FileOps for LocalTarget {
         Ok(())
     }
 
+    fn read_remote_file(&self, path: &Path) -> Result<String> {
+        fs_err::read_to_string(path).map_err(|e| ClientError::Config(ConfigError::Io(e)))
+    }
+
     fn read_remote_file_tail(&self, path: &Path, line_count: u32) -> Result<Vec<String>> {
         if !path.exists() {
             return Ok(vec![]);
