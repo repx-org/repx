@@ -2,6 +2,7 @@ pub mod config;
 pub mod constants;
 pub mod engine;
 pub mod errors;
+pub mod fs_utils;
 pub mod lab;
 pub mod logging;
 pub mod model;

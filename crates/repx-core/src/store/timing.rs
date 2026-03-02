@@ -33,7 +33,7 @@ pub fn read_timestamps(output_dir: &Path) -> Result<JobTimestamps, ConfigError> 
 pub fn write_timestamps(output_dir: &Path, timestamps: &JobTimestamps) -> Result<(), ConfigError> {
     let path = get_timing_path(output_dir);
     let content = serde_json::to_string_pretty(timestamps)?;
-    fs::write(path, content)?;
+    crate::fs_utils::write_atomic(&path, content.as_bytes())?;
     Ok(())
 }
 
