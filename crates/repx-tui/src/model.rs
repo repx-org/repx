@@ -1,6 +1,44 @@
 use serde::Deserialize;
 use serde::Serialize;
-use std::{collections::HashMap, str::FromStr};
+use std::{collections::HashMap, fmt, str::FromStr};
+
+#[derive(
+    Clone, Debug, PartialEq, Eq, Hash, Copy, PartialOrd, Ord, Serialize, Deserialize, Default,
+)]
+pub enum JobStatus {
+    Succeeded,
+    Failed,
+    SubmitFailed,
+    Running,
+    Pending,
+    Queued,
+    Blocked,
+    Submitting,
+    #[default]
+    Unknown,
+}
+
+impl JobStatus {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            JobStatus::Succeeded => "Succeeded",
+            JobStatus::Failed => "Failed",
+            JobStatus::SubmitFailed => "Submit Failed",
+            JobStatus::Running => "Running",
+            JobStatus::Pending => "Pending",
+            JobStatus::Queued => "Queued",
+            JobStatus::Blocked => "Blocked",
+            JobStatus::Submitting => "Submitting...",
+            JobStatus::Unknown => "Unknown",
+        }
+    }
+}
+
+impl fmt::Display for JobStatus {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
 
 #[derive(Clone, Debug, Default)]
 pub struct StatusCounts {
@@ -98,7 +136,7 @@ pub struct TuiJob {
     pub params: serde_json::Value,
     #[serde(default)]
     pub params_str: String,
-    pub status: String,
+    pub status: JobStatus,
     pub context_depends_on: String,
     pub context_dependents: String,
     pub logs: Vec<String>,
@@ -319,7 +357,7 @@ mod tests {
             run: "run-test".to_string(),
             params: serde_json::json!({"key": "value", "count": 42}),
             params_str: "count=42,key=value".to_string(),
-            status: "pending".to_string(),
+            status: JobStatus::Pending,
             context_depends_on: "job-122".to_string(),
             context_dependents: "job-124, job-125".to_string(),
             logs: vec!["log line 1".to_string(), "log line 2".to_string()],

@@ -94,7 +94,23 @@ let
         Please ensure each parameter value is wrapped in a list, e.g., 'param = [ "value" ];'
       ''
     else
-      pkgs.lib.cartesianProduct allParams;
+      let
+        paramsWithNulls = pkgs.lib.filter (param: builtins.any (elem: elem == null) param.value) (
+          pkgs.lib.mapAttrsToList (name: value: { inherit name value; }) allParams
+        );
+      in
+      if paramsWithNulls != [ ] then
+        let
+          nullParamNames = pkgs.lib.map (p: p.name) paramsWithNulls;
+          formattedNullNames = pkgs.lib.concatStringsSep ", " (map (n: ''"${n}"'') nullParamNames);
+        in
+        throw ''
+          Type error in 'mkRun' parameters for run "${name}".
+          The following parameter lists contain null values: ${formattedNullNames}.
+          Null values in parameter lists are not allowed. Please remove them or replace with valid values.
+        ''
+      else
+        pkgs.lib.cartesianProduct allParams;
 
   repxForDiscovery = repx-lib.mkPipelineHelpers {
     inherit pkgs repx-lib interRunDepTypes;

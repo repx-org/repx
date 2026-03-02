@@ -32,7 +32,9 @@ def find_writable_cache_dir() -> Path:
     )
 
 
-def generate_logic_manifest(job: JobView, job_cache_dir: Path, output_json_path: Path):
+def generate_logic_manifest(
+    job: JobView, job_cache_dir: Path, output_json_path: Path
+) -> None:
     """Generates the logic manifest (inputs.json) for a given job."""
     final_json = {}
     for mapping in job.input_mappings:
@@ -67,7 +69,7 @@ def execute_job(
     job: JobView,
     lab_path: Path,
     job_cache_dir: Path,
-):
+) -> None:
     """Executes a single job using the simple (out_dir, inputs.json) contract."""
     if job.stage_type != "simple":
         logger.warning(f"SKIPPING Job: {job.id} (type: {job.stage_type})")
@@ -123,7 +125,7 @@ def ensure_job_is_run(
     exp: Experiment,
     lab_path: Path,
     job_cache_dir: Path,
-):
+) -> None:
     """Recursively runs dependencies and then the job itself, with caching."""
     success_marker = job_cache_dir / job.id / "repx" / "SUCCESS"
     if success_marker.exists():
@@ -140,7 +142,7 @@ def ensure_job_is_run(
     execute_job(job, lab_path, job_cache_dir)
 
 
-def main():
+def main() -> None:
     try:
         current_dir = Path(os.environ.get("PWD", os.getcwd()))
     except KeyError:

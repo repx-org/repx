@@ -9,6 +9,8 @@ pub struct ContainerRuntime;
 
 use super::Runtime;
 
+const CONTAINER_HOSTNAME: &str = "repx-container";
+
 impl ContainerRuntime {
     fn get_runtime_details(runtime: &Runtime) -> Result<(&str, &str)> {
         match runtime {
@@ -193,7 +195,7 @@ impl ContainerRuntime {
         cmd.arg("run")
             .arg("--rm")
             .arg("--hostname")
-            .arg("repx-container")
+            .arg(CONTAINER_HOSTNAME)
             .arg("--env")
             .arg("TERM=xterm");
 

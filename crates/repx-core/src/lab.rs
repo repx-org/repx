@@ -11,6 +11,7 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 
 const EXPECTED_REPX_VERSION: &str = env!("CARGO_PKG_VERSION");
+const HASH_BUFFER_SIZE: usize = 8192;
 
 fn reject_external_symlink(path: &Path, lab_root: &Path) -> Result<(), ConfigError> {
     let meta = fs::symlink_metadata(path).map_err(|e| {
@@ -86,7 +87,7 @@ fn verify_file_integrity(lab_path: &Path, files: &[FileEntry]) -> Result<(), Con
         })?;
 
         let mut hasher = Sha256::new();
-        let mut buffer = [0u8; 8192];
+        let mut buffer = [0u8; HASH_BUFFER_SIZE];
         loop {
             let bytes_read = file.read(&mut buffer).map_err(|e| {
                 ConfigError::Io(std::io::Error::new(

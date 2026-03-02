@@ -82,27 +82,9 @@ pkgs.testers.runNixOSTest {
 
     LAB_PATH = "${referenceLab}"
 
-    def get_subset_jobs():
-        print(f"Searching for jobs in {LAB_PATH}")
-        for root, dirs, files in os.walk(LAB_PATH):
-            for file in files:
-                if file.endswith(".json"):
-                    full_path = os.path.join(root, file)
-                    try:
-                        with open(full_path, 'r') as f:
-                            data = json.load(f)
-                            if data.get("name") == "simulation-run" and "jobs" in data:
-                                jobs = data["jobs"]
-                                for jid, jval in jobs.items():
-                                    if "workload-generator" in jval.get("name", ""):
-                                        return [jid]
-                                if jobs:
-                                    return [list(jobs.keys())[0]]
-                    except Exception as e:
-                        print(f"Warning: Failed to read {full_path}: {e}")
-        return []
+    exec(open("${./helpers/get-subset-jobs.py}").read())
 
-    subset_jobs = get_subset_jobs()
+    subset_jobs = get_subset_jobs(LAB_PATH)
     if not subset_jobs:
         raise Exception("Failed to find subset of jobs.")
 

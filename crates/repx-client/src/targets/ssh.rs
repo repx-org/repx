@@ -12,6 +12,8 @@ use std::{
     sync::mpsc::Sender,
 };
 
+const GC_ROOTS_KEEP: usize = 5;
+
 pub struct SshTarget {
     pub(crate) name: String,
     pub(crate) address: String,
@@ -844,11 +846,12 @@ impl GcOps for SshTarget {
             mkdir -p {0}
             ln -sfn {1} {2}
             cd {0}
-            ls -1 | sort -r | tail -n +6 | xargs -r rm
+            ls -1 | sort -r | tail -n +{3} | xargs -r rm
             "#,
             shell_quote(&gcroots_dir.to_string_lossy()),
             shell_quote(&target_path_str),
-            shell_quote(&link_path.to_string_lossy())
+            shell_quote(&link_path.to_string_lossy()),
+            GC_ROOTS_KEEP + 1,
         );
 
         self.run_command("sh", &["-c", &script])?;

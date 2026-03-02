@@ -1,7 +1,7 @@
 use crate::app::StatusFilter;
-use crate::model::{TuiDisplayRow, TuiJob, TuiRowItem};
+use crate::model::{JobStatus, TuiDisplayRow, TuiJob, TuiRowItem};
 use ratatui::widgets::TableState;
-use repx_core::engine::{self, JobStatus};
+use repx_core::engine;
 use repx_core::model::{JobId, Lab};
 use std::collections::{HashMap, HashSet, VecDeque};
 
@@ -87,7 +87,7 @@ impl JobsState {
                     run: run_id.to_string(),
                     params: job_def.params.clone(),
                     params_str: crate::tree_view::format_params_single_line(&job_def.params),
-                    status: "Unknown".to_string(),
+                    status: JobStatus::Unknown,
                     context_depends_on: "-".to_string(),
                     context_dependents: "-".to_string(),
                     logs: vec!["Awaiting update...".to_string()],
@@ -117,7 +117,7 @@ impl JobsState {
 
     pub fn reset_statuses(&mut self) {
         for job in self.jobs.iter_mut() {
-            job.status = "Unknown".to_string();
+            job.status = JobStatus::Unknown;
         }
     }
 
@@ -129,24 +129,27 @@ impl JobsState {
         let full_job_statuses = engine::determine_job_statuses(lab, &statuses);
 
         for job in self.jobs.iter_mut() {
-            if job.status == "Submitting..." {
+            if job.status == JobStatus::Submitting {
                 if let Some(status) = full_job_statuses.get(&job.full_id) {
-                    if matches!(status, JobStatus::Pending | JobStatus::Blocked { .. }) {
+                    if matches!(
+                        status,
+                        engine::JobStatus::Pending | engine::JobStatus::Blocked { .. }
+                    ) {
                         continue;
                     }
                 }
             }
 
-            let status_str = match full_job_statuses.get(&job.full_id) {
-                Some(JobStatus::Succeeded { .. }) => "Succeeded",
-                Some(JobStatus::Failed { .. }) => "Failed",
-                Some(JobStatus::Pending) => "Pending",
-                Some(JobStatus::Queued) => "Queued",
-                Some(JobStatus::Running) => "Running",
-                Some(JobStatus::Blocked { .. }) => "Blocked",
-                None => "Unknown",
+            let new_status = match full_job_statuses.get(&job.full_id) {
+                Some(engine::JobStatus::Succeeded { .. }) => JobStatus::Succeeded,
+                Some(engine::JobStatus::Failed { .. }) => JobStatus::Failed,
+                Some(engine::JobStatus::Pending) => JobStatus::Pending,
+                Some(engine::JobStatus::Queued) => JobStatus::Queued,
+                Some(engine::JobStatus::Running) => JobStatus::Running,
+                Some(engine::JobStatus::Blocked { .. }) => JobStatus::Blocked,
+                None => JobStatus::Unknown,
             };
-            job.status = status_str.to_string();
+            job.status = new_status;
         }
     }
     pub fn next(&mut self) {
@@ -803,7 +806,10 @@ impl JobsState {
     fn job_matches(&self, job: &TuiJob, filters: &[ParsedFilter]) -> bool {
         let status_match = match self.status_filter {
             StatusFilter::All => true,
-            _ => job.status == self.status_filter.as_str(),
+            StatusFilter::Failed => job.status == JobStatus::Failed,
+            StatusFilter::Running => job.status == JobStatus::Running,
+            StatusFilter::Pending => job.status == JobStatus::Pending,
+            StatusFilter::Completed => job.status == JobStatus::Succeeded,
         };
         if !status_match {
             return false;
@@ -822,7 +828,7 @@ impl JobsState {
                 FilterType::Name => job.name.to_lowercase().contains(&filter.term),
                 FilterType::Run => job.run.to_lowercase().contains(&filter.term),
                 FilterType::Params => self.params_match(&job.params, &filter.term),
-                FilterType::Status => job.status.to_lowercase().contains(&filter.term),
+                FilterType::Status => job.status.as_str().to_lowercase().contains(&filter.term),
             };
             if !matches {
                 return false;

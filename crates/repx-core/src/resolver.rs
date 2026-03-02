@@ -27,47 +27,51 @@ pub fn resolve_run_spec(lab: &Lab, spec: &str) -> Result<Vec<RunId>, DomainError
         Ok(vec![RunId(spec.to_string())])
     }
 }
+fn find_final_jobs_in_run<'a>(lab: &'a Lab, run: &'a crate::model::Run) -> Vec<&'a JobId> {
+    let run_jobs_set: HashSet<_> = run.jobs.iter().collect();
+    let mut dep_ids_in_run: HashSet<&JobId> = HashSet::new();
+
+    for job_id in &run.jobs {
+        if let Some(job) = lab.jobs.get(job_id) {
+            for dep_id in job.all_dependencies() {
+                if run_jobs_set.contains(dep_id) {
+                    dep_ids_in_run.insert(dep_id);
+                }
+            }
+        }
+    }
+
+    run_jobs_set
+        .into_iter()
+        .filter(|job_id| !dep_ids_in_run.contains(job_id))
+        .collect()
+}
+
+fn resolve_job_id_by_prefix<'a>(lab: &'a Lab, input: &str) -> Result<Vec<&'a JobId>, DomainError> {
+    let candidates: Vec<&JobId> = lab
+        .jobs
+        .keys()
+        .filter(|job_id| job_id.0.starts_with(input))
+        .collect();
+
+    match candidates.len() {
+        0 => Err(DomainError::TargetNotFound(input.to_string())),
+        1 => Ok(vec![candidates[0]]),
+        _ => Err(DomainError::AmbiguousJobId {
+            input: input.to_string(),
+            matches: candidates.iter().map(|id| id.to_string()).collect(),
+        }),
+    }
+}
+
 pub fn resolve_all_final_job_ids<'a>(
     lab: &'a Lab,
     run_id: &RunId,
 ) -> Result<Vec<&'a JobId>, DomainError> {
     if let Some(run) = lab.runs.get(run_id) {
-        let run_jobs_set: HashSet<_> = run.jobs.iter().collect();
-        let mut dep_ids_in_run: HashSet<&JobId> = HashSet::new();
-
-        for job_id in &run.jobs {
-            if let Some(job) = lab.jobs.get(job_id) {
-                let dependencies = job.all_dependencies();
-                for dep_id in dependencies {
-                    if run_jobs_set.contains(dep_id) {
-                        dep_ids_in_run.insert(dep_id);
-                    }
-                }
-            }
-        }
-
-        let final_jobs: Vec<&JobId> = run_jobs_set
-            .into_iter()
-            .filter(|job_id| !dep_ids_in_run.contains(job_id))
-            .collect();
-
-        return Ok(final_jobs);
+        return Ok(find_final_jobs_in_run(lab, run));
     }
-
-    let candidates: Vec<&JobId> = lab
-        .jobs
-        .keys()
-        .filter(|job_id| job_id.0.starts_with(&run_id.0))
-        .collect();
-
-    match candidates.len() {
-        0 => Err(DomainError::TargetNotFound(run_id.0.clone())),
-        1 => Ok(vec![candidates[0]]),
-        _ => Err(DomainError::AmbiguousJobId {
-            input: run_id.0.clone(),
-            matches: candidates.iter().map(|id| id.to_string()).collect(),
-        }),
-    }
+    resolve_job_id_by_prefix(lab, &run_id.0)
 }
 
 pub fn resolve_target_job_id<'a>(
@@ -75,50 +79,18 @@ pub fn resolve_target_job_id<'a>(
     user_input: &RunId,
 ) -> Result<&'a JobId, DomainError> {
     if let Some(run) = lab.runs.get(user_input) {
-        let run_jobs_set: HashSet<_> = run.jobs.iter().collect();
-        let mut dep_ids_in_run: HashSet<&JobId> = HashSet::new();
-
-        for job_id in &run.jobs {
-            if let Some(job) = lab.jobs.get(job_id) {
-                let dependencies = job.all_dependencies();
-                for dep_id in dependencies {
-                    if run_jobs_set.contains(dep_id) {
-                        dep_ids_in_run.insert(dep_id);
-                    }
-                }
-            }
-        }
-
-        let final_jobs: Vec<&JobId> = run_jobs_set
-            .into_iter()
-            .filter(|job_id| !dep_ids_in_run.contains(job_id))
-            .collect();
-
-        match final_jobs.len() {
-            1 => return Ok(final_jobs[0]),
-            _ => {
-                return Err(DomainError::AmbiguousRun(
-                    user_input.0.clone(),
-                    run.jobs.clone(),
-                ));
-            }
-        }
+        let final_jobs = find_final_jobs_in_run(lab, run);
+        return match final_jobs.len() {
+            1 => Ok(final_jobs[0]),
+            _ => Err(DomainError::AmbiguousRun(
+                user_input.0.clone(),
+                run.jobs.clone(),
+            )),
+        };
     }
 
-    let candidates: Vec<&JobId> = lab
-        .jobs
-        .keys()
-        .filter(|job_id| job_id.0.starts_with(&user_input.0))
-        .collect();
-
-    match candidates.len() {
-        0 => Err(DomainError::TargetNotFound(user_input.0.clone())),
-        1 => Ok(candidates[0]),
-        _ => Err(DomainError::AmbiguousJobId {
-            input: user_input.0.clone(),
-            matches: candidates.iter().map(|id| id.to_string()).collect(),
-        }),
-    }
+    let candidates = resolve_job_id_by_prefix(lab, &user_input.0)?;
+    Ok(candidates[0])
 }
 
 #[cfg(test)]

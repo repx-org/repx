@@ -19,6 +19,7 @@ use sysinfo::System;
 
 const DEFAULT_JOB_MEM_BYTES: u64 = 1024 * 1024 * 1024;
 const DEFAULT_JOB_CPUS: u32 = 1;
+const POLL_INTERVAL_MS: u64 = 50;
 
 fn parse_mem_to_bytes(mem_str: &str) -> Option<u64> {
     let mem_str = mem_str.trim().to_uppercase();
@@ -1024,7 +1025,7 @@ pub fn submit_local_batch_run(
         }
 
         if !active_handles.is_empty() {
-            thread::sleep(Duration::from_millis(50));
+            thread::sleep(Duration::from_millis(POLL_INTERVAL_MS));
         }
     }
 

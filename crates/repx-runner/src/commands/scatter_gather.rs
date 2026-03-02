@@ -12,7 +12,7 @@ use std::{
     fs,
     path::{Path, PathBuf},
 };
-use tokio::{process::Command as TokioCommand, runtime::Runtime as TokioRuntime};
+use tokio::process::Command as TokioCommand;
 
 use super::write_marker;
 
@@ -118,12 +118,7 @@ fn toposort_steps(steps: &HashMap<String, StepMeta>) -> Result<Vec<String>, CliE
 }
 
 pub fn handle_scatter_gather(args: InternalScatterGatherArgs) -> Result<(), CliError> {
-    let rt = TokioRuntime::new().map_err(|e| {
-        CliError::Config(ConfigError::General(format!(
-            "Failed to create async runtime: {}",
-            e
-        )))
-    })?;
+    let rt = super::create_tokio_runtime()?;
     rt.block_on(async_handle_scatter_gather(args))
 }
 

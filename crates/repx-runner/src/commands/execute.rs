@@ -8,15 +8,9 @@ use repx_executor::{CancellationToken, ExecutionRequest, Executor};
 use std::fs;
 
 use super::write_marker;
-use tokio::runtime::Runtime as TokioRuntime;
 
 pub fn handle_execute(args: InternalExecuteArgs) -> Result<(), CliError> {
-    let rt = TokioRuntime::new().map_err(|e| {
-        CliError::Config(repx_core::errors::ConfigError::General(format!(
-            "Failed to create async runtime: {}",
-            e
-        )))
-    })?;
+    let rt = super::create_tokio_runtime()?;
     rt.block_on(async_handle_execute(args))
 }
 

@@ -1,4 +1,5 @@
 use crate::app::App;
+use crate::model::JobStatus;
 use ratatui::prelude::*;
 use repx_core::theme::ElementStyle;
 use std::str::FromStr;
@@ -26,16 +27,16 @@ pub fn get_style(app: &App, element: &ElementStyle) -> Style {
     style
 }
 
-pub fn status_style(app: &App, status: &str) -> Style {
+pub fn status_style(app: &App, status: &JobStatus) -> Style {
     match status {
-        "Succeeded" => get_style(app, &app.theme.elements.job_status.succeeded),
-        "Failed" => get_style(app, &app.theme.elements.job_status.failed),
-        "Submit Failed" => get_style(app, &app.theme.elements.job_status.submit_failed),
-        "Pending" => get_style(app, &app.theme.elements.job_status.pending),
-        "Running" => get_style(app, &app.theme.elements.job_status.running),
-        "Queued" => get_style(app, &app.theme.elements.job_status.queued),
-        "Blocked" => get_style(app, &app.theme.elements.job_status.blocked),
-        "Submitting..." => get_style(app, &app.theme.elements.job_status.submitting),
-        _ => get_style(app, &app.theme.elements.job_status.unknown),
+        JobStatus::Succeeded => get_style(app, &app.theme.elements.job_status.succeeded),
+        JobStatus::Failed => get_style(app, &app.theme.elements.job_status.failed),
+        JobStatus::SubmitFailed => get_style(app, &app.theme.elements.job_status.submit_failed),
+        JobStatus::Pending => get_style(app, &app.theme.elements.job_status.pending),
+        JobStatus::Running => get_style(app, &app.theme.elements.job_status.running),
+        JobStatus::Queued => get_style(app, &app.theme.elements.job_status.queued),
+        JobStatus::Blocked => get_style(app, &app.theme.elements.job_status.blocked),
+        JobStatus::Submitting => get_style(app, &app.theme.elements.job_status.submitting),
+        JobStatus::Unknown => get_style(app, &app.theme.elements.job_status.unknown),
     }
 }

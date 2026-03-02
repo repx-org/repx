@@ -7,6 +7,7 @@ use std::process::Stdio;
 use tokio::process::Command as TokioCommand;
 
 const EXCLUDED_ROOTFS_DIRS: &[&str] = &["dev", "proc", "tmp"];
+const SUCCESS_MARKER: &str = "SUCCESS";
 
 #[derive(Debug, Serialize, Deserialize)]
 struct OverlayCapabilityCache {
@@ -18,6 +19,8 @@ pub struct BwrapRuntime;
 
 const EXCLUDED_HOST_DIRS: &[&str] = &["dev", "proc", "sys", "nix"];
 const WRITABLE_HOST_DIRS: &[&str] = &["home", "tmp", "var", "opt", "srv", "mnt", "media", "run"];
+const DEFAULT_CONTAINER_PATH: &str = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
+const CONTAINER_HOSTNAME: &str = "repx-container";
 
 impl BwrapRuntime {
     pub async fn ensure_rootfs_extracted(
@@ -29,7 +32,7 @@ impl BwrapRuntime {
         let images_cache_dir = ctx.get_images_cache_dir();
         let image_dir = images_cache_dir.join(image_hash);
         let extract_dir = image_dir.join("rootfs");
-        let success_marker = image_dir.join("SUCCESS");
+        let success_marker = image_dir.join(SUCCESS_MARKER);
 
         let temp_path = ctx.get_temp_path();
         let lock_path = temp_path.join(format!("repx-extract-{}.lock", image_hash));
@@ -191,7 +194,7 @@ impl BwrapRuntime {
         Ok(union_dir)
     }
 
-    pub async fn check_overlay_support(ctx: &RuntimeContext<'_>, _lower_dir: &Path) -> bool {
+    pub async fn check_overlay_support(ctx: &RuntimeContext<'_>) -> bool {
         let cache_dir = ctx.get_capabilities_cache_dir();
         let cache_file = cache_dir.join("overlay_support.json");
 
@@ -381,7 +384,7 @@ impl BwrapRuntime {
         } else {
             cmd.arg("--unshare-all")
                 .arg("--hostname")
-                .arg("repx-container");
+                .arg(CONTAINER_HOSTNAME);
 
             let overlay_supported = Self::check_tmp_overlay_support(ctx, rootfs_path).await;
 
@@ -438,8 +441,7 @@ impl BwrapRuntime {
 
         cmd.arg("--clearenv");
 
-        let mut inner_path =
-            String::from("/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin");
+        let mut inner_path = String::from(DEFAULT_CONTAINER_PATH);
         if let Some(host_tools) = &request.host_tools_bin_dir {
             inner_path = format!("{}:{}", host_tools.display(), inner_path);
         }
@@ -533,7 +535,7 @@ impl BwrapRuntime {
             }
 
             let can_overlay = if has_image_store_entries {
-                Self::check_overlay_support(ctx, Path::new("/nix/store")).await
+                Self::check_overlay_support(ctx).await
             } else {
                 false
             };

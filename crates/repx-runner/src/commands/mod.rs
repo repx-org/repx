@@ -14,6 +14,15 @@ pub mod scatter_gather;
 pub mod show;
 pub mod trace;
 
+pub(crate) fn create_tokio_runtime() -> Result<tokio::runtime::Runtime, CliError> {
+    tokio::runtime::Runtime::new().map_err(|e| {
+        CliError::Config(ConfigError::General(format!(
+            "Failed to create async runtime: {}",
+            e
+        )))
+    })
+}
+
 pub(crate) fn write_marker(path: &Path) -> std::io::Result<()> {
     let f = std::fs::File::create(path)?;
     f.sync_all()?;
