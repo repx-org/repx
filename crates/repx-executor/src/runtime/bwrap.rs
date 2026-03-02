@@ -1,24 +1,12 @@
 use crate::context::RuntimeContext;
 use crate::error::{ExecutorError, Result};
 use crate::ExecutionRequest;
-use nix::fcntl::{Flock, FlockArg};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use tokio::process::Command as TokioCommand;
 
 const EXCLUDED_ROOTFS_DIRS: &[&str] = &["dev", "proc", "tmp"];
-
-const LOCK_POLL_INTERVAL_MS: u64 = 100;
-const LOCK_TIMEOUT_SECS_DEFAULT: u64 = 300;
-
-fn lock_timeout() -> std::time::Duration {
-    let secs = std::env::var("REPX_LOCK_TIMEOUT_SECS")
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(LOCK_TIMEOUT_SECS_DEFAULT);
-    std::time::Duration::from_secs(secs)
-}
 
 #[derive(Debug, Serialize, Deserialize)]
 struct OverlayCapabilityCache {
@@ -36,7 +24,7 @@ impl BwrapRuntime {
         ctx: &RuntimeContext<'_>,
         image_tag: &str,
     ) -> Result<PathBuf> {
-        let image_hash = image_tag.split(':').next_back().unwrap_or(image_tag);
+        let image_hash = crate::util::extract_image_hash(image_tag);
 
         let images_cache_dir = ctx.get_images_cache_dir();
         let image_dir = images_cache_dir.join(image_hash);
@@ -52,34 +40,7 @@ impl BwrapRuntime {
             return Ok(extract_dir);
         }
 
-        let mut lock_file = std::fs::File::create(&lock_path)?;
-        let timeout = lock_timeout();
-        let lock_start = std::time::Instant::now();
-        let _lock = loop {
-            match Flock::lock(lock_file, FlockArg::LockExclusiveNonblock) {
-                Ok(lock) => break lock,
-                Err((f, errno))
-                    if errno == nix::errno::Errno::EWOULDBLOCK
-                        || errno == nix::errno::Errno::EAGAIN =>
-                {
-                    if lock_start.elapsed() > timeout {
-                        return Err(ExecutorError::Io(std::io::Error::other(format!(
-                            "Timed out waiting for extraction lock after {}s (set REPX_LOCK_TIMEOUT_SECS to override)",
-                            timeout.as_secs()
-                        ))));
-                    }
-                    lock_file = f;
-                    tokio::time::sleep(std::time::Duration::from_millis(LOCK_POLL_INTERVAL_MS))
-                        .await;
-                }
-                Err((_, e)) => {
-                    return Err(ExecutorError::Io(std::io::Error::other(format!(
-                        "Failed to acquire extraction lock: {}",
-                        e
-                    ))))
-                }
-            }
-        };
+        let _lock = super::acquire_flock(&lock_path, "extraction").await?;
 
         if success_marker.exists() && extract_dir.exists() {
             return Ok(extract_dir);

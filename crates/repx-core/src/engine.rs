@@ -1,4 +1,4 @@
-use crate::model::{Job, JobId, Lab, RunId};
+use crate::model::{JobId, Lab, RunId};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap, HashSet};
 
@@ -11,14 +11,6 @@ pub enum JobStatus {
     Queued,
     Running,
     Blocked { missing_deps: HashSet<JobId> },
-}
-fn get_all_dependencies(job: &Job) -> impl Iterator<Item = &JobId> {
-    job.executables
-        .values()
-        .flat_map(|exe| exe.inputs.iter())
-        .filter_map(|mapping| mapping.job_id.as_ref())
-        .collect::<HashSet<_>>()
-        .into_iter()
 }
 
 pub fn determine_job_statuses(
@@ -81,7 +73,7 @@ fn resolve_job_status_inner<'a>(
     let mut missing_deps = HashSet::new();
     let mut all_deps_succeeded = true;
 
-    let dependencies = get_all_dependencies(job);
+    let dependencies = job.all_dependencies();
     for dep_id in dependencies {
         let dep_status = resolve_job_status_inner(dep_id, lab, cache, visiting);
         if !matches!(dep_status, JobStatus::Succeeded { .. }) {
@@ -176,7 +168,7 @@ pub fn build_dependency_graph(lab: &Lab, final_job_id: &JobId) -> Vec<JobId> {
         stack.push((job_id.clone(), true));
 
         if let Some(job) = lab.jobs.get(&job_id) {
-            for dep in get_all_dependencies(job) {
+            for dep in job.all_dependencies() {
                 if !visited.contains(dep) {
                     stack.push((dep.clone(), false));
                 }
@@ -190,7 +182,7 @@ pub fn build_dependency_graph(lab: &Lab, final_job_id: &JobId) -> Vec<JobId> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::JobId;
+    use crate::model::{Job, JobId};
     use std::collections::HashMap;
 
     #[test]

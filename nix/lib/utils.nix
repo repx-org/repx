@@ -1,5 +1,5 @@
 { pkgs }:
-let
+rec {
   sanitize =
     p:
     if builtins.isPath p then
@@ -9,8 +9,6 @@ let
       }
     else
       p;
-in
-rec {
   range = start: end: pkgs.lib.range start end;
 
   list = l: {

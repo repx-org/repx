@@ -14,6 +14,14 @@ pub mod error;
 
 use error::CliError;
 
+fn create_client(config: &config::Config, lab_path: &std::path::Path) -> Result<Client, CliError> {
+    Client::new(config.clone(), lab_path.to_path_buf()).map_err(|e| CliError::ExecutionFailed {
+        message: "Failed to initialize client".to_string(),
+        log_path: None,
+        log_summary: e.to_string(),
+    })
+}
+
 pub fn run(cli: Cli) -> Result<(), CliError> {
     if cli.verbose > 0 {
         logging::set_log_level(LogLevel::from(cli.verbose + 1));
@@ -45,13 +53,7 @@ pub fn run(cli: Cli) -> Result<(), CliError> {
         Commands::TraceParams(args) => commands::trace::handle_trace_params(args, &cli.lab),
         Commands::Log(args) => {
             let config = config::load_config()?;
-            let client = Client::new(config.clone(), cli.lab.clone()).map_err(|e| {
-                CliError::ExecutionFailed {
-                    message: "Failed to initialize client".to_string(),
-                    log_path: None,
-                    log_summary: e.to_string(),
-                }
-            })?;
+            let client = create_client(&config, &cli.lab)?;
             let target_name = cli
                 .target
                 .as_deref()
@@ -66,13 +68,7 @@ pub fn run(cli: Cli) -> Result<(), CliError> {
         }
         Commands::Gc(args) => {
             let config = config::load_config()?;
-            let client = Client::new(config.clone(), cli.lab.clone()).map_err(|e| {
-                CliError::ExecutionFailed {
-                    message: "Failed to initialize client".to_string(),
-                    log_path: None,
-                    log_summary: e.to_string(),
-                }
-            })?;
+            let client = create_client(&config, &cli.lab)?;
             let submission_target = args
                 .target
                 .clone()
@@ -89,13 +85,7 @@ pub fn run(cli: Cli) -> Result<(), CliError> {
             let config = config::load_config()?;
             let resources = config::load_resources(cli.resources.as_ref())?;
 
-            let client = Client::new(config.clone(), cli.lab.clone()).map_err(|e| {
-                CliError::ExecutionFailed {
-                    message: "Failed to initialize client".to_string(),
-                    log_path: None,
-                    log_summary: e.to_string(),
-                }
-            })?;
+            let client = create_client(&config, &cli.lab)?;
 
             let target_name = match cli.target.as_ref().or(config.submission_target.as_ref()) {
                 Some(name) => name.clone(),

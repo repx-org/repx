@@ -257,6 +257,17 @@ pub struct Lab {
     pub referenced_files: Vec<PathBuf>,
 }
 
+impl Job {
+    pub fn all_dependencies(&self) -> impl Iterator<Item = &JobId> {
+        self.executables
+            .values()
+            .flat_map(|exe| exe.inputs.iter())
+            .filter_map(|mapping| mapping.job_id.as_ref())
+            .collect::<std::collections::HashSet<_>>()
+            .into_iter()
+    }
+}
+
 impl Lab {
     pub fn is_native(&self) -> bool {
         self.runs.values().all(|run| run.image.is_none())

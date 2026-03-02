@@ -156,36 +156,7 @@ impl ScatterGatherOrchestrator {
         let scatter_repx_dir = scatter_root.join(dirs::REPX);
         let inputs_json_path = repx_dir.join("inputs.json");
 
-        let runtime = match args.runtime.as_str() {
-            "native" => Runtime::Native,
-            "podman" => Runtime::Podman {
-                image_tag: args.image_tag.clone().ok_or_else(|| {
-                    CliError::Config(ConfigError::General(
-                        "Podman runtime requires --image-tag".into(),
-                    ))
-                })?,
-            },
-            "docker" => Runtime::Docker {
-                image_tag: args.image_tag.clone().ok_or_else(|| {
-                    CliError::Config(ConfigError::General(
-                        "Docker runtime requires --image-tag".into(),
-                    ))
-                })?,
-            },
-            "bwrap" => Runtime::Bwrap {
-                image_tag: args.image_tag.clone().ok_or_else(|| {
-                    CliError::Config(ConfigError::General(
-                        "Bwrap runtime requires --image-tag".into(),
-                    ))
-                })?,
-            },
-            _ => {
-                return Err(CliError::Config(ConfigError::General(format!(
-                    "Unsupported runtime: {}",
-                    args.runtime
-                ))))
-            }
-        };
+        let runtime = super::parse_runtime(&args.runtime, args.image_tag.clone())?;
         let host_tools_root = args.base_path.join("artifacts").join("host-tools");
         let host_tools_bin_dir = Some(host_tools_root.join(&args.host_tools_dir).join("bin"));
 

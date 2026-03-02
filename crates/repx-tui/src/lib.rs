@@ -98,11 +98,11 @@ pub fn run(args: TuiArgs) -> Result<(), TuiError> {
 
         let target_name = active_target_clone_for_status
             .lock()
-            .expect("active_target mutex must not be poisoned")
+            .unwrap_or_else(|e| e.into_inner())
             .clone();
         let scheduler_name = active_scheduler_clone_for_status
             .lock()
-            .expect("active_scheduler mutex must not be poisoned")
+            .unwrap_or_else(|e| e.into_inner())
             .clone();
         let scheduler_type: Option<SchedulerType> = scheduler_name.parse().ok();
 
@@ -195,7 +195,7 @@ pub fn run(args: TuiArgs) -> Result<(), TuiError> {
                 if last_fetch.elapsed() >= polling_interval {
                     let target_name = active_target_clone_for_logs
                         .lock()
-                        .expect("active_target mutex must not be poisoned")
+                        .unwrap_or_else(|e| e.into_inner())
                         .clone();
                     let log_result = log_client_clone.get_log_tail(
                         job_id.clone(),

@@ -47,22 +47,7 @@ let
     name: default: if builtins.hasAttr name globalParams then globalParams.${name} else default
   ) declaredParams;
 
-  resolveWithParams =
-    attrName: value:
-    if builtins.isFunction value then
-      let
-        argSet = builtins.functionArgs value;
-      in
-      if argSet == { params = false; } || argSet == { params = true; } then
-        value { params = resolvedParams; }
-      else
-        throw ''
-          Stage definition error in '${toString stageFile}':
-          The '${attrName}' attribute is a function, but it must take exactly { params } as argument.
-          Got function with arguments: ${builtins.toJSON (builtins.attrNames argSet)}
-        ''
-    else
-      value;
+  resolveWithParams = common.mkResolveWithParams resolvedParams (toString stageFile);
 
   resolvedPname = resolveWithParams "pname" (stageDef.pname or (throw "Stage must have a pname"));
   resolvedInputs = resolveWithParams "inputs" (

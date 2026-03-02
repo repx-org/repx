@@ -320,7 +320,7 @@ pub fn submit_slurm_batch_run(
                 client
                     .slurm_map
                     .lock()
-                    .expect("slurm_map mutex must not be poisoned")
+                    .unwrap_or_else(|e| e.into_inner())
                     .insert(repx_id.clone(), (target_name.to_string(), slurm_id));
                 submitted_count += 1;
                 send(ClientEvent::JobSubmitted {

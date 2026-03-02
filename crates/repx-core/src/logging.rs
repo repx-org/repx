@@ -281,7 +281,11 @@ where
     }
 }
 
-pub fn init_session_logger(config: &LoggingConfig) -> Result<(), ConfigError> {
+fn init_logger(
+    config: &LoggingConfig,
+    prefix: &str,
+    symlink_name: &str,
+) -> Result<(), ConfigError> {
     let xdg_dirs = xdg::BaseDirectories::with_prefix("repx");
     let cache_home = xdg_dirs.get_cache_home().ok_or_else(|| {
         ConfigError::Io(std::io::Error::new(
@@ -291,16 +295,16 @@ pub fn init_session_logger(config: &LoggingConfig) -> Result<(), ConfigError> {
     })?;
     let logs_dir = cache_home.join("logs");
 
-    rotate_logs(&logs_dir, "repx_", config)?;
+    rotate_logs(&logs_dir, prefix, config)?;
 
     let timestamp = Local::now().format("%Y-%m-%d_%H-%M-%S");
     let pid = std::process::id();
-    let filename = format!("repx_{}_{}.log", timestamp, pid);
+    let filename = format!("{}{}_{}.log", prefix, timestamp, pid);
     let log_path = logs_dir.join(&filename);
 
     init_tracing_subscriber(&log_path)?;
 
-    let symlink_path = cache_home.join("repx.log");
+    let symlink_path = cache_home.join(symlink_name);
     let _ = fs::remove_file(&symlink_path);
     #[cfg(unix)]
     {
@@ -310,6 +314,10 @@ pub fn init_session_logger(config: &LoggingConfig) -> Result<(), ConfigError> {
     }
 
     Ok(())
+}
+
+pub fn init_session_logger(config: &LoggingConfig) -> Result<(), ConfigError> {
+    init_logger(config, "repx_", "repx.log")
 }
 
 pub fn init_stderr_logger() {
@@ -329,34 +337,7 @@ pub fn init_stderr_logger() {
 }
 
 pub fn init_tui_logger(config: &LoggingConfig) -> Result<(), ConfigError> {
-    let xdg_dirs = xdg::BaseDirectories::with_prefix("repx");
-    let cache_home = xdg_dirs.get_cache_home().ok_or_else(|| {
-        ConfigError::Io(std::io::Error::new(
-            std::io::ErrorKind::NotFound,
-            "Could not find cache home directory",
-        ))
-    })?;
-    let logs_dir = cache_home.join("logs");
-
-    rotate_logs(&logs_dir, "repx-tui_", config)?;
-
-    let timestamp = Local::now().format("%Y-%m-%d_%H-%M-%S");
-    let pid = std::process::id();
-    let filename = format!("repx-tui_{}_{}.log", timestamp, pid);
-    let log_path = logs_dir.join(&filename);
-
-    init_tracing_subscriber(&log_path)?;
-
-    let symlink_path = cache_home.join("repx-tui.log");
-    let _ = fs::remove_file(&symlink_path);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::symlink;
-        let target = Path::new("logs").join(filename);
-        let _ = symlink(&target, &symlink_path);
-    }
-
-    Ok(())
+    init_logger(config, "repx-tui_", "repx-tui.log")
 }
 
 fn format_command_for_display(command: &Command) -> String {

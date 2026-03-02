@@ -4,7 +4,7 @@ use repx_core::{
     errors::ConfigError,
     model::JobId,
 };
-use repx_executor::{ExecutionRequest, Executor, Runtime};
+use repx_executor::{ExecutionRequest, Executor};
 use std::fs;
 
 use super::write_marker;
@@ -45,36 +45,7 @@ async fn async_handle_execute(args: InternalExecuteArgs) -> Result<(), CliError>
         .to_path_buf();
     let inputs_json_path = repx_dir.join("inputs.json");
 
-    let runtime = match args.runtime.as_str() {
-        "native" => Runtime::Native,
-        "podman" => Runtime::Podman {
-            image_tag: args.image_tag.ok_or_else(|| {
-                CliError::Config(ConfigError::General(
-                    "Container execution with 'podman' requires an --image-tag.".to_string(),
-                ))
-            })?,
-        },
-        "docker" => Runtime::Docker {
-            image_tag: args.image_tag.ok_or_else(|| {
-                CliError::Config(ConfigError::General(
-                    "Container execution with 'docker' requires an --image-tag.".to_string(),
-                ))
-            })?,
-        },
-        "bwrap" => Runtime::Bwrap {
-            image_tag: args.image_tag.ok_or_else(|| {
-                CliError::Config(ConfigError::General(
-                    "Container execution with 'bwrap' requires an --image-tag.".to_string(),
-                ))
-            })?,
-        },
-        other => {
-            return Err(CliError::Config(ConfigError::General(format!(
-                "Unsupported runtime: {}",
-                other
-            ))))
-        }
-    };
+    let runtime = super::parse_runtime(&args.runtime, args.image_tag)?;
     let host_tools_root = args.base_path.join("artifacts").join("host-tools");
     let host_tools_bin_dir = Some(host_tools_root.join(&args.host_tools_dir).join("bin"));
 
