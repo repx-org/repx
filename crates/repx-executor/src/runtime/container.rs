@@ -96,11 +96,14 @@ impl ContainerRuntime {
                     tracing::debug!("tar command failed with status {}", tar_status);
                 }
 
-                if let Err(e) = copy_task
-                    .await
-                    .expect("tar-to-load copy task must not panic")
-                {
-                    tracing::debug!("Copying tar output to {} load failed: {}", binary, e);
+                match copy_task.await {
+                    Ok(Ok(_)) => {}
+                    Ok(Err(e)) => {
+                        tracing::debug!("Copying tar output to {} load failed: {}", binary, e);
+                    }
+                    Err(join_err) => {
+                        tracing::warn!("tar-to-load copy task panicked: {}", join_err);
+                    }
                 }
             } else {
                 tracing::debug!("Loading image tarball from {:?}...", image_full_path);
@@ -132,7 +135,14 @@ impl ContainerRuntime {
                 let mut tag_cmd = TokioCommand::new(binary);
                 tag_cmd.args(["tag", &id, image_tag]);
                 ctx.restrict_command_environment(&mut tag_cmd, &[binary]);
-                tag_cmd.output().await?;
+                let tag_output = tag_cmd.output().await?;
+                if !tag_output.status.success() {
+                    let stderr = String::from_utf8_lossy(&tag_output.stderr);
+                    return Err(ExecutorError::Io(std::io::Error::other(format!(
+                        "'{} tag {} {}' failed with status {}. Stderr:\n{}",
+                        binary, id, image_tag, tag_output.status, stderr
+                    ))));
+                }
                 tracing::info!("Successfully loaded and tagged image '{}'", image_tag);
             } else {
                 tracing::info!(

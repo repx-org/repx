@@ -388,7 +388,7 @@ fn build_filter_description(stage_filter: Option<&str>, status_filters: &[Status
     parts.join(" and ")
 }
 
-fn print_job_line(lab: &Lab, job_id: &JobId, ctx: &ListJobsContext, indent: usize) {
+fn print_job_line(_lab: &Lab, job_id: &JobId, ctx: &ListJobsContext, indent: usize) {
     let prefix = " ".repeat(indent);
     let mut line = format!("{}{}", prefix, job_id);
 
@@ -423,8 +423,6 @@ fn print_job_line(lab: &Lab, job_id: &JobId, ctx: &ListJobsContext, indent: usiz
     }
 
     println!("{}", line);
-
-    let _ = lab;
 }
 
 fn get_nested_value(value: &Value, key: &str) -> Value {
@@ -493,18 +491,12 @@ fn list_groups(lab: &Lab, name: Option<&str>) -> Result<(), CliError> {
                     keys.sort();
                     keys
                 };
-                if available.is_empty() {
-                    eprintln!(
-                        "Unknown group '{}'. No groups are defined in this lab.",
-                        group_name
-                    );
-                } else {
-                    eprintln!(
-                        "Unknown group '{}'. Available groups: {}",
-                        group_name,
-                        available.join(", ")
-                    );
-                }
+                return Err(CliError::Domain(
+                    repx_core::errors::DomainError::UnknownGroup {
+                        name: group_name.to_string(),
+                        available,
+                    },
+                ));
             }
         },
     }

@@ -13,14 +13,18 @@ use std::collections::HashSet;
 use std::fs;
 use std::path::Path;
 
-pub fn handle_show(args: ShowArgs, lab_path: &Path) -> Result<(), CliError> {
+pub fn handle_show(args: ShowArgs, lab_path: &Path, target: Option<&str>) -> Result<(), CliError> {
     match args.entity {
-        ShowEntity::Job(job_args) => handle_show_job(job_args, lab_path),
-        ShowEntity::Output(output_args) => handle_show_output(output_args, lab_path),
+        ShowEntity::Job(job_args) => handle_show_job(job_args, lab_path, target),
+        ShowEntity::Output(output_args) => handle_show_output(output_args, lab_path, target),
     }
 }
 
-fn handle_show_job(args: ShowJobArgs, lab_path: &Path) -> Result<(), CliError> {
+fn handle_show_job(
+    args: ShowJobArgs,
+    lab_path: &Path,
+    target: Option<&str>,
+) -> Result<(), CliError> {
     let lab = lab::load_from_path(lab_path)?;
     let config = config::load_config()?;
 
@@ -40,7 +44,7 @@ fn handle_show_job(args: ShowJobArgs, lab_path: &Path) -> Result<(), CliError> {
         .find(|(_, run)| run.jobs.contains(job_id))
         .map(|(run_id, _)| run_id.0.clone());
 
-    let store_path = get_store_path(&config)?;
+    let store_path = get_store_path(&config, target)?;
     let outcomes = get_job_outcomes(&store_path, std::slice::from_ref(job_id))?;
     let status = outcomes.get(job_id).map(|found| match found.outcome {
         JobOutcome::Succeeded => "SUCCESS",
@@ -193,12 +197,18 @@ fn handle_show_job(args: ShowJobArgs, lab_path: &Path) -> Result<(), CliError> {
     Ok(())
 }
 
-fn get_store_path(config: &Config) -> Result<std::path::PathBuf, CliError> {
-    let target_name = config.submission_target.as_ref().ok_or_else(|| {
-        CliError::Config(ConfigError::General(
-            "No submission target configured".to_string(),
-        ))
-    })?;
+fn get_store_path(
+    config: &Config,
+    target_override: Option<&str>,
+) -> Result<std::path::PathBuf, CliError> {
+    let target_name = target_override
+        .or(config.submission_target.as_deref())
+        .ok_or_else(|| {
+            CliError::Config(ConfigError::General(
+                "No submission target configured. Use --target or set 'submission_target' in config."
+                    .to_string(),
+            ))
+        })?;
 
     let target = config.targets.get(target_name).ok_or_else(|| {
         CliError::Config(ConfigError::General(format!(
@@ -263,6 +273,7 @@ fn list_directory_recursive(base: &Path, dir: &Path, indent: usize) -> Result<()
 
         if path.is_dir() {
             println!("{}{}/", prefix, relative.display());
+            list_directory_recursive(base, &path, indent + 2)?;
         } else {
             let size = fs::metadata(&path)
                 .map(|m| format_size(m.len()))
@@ -290,14 +301,18 @@ fn format_size(bytes: u64) -> String {
     }
 }
 
-fn handle_show_output(args: ShowOutputArgs, lab_path: &Path) -> Result<(), CliError> {
+fn handle_show_output(
+    args: ShowOutputArgs,
+    lab_path: &Path,
+    target: Option<&str>,
+) -> Result<(), CliError> {
     let lab = lab::load_from_path(lab_path)?;
     let config = config::load_config()?;
 
     let target_input = RunId(args.job_id.clone());
     let job_id = resolver::resolve_target_job_id(&lab, &target_input)?;
 
-    let store_path = get_store_path(&config)?;
+    let store_path = get_store_path(&config, target)?;
     let output_dir = store_path.join(dirs::OUTPUTS).join(&job_id.0);
     let out_dir = output_dir.join(dirs::OUT);
 

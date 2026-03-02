@@ -119,7 +119,7 @@ pub struct App {
     resources: Option<Resources>,
     pub focused_panel: PanelFocus,
     pub pending_action: Option<ExternalAction>,
-    pub system_logs: Vec<String>,
+    pub system_logs: VecDeque<String>,
     system_log_rx: Receiver<String>,
     pending_context_job_id: Option<JobId>,
     pub is_pinned: bool,
@@ -142,7 +142,7 @@ impl App {
         active_scheduler_ref: Arc<Mutex<String>>,
     ) -> Result<Self, ClientError> {
         tracing::info!("Initializing new App instance.");
-        let lab = client.lab()?.clone();
+        let lab = client.lab().clone();
         let is_native_lab = lab.is_native();
 
         let targets = client
@@ -251,7 +251,7 @@ impl App {
             submission_tx,
             submission_rx,
             system_log_rx,
-            system_logs: Vec::new(),
+            system_logs: VecDeque::new(),
             is_loading: true,
             resources,
             focused_panel: PanelFocus::Jobs,
@@ -330,9 +330,9 @@ impl App {
 
     pub fn check_for_system_log_updates(&mut self) {
         while let Ok(line) = self.system_log_rx.try_recv() {
-            self.system_logs.push(line);
+            self.system_logs.push_back(line);
             if self.system_logs.len() > 200 {
-                self.system_logs.remove(0);
+                self.system_logs.pop_front();
             }
         }
     }
@@ -930,7 +930,7 @@ impl App {
             Some(t) => t,
             None => {
                 self.system_logs
-                    .push(format!("Error: target '{}' not found", target_name));
+                    .push_back(format!("Error: target '{}' not found", target_name));
                 return;
             }
         };
@@ -947,7 +947,7 @@ impl App {
         let target_config = match config.targets.get(&target_name) {
             Some(tc) => tc,
             None => {
-                self.system_logs.push(format!(
+                self.system_logs.push_back(format!(
                     "Error: target '{}' not found in configuration",
                     target_name
                 ));
@@ -1056,7 +1056,7 @@ impl App {
             Some(t) => t,
             None => {
                 self.system_logs
-                    .push("No active target for pin operation".to_string());
+                    .push_back("No active target for pin operation".to_string());
                 return;
             }
         };
@@ -1064,7 +1064,7 @@ impl App {
         let lab_hash = &self.lab.content_hash;
         if lab_hash.is_empty() {
             self.system_logs
-                .push("Cannot pin: lab content hash is empty".to_string());
+                .push_back("Cannot pin: lab content hash is empty".to_string());
             return;
         }
 
@@ -1073,10 +1073,11 @@ impl App {
                 Ok(_) => {
                     self.is_pinned = false;
                     self.system_logs
-                        .push(format!("Lab unpinned from GC roots on '{}'", target_name));
+                        .push_back(format!("Lab unpinned from GC roots on '{}'", target_name));
                 }
                 Err(e) => {
-                    self.system_logs.push(format!("Failed to unpin: {}", e));
+                    self.system_logs
+                        .push_back(format!("Failed to unpin: {}", e));
                 }
             }
         } else {
@@ -1084,10 +1085,10 @@ impl App {
                 Ok(_) => {
                     self.is_pinned = true;
                     self.system_logs
-                        .push(format!("Lab pinned as GC root on '{}'", target_name));
+                        .push_back(format!("Lab pinned as GC root on '{}'", target_name));
                 }
                 Err(e) => {
-                    self.system_logs.push(format!("Failed to pin: {}", e));
+                    self.system_logs.push_back(format!("Failed to pin: {}", e));
                 }
             }
         }

@@ -148,7 +148,7 @@ impl<'a> VizGenerator<'a> {
             run_anchors.entry(run_name).or_insert(job_name);
         }
 
-        let mut intra_edges: HashMap<(String, String), usize> = HashMap::new();
+        let mut intra_edges: HashMap<(String, String, String, String), usize> = HashMap::new();
         let mut inter_edges: HashSet<(String, String, String)> = HashSet::new();
 
         for (jid, job) in &self.lab.jobs {
@@ -175,10 +175,14 @@ impl<'a> VizGenerator<'a> {
                         let src_name = src_job.name.clone().unwrap_or_else(|| sid.0.clone());
                         let clean_src_run = clean_id(&src_run);
                         let clean_src = clean_id(&src_name);
-                        let unique_src = format!("{}_{}", clean_src_run, clean_src);
 
                         *intra_edges
-                            .entry((unique_src, unique_tgt.clone()))
+                            .entry((
+                                clean_src_run,
+                                clean_src,
+                                clean_run.clone(),
+                                clean_tgt.clone(),
+                            ))
                             .or_default() += 1;
                     }
                 }
@@ -209,7 +213,10 @@ impl<'a> VizGenerator<'a> {
 
                 let clean_group = clean_id(group_name);
                 dot.push_str(&format!("    subgraph cluster_group_{} {{\n", clean_group));
-                dot.push_str(&format!("        label=\"@{}\";\n", group_name));
+                dot.push_str(&format!(
+                    "        label=\"@{}\";\n",
+                    escape_dot_label(group_name)
+                ));
                 dot.push_str("        style=\"solid,rounded\";\n");
                 dot.push_str(&format!("        color=\"{}\";\n", COLOR_GROUP_BORDER));
                 dot.push_str(&format!("        fontsize=\"{}\";\n", GROUP_FONT_SIZE));
@@ -240,13 +247,13 @@ impl<'a> VizGenerator<'a> {
         }
 
         for prefix in &node_prefixes {
-            for ((src, dst), cnt) in &intra_edges {
-                let src_job_name = src.split('_').next_back().unwrap_or(src);
-                let dst_job_name = dst.split('_').next_back().unwrap_or(dst);
-                let src_run = src.split('_').next().unwrap_or("");
-                let dst_run = dst.split('_').next().unwrap_or("");
+            for ((src_run, src_job_name, dst_run, dst_job_name), cnt) in &intra_edges {
+                let prefix_has_src =
+                    prefix == src_run || prefix.ends_with(&format!("_{}", src_run));
+                let prefix_has_dst =
+                    prefix == dst_run || prefix.ends_with(&format!("_{}", dst_run));
 
-                if prefix.contains(src_run) && prefix.contains(dst_run) {
+                if prefix_has_src && prefix_has_dst {
                     let width = if *cnt > 1 { "2.0" } else { "1.2" };
 
                     let src_node = format!("{}_{}", prefix, src_job_name);
@@ -333,7 +340,11 @@ impl<'a> VizGenerator<'a> {
         indent: &str,
     ) {
         dot.push_str(&format!("{}subgraph cluster_{} {{\n", indent, prefix));
-        dot.push_str(&format!("{}    label=\"Run: {}\";\n", indent, run_name));
+        dot.push_str(&format!(
+            "{}    label=\"Run: {}\";\n",
+            indent,
+            escape_dot_label(run_name)
+        ));
         dot.push_str(&format!("{}    style=\"dashed,rounded\";\n", indent));
         dot.push_str(&format!(
             "{}    color=\"{}\";\n",
@@ -362,7 +373,7 @@ impl<'a> VizGenerator<'a> {
                     &format!("{}    ", indent),
                 );
             } else {
-                let job_label = format!("{}\\n(x{})", job_name, count);
+                let job_label = format!("{}\\n(x{})", escape_dot_label(job_name), count);
                 let fill_color = get_fill_color(job_name);
 
                 dot.push_str(&format!("{}    {} [\n", indent, unique_node_id));
@@ -392,12 +403,17 @@ impl<'a> VizGenerator<'a> {
                     .collect();
 
                 let mut val_str = clean_vals.join(", ");
-                if val_str.len() > PARAM_MAX_WIDTH {
+                if val_str.chars().count() > PARAM_MAX_WIDTH {
                     let keep = PARAM_MAX_WIDTH.saturating_sub(2);
-                    val_str = format!("{}..", &val_str[..keep]);
+                    let truncated: String = val_str.chars().take(keep).collect();
+                    val_str = format!("{}..", truncated);
                 }
 
-                let label = format!("{}:\\n{}", p_key, val_str);
+                let label = format!(
+                    "{}:\\n{}",
+                    escape_dot_label(&p_key),
+                    escape_dot_label(&val_str)
+                );
 
                 dot.push_str(&format!("{}    {} [\n", indent, param_node_id));
                 dot.push_str(&format!("{}        label=\"{}\",\n", indent, label));
@@ -469,7 +485,9 @@ impl<'a> VizGenerator<'a> {
         dot.push_str(&format!("{}subgraph cluster_{} {{\n", indent, cluster_id));
         dot.push_str(&format!(
             "{}    label=\"{}\\n(x{})\";\n",
-            indent, job_name, count
+            indent,
+            escape_dot_label(job_name),
+            count
         ));
         dot.push_str(&format!("{}    style=\"filled,rounded,bold\";\n", indent));
         dot.push_str(&format!("{}    color=\"{}\";\n", indent, SG_CLUSTER_BORDER));
@@ -500,7 +518,11 @@ impl<'a> VizGenerator<'a> {
         for step_name in &step_names {
             let step_id = format!("{}_sg_step_{}", unique_node_id, clean_id(step_name));
             dot.push_str(&format!("{}    {} [\n", indent, step_id));
-            dot.push_str(&format!("{}        label=\"{}\",\n", indent, step_name));
+            dot.push_str(&format!(
+                "{}        label=\"{}\",\n",
+                indent,
+                escape_dot_label(step_name)
+            ));
             dot.push_str(&format!("{}        shape=\"box\",\n", indent));
             dot.push_str(&format!("{}        style=\"filled,rounded\",\n", indent));
             dot.push_str(&format!(
@@ -683,9 +705,18 @@ fn get_fill_color(name: &str) -> String {
         .to_string()
 }
 
+fn escape_dot_label(s: &str) -> String {
+    s.replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace('<', "\\<")
+        .replace('>', "\\>")
+}
+
 fn clean_id(s: &str) -> String {
-    let re = Regex::new(r"[^a-zA-Z0-9_]").expect("static regex pattern must compile");
-    re.replace_all(s, "").to_string()
+    static RE: std::sync::LazyLock<Regex> = std::sync::LazyLock::new(|| {
+        Regex::new(r"[^a-zA-Z0-9_]").expect("static regex pattern must compile")
+    });
+    RE.replace_all(s, "").to_string()
 }
 
 fn smart_truncate(val: &Value, max_len: usize) -> String {
