@@ -60,6 +60,9 @@ anyhow = "1.0"
 uuid = { version = "1.21.0", features = ["v4", "fast-rng", "macro-diagnostics"] }
 sysinfo = "0.32"
 
+[workspace.lints.clippy]
+unwrap_used = "deny"
+
 [profile.release]
 lto = "thin"
 codegen-units = 1

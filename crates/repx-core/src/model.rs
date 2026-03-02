@@ -304,7 +304,7 @@ mod tests {
     #[test]
     fn test_runid_from_str_ok() {
         assert_eq!(
-            RunId::from_str("my-experiment-run").unwrap(),
+            RunId::from_str("my-experiment-run").expect("valid run ID must parse"),
             RunId("my-experiment-run".to_string())
         );
     }
@@ -331,7 +331,7 @@ mod tests {
                 "spec": ["run-c"]
             }
         }"#;
-        let meta: RootMetadata = serde_json::from_str(json).unwrap();
+        let meta: RootMetadata = serde_json::from_str(json).expect("valid JSON must deserialize");
         assert_eq!(meta.groups.len(), 2);
         assert_eq!(meta.groups["foldability"], vec!["run-a", "run-b"]);
         assert_eq!(meta.groups["spec"], vec!["run-c"]);
@@ -345,7 +345,7 @@ mod tests {
             "gitHash": "abc123",
             "runs": ["revision/meta-run-a.json"]
         }"#;
-        let meta: RootMetadata = serde_json::from_str(json).unwrap();
+        let meta: RootMetadata = serde_json::from_str(json).expect("valid JSON must deserialize");
         assert!(meta.groups.is_empty());
     }
 }

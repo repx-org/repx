@@ -307,15 +307,21 @@ garbage line to ignore
         let parsed = parse_squeue(squeue_output);
         assert_eq!(parsed.len(), 4);
 
-        let job_one = parsed.get(&JobId("job-one-running".into())).unwrap();
+        let job_one = parsed
+            .get(&JobId("job-one-running".into()))
+            .expect("job-one-running must be present");
         assert_eq!(job_one.slurm_id, 12345);
         assert_eq!(job_one.state, SlurmState::Running);
 
-        let job_two = parsed.get(&JobId("job-two-pending".into())).unwrap();
+        let job_two = parsed
+            .get(&JobId("job-two-pending".into()))
+            .expect("job-two-pending must be present");
         assert_eq!(job_two.slurm_id, 12346);
         assert_eq!(job_two.state, SlurmState::Pending);
 
-        let job_three = parsed.get(&JobId("job-three-other".into())).unwrap();
+        let job_three = parsed
+            .get(&JobId("job-three-other".into()))
+            .expect("job-three-other must be present");
         assert_eq!(job_three.slurm_id, 12347);
         assert_eq!(job_three.state, SlurmState::Other("CG".into()));
     }

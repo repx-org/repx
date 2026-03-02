@@ -35,3 +35,6 @@ clap = { workspace = true, features = ["derive"] }
 colored = { workspace = true }
 which = "8.0"
 clap_complete = "4.5.66"
+
+[lints]
+workspace = true

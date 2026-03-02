@@ -9,6 +9,17 @@ use tokio::process::Command as TokioCommand;
 
 const EXCLUDED_ROOTFS_DIRS: &[&str] = &["dev", "proc", "tmp"];
 
+const LOCK_POLL_INTERVAL_MS: u64 = 100;
+const LOCK_TIMEOUT_SECS_DEFAULT: u64 = 300;
+
+fn lock_timeout() -> std::time::Duration {
+    let secs = std::env::var("REPX_LOCK_TIMEOUT_SECS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(LOCK_TIMEOUT_SECS_DEFAULT);
+    std::time::Duration::from_secs(secs)
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 struct OverlayCapabilityCache {
     tmp_overlay_supported: bool,
@@ -42,6 +53,8 @@ impl BwrapRuntime {
         }
 
         let mut lock_file = std::fs::File::create(&lock_path)?;
+        let timeout = lock_timeout();
+        let lock_start = std::time::Instant::now();
         let _lock = loop {
             match Flock::lock(lock_file, FlockArg::LockExclusiveNonblock) {
                 Ok(lock) => break lock,
@@ -49,8 +62,15 @@ impl BwrapRuntime {
                     if errno == nix::errno::Errno::EWOULDBLOCK
                         || errno == nix::errno::Errno::EAGAIN =>
                 {
+                    if lock_start.elapsed() > timeout {
+                        return Err(ExecutorError::Io(std::io::Error::other(format!(
+                            "Timed out waiting for extraction lock after {}s (set REPX_LOCK_TIMEOUT_SECS to override)",
+                            timeout.as_secs()
+                        ))));
+                    }
                     lock_file = f;
-                    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                    tokio::time::sleep(std::time::Duration::from_millis(LOCK_POLL_INTERVAL_MS))
+                        .await;
                 }
                 Err((_, e)) => {
                     return Err(ExecutorError::Io(std::io::Error::other(format!(

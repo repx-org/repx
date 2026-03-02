@@ -1,3 +1,5 @@
+use crate::error::ClientError;
+use repx_core::errors::ConfigError;
 use repx_core::model::{Job, JobId, StageType};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -30,12 +32,17 @@ impl OrchestrationPlan {
         job_def: &Job,
         script_hash: String,
         batch_jobs: &HashSet<JobId>,
-    ) {
+    ) -> Result<(), ClientError> {
         let entrypoint_exe = job_def
             .executables
             .get("main")
             .or_else(|| job_def.executables.get("scatter"))
-            .unwrap();
+            .ok_or_else(|| {
+                ClientError::Config(ConfigError::General(format!(
+                    "Job '{}' missing required executable 'main' or 'scatter'",
+                    job_id
+                )))
+            })?;
 
         let dependencies = entrypoint_exe
             .inputs
@@ -52,5 +59,6 @@ impl OrchestrationPlan {
                 job_type: job_def.stage_type.clone(),
             },
         );
+        Ok(())
     }
 }

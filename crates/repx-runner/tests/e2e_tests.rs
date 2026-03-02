@@ -17,7 +17,8 @@ fn test_full_run_local_native() {
     let stage_e_job_id = harness.get_job_id_by_name("stage-E-total-sum");
     let stage_e_path = harness.get_job_output_path(&stage_e_job_id);
     assert!(stage_e_path.join("repx/SUCCESS").exists());
-    let total_sum_content = fs::read_to_string(stage_e_path.join("out/total_sum.txt")).unwrap();
+    let total_sum_content = fs::read_to_string(stage_e_path.join("out/total_sum.txt"))
+        .expect("reading total_sum.txt must succeed");
     let val = total_sum_content.trim();
     assert!(
         val == "540" || val == "595",
@@ -181,7 +182,11 @@ fn test_list_commands() {
         .assert()
         .success()
         .stdout(predicates::str::contains("stage-A-producer"))
-        .stdout(predicates::str::is_match("stage-B").unwrap().not());
+        .stdout(
+            predicates::str::is_match("stage-B")
+                .expect("regex must compile")
+                .not(),
+        );
 }
 
 #[test]
@@ -346,8 +351,10 @@ fn test_continue_on_failure_runs_independent_jobs() {
     let stage_a_path = harness.get_job_output_path(&stage_a_job_id);
     assert!(stage_a_path.join("repx/SUCCESS").exists());
 
-    fs::remove_file(stage_a_path.join("repx/SUCCESS")).unwrap();
-    fs::write(stage_a_path.join("repx/FAIL"), "simulated failure").unwrap();
+    fs::remove_file(stage_a_path.join("repx/SUCCESS"))
+        .expect("removing SUCCESS marker must succeed");
+    fs::write(stage_a_path.join("repx/FAIL"), "simulated failure")
+        .expect("writing FAIL marker must succeed");
 
     let stage_b_job_id = harness.get_job_id_by_name("stage-B-producer");
     let stage_b_path = harness.get_job_output_path(&stage_b_job_id);

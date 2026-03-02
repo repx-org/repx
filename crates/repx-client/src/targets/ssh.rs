@@ -570,7 +570,15 @@ impl ArtifactSync for SshTarget {
             }
         }
 
-        let image_filename = image_path.file_name().unwrap().to_str().unwrap();
+        let image_filename = image_path
+            .file_name()
+            .and_then(|s| s.to_str())
+            .ok_or_else(|| {
+                ClientError::Config(ConfigError::General(format!(
+                    "Image path '{}' has no valid filename",
+                    image_path.display()
+                )))
+            })?;
         let image_hash_name = super::common::parse_image_hash(image_filename);
         let remote_image_dir = remote_images.join(image_hash_name);
 
@@ -589,15 +597,18 @@ impl ArtifactSync for SshTarget {
                 .unwrap_or(layer);
 
             let link_dir = remote_image_dir.join(layer_hash);
-            link_script.push_str(&format!("mkdir -p {}\n", link_dir.to_string_lossy()));
+            link_script.push_str(&format!(
+                "mkdir -p {}\n",
+                shell_quote(&link_dir.to_string_lossy())
+            ));
 
             let target_path = format!("../../store/{}-layer.tar", layer_hash);
             let link_path = link_dir.join("layer.tar");
 
             link_script.push_str(&format!(
                 "ln -sfn {} {}\n",
-                target_path,
-                link_path.to_string_lossy()
+                shell_quote(&target_path),
+                shell_quote(&link_path.to_string_lossy())
             ));
         }
 

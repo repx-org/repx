@@ -562,7 +562,9 @@ impl LocalTarget {
         for entry in WalkDir::new(src) {
             let entry = entry?;
             let path = entry.path();
-            let relative = path.strip_prefix(src).unwrap();
+            let relative = path
+                .strip_prefix(src)
+                .expect("strip_prefix guaranteed by WalkDir starting from src");
             let dest_path = dest.join(relative);
 
             if path.is_dir() {

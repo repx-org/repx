@@ -50,7 +50,10 @@ impl ContinueOnFailureHarness {
             let ready: Vec<JobId> = jobs_left
                 .iter()
                 .filter(|job_id| {
-                    let deps = self.jobs_to_submit.get(*job_id).unwrap();
+                    let deps = self
+                        .jobs_to_submit
+                        .get(*job_id)
+                        .expect("job must exist in graph");
                     let deps_met = deps.iter().all(|dep| completed.contains(dep));
                     let no_failed_deps = deps.iter().all(|dep| !failed_ids.contains(dep));
                     deps_met && no_failed_deps
@@ -140,7 +143,7 @@ fn test_fail_fast_stops_on_first_failure() {
     let result = harness.run();
 
     assert!(result.is_err());
-    assert!(result.unwrap_err().contains("A failed"));
+    assert!(result.expect_err("result must be Err").contains("A failed"));
 }
 
 #[test]
@@ -152,7 +155,7 @@ fn test_fail_fast_all_succeed() {
     };
 
     let harness = ContinueOnFailureHarness::new(graph, HashMap::new(), HashSet::new(), false);
-    let result = harness.run().unwrap();
+    let result = harness.run().expect("harness run must succeed");
 
     assert_eq!(result.failed.len(), 0);
     assert_eq!(result.skipped.len(), 0);
@@ -172,7 +175,7 @@ fn test_continue_on_failure_runs_independent_jobs() {
     };
 
     let harness = ContinueOnFailureHarness::new(graph, outcomes, HashSet::new(), true);
-    let result = harness.run().unwrap();
+    let result = harness.run().expect("harness run must succeed");
 
     assert_eq!(result.failed.len(), 1);
     assert_eq!(result.failed[0].0, job_id!("A"));
@@ -196,7 +199,7 @@ fn test_continue_on_failure_reports_multiple_failures() {
     };
 
     let harness = ContinueOnFailureHarness::new(graph, outcomes, HashSet::new(), true);
-    let result = harness.run().unwrap();
+    let result = harness.run().expect("harness run must succeed");
 
     assert_eq!(result.failed.len(), 2);
     let failed_ids: HashSet<_> = result.failed.iter().map(|(id, _)| id.clone()).collect();
@@ -221,7 +224,7 @@ fn test_continue_on_failure_cascading_skips() {
     };
 
     let harness = ContinueOnFailureHarness::new(graph, outcomes, HashSet::new(), true);
-    let result = harness.run().unwrap();
+    let result = harness.run().expect("harness run must succeed");
 
     assert_eq!(result.failed.len(), 1);
     assert_eq!(result.failed[0].0, job_id!("A"));
@@ -245,7 +248,7 @@ fn test_continue_on_failure_diamond_with_one_path_failing() {
     };
 
     let harness = ContinueOnFailureHarness::new(graph, outcomes, HashSet::new(), true);
-    let result = harness.run().unwrap();
+    let result = harness.run().expect("harness run must succeed");
 
     assert!(result.succeeded.contains(&job_id!("start")));
     assert!(result.succeeded.contains(&job_id!("mid_b")));
@@ -268,7 +271,7 @@ fn test_continue_on_failure_partial_fan_out_failure() {
     };
 
     let harness = ContinueOnFailureHarness::new(graph, outcomes, HashSet::new(), true);
-    let result = harness.run().unwrap();
+    let result = harness.run().expect("harness run must succeed");
 
     assert!(result.succeeded.contains(&job_id!("start")));
     assert!(result.succeeded.contains(&job_id!("A")));
@@ -290,7 +293,7 @@ fn test_continue_on_failure_all_succeed() {
     };
 
     let harness = ContinueOnFailureHarness::new(graph, HashMap::new(), HashSet::new(), true);
-    let result = harness.run().unwrap();
+    let result = harness.run().expect("harness run must succeed");
 
     assert_eq!(result.failed.len(), 0);
     assert_eq!(result.skipped.len(), 0);
@@ -316,7 +319,7 @@ fn test_continue_on_failure_complex_scenario() {
     };
 
     let harness = ContinueOnFailureHarness::new(graph, outcomes, HashSet::new(), true);
-    let result = harness.run().unwrap();
+    let result = harness.run().expect("harness run must succeed");
 
     assert_eq!(result.failed.len(), 2);
     let failed_ids: HashSet<_> = result.failed.iter().map(|(id, _)| id.clone()).collect();

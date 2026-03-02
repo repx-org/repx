@@ -15,17 +15,19 @@ fn test_gc_removes_dead_artifacts_and_outputs() {
     let outputs_dir = base_path.join("outputs");
     let gcroots_dir = base_path.join("gcroots");
 
-    fs::create_dir_all(&artifacts_dir).unwrap();
-    fs::create_dir_all(&outputs_dir).unwrap();
-    fs::create_dir_all(&gcroots_dir).unwrap();
+    fs::create_dir_all(&artifacts_dir).expect("creating artifacts dir must succeed");
+    fs::create_dir_all(&outputs_dir).expect("creating outputs dir must succeed");
+    fs::create_dir_all(&gcroots_dir).expect("creating gcroots dir must succeed");
 
     let dead_artifact = artifacts_dir.join("dead-hash-123");
-    fs::create_dir_all(&dead_artifact).unwrap();
-    fs::write(dead_artifact.join("some_file"), "data").unwrap();
+    fs::create_dir_all(&dead_artifact).expect("creating dead artifact dir must succeed");
+    fs::write(dead_artifact.join("some_file"), "data")
+        .expect("writing dead artifact file must succeed");
 
     let dead_output = outputs_dir.join("job-orphan-123");
-    fs::create_dir_all(&dead_output).unwrap();
-    fs::write(dead_output.join("stuff.txt"), "result").unwrap();
+    fs::create_dir_all(&dead_output).expect("creating dead output dir must succeed");
+    fs::write(dead_output.join("stuff.txt"), "result")
+        .expect("writing dead output file must succeed");
 
     let mut cmd = harness.cmd();
     cmd.arg("internal-gc").arg("--base-path").arg(base_path);
@@ -53,12 +55,12 @@ fn test_gc_preserves_pinned_lab_and_outputs() {
     harness.stage_lab();
 
     let manifest_path = fs::read_dir(artifacts_dir.join("lab"))
-        .unwrap()
-        .map(|e| e.unwrap().path())
+        .expect("reading lab artifacts dir must succeed")
+        .map(|e| e.expect("reading dir entry must succeed").path())
         .find(|p| p.to_string_lossy().ends_with("lab-metadata.json"))
         .expect("Could not find manifest to pin");
 
-    fs::create_dir_all(&gcroots_pinned).unwrap();
+    fs::create_dir_all(&gcroots_pinned).expect("creating gcroots/pinned dir must succeed");
     let link_path = gcroots_pinned.join("my-pinned-lab");
     #[cfg(unix)]
     symlink(&manifest_path, &link_path).expect("Failed to create symlink");
@@ -66,16 +68,17 @@ fn test_gc_preserves_pinned_lab_and_outputs() {
     let job_id = harness.get_job_id_by_name("stage-A-producer");
 
     let valid_job_output = outputs_dir.join(&job_id);
-    fs::create_dir_all(&valid_job_output).unwrap();
-    fs::write(valid_job_output.join("log.txt"), "I am important").unwrap();
+    fs::create_dir_all(&valid_job_output).expect("creating valid job output dir must succeed");
+    fs::write(valid_job_output.join("log.txt"), "I am important")
+        .expect("writing job log must succeed");
 
     let orphan_job_output = outputs_dir.join("job-nobody-knows");
-    fs::create_dir_all(&orphan_job_output).unwrap();
+    fs::create_dir_all(&orphan_job_output).expect("creating orphan job output dir must succeed");
 
     let mut cmd = harness.cmd();
     cmd.arg("internal-gc").arg("--base-path").arg(base_path);
 
-    let output = cmd.output().unwrap();
+    let output = cmd.output().expect("executing internal-gc must succeed");
     println!("STDOUT: {}", String::from_utf8_lossy(&output.stdout));
     println!("STDERR: {}", String::from_utf8_lossy(&output.stderr));
     assert!(output.status.success());
@@ -104,15 +107,15 @@ fn test_gc_preserves_auto_gcroots() {
     harness.stage_lab();
 
     let manifest_path = fs::read_dir(artifacts_dir.join("lab"))
-        .unwrap()
-        .map(|e| e.unwrap().path())
+        .expect("reading lab artifacts dir must succeed")
+        .map(|e| e.expect("reading dir entry must succeed").path())
         .find(|p| p.to_string_lossy().ends_with("lab-metadata.json"))
         .expect("Could not find manifest to pin");
 
-    fs::create_dir_all(&gcroots_auto).unwrap();
+    fs::create_dir_all(&gcroots_auto).expect("creating gcroots/auto dir must succeed");
     let link_path = gcroots_auto.join("2023-01-01_snapshot-1");
     #[cfg(unix)]
-    symlink(&manifest_path, &link_path).unwrap();
+    symlink(&manifest_path, &link_path).expect("creating auto gcroot symlink must succeed");
 
     harness
         .cmd()
@@ -142,8 +145,8 @@ fn test_gc_root_rotation_keeps_last_5() {
     let lab_hash = "abc-123";
 
     let artifacts_dir = base_path.join("artifacts");
-    fs::create_dir_all(&artifacts_dir).unwrap();
-    fs::create_dir_all(artifacts_dir.join(lab_hash)).unwrap();
+    fs::create_dir_all(&artifacts_dir).expect("creating artifacts dir must succeed");
+    fs::create_dir_all(artifacts_dir.join(lab_hash)).expect("creating lab hash dir must succeed");
 
     let target_config = TargetConfig {
         base_path: base_path.to_path_buf(),
@@ -161,16 +164,23 @@ fn test_gc_root_rotation_keeps_last_5() {
         ..Default::default()
     };
 
-    let client = Client::new(config, harness.lab_path.clone()).unwrap();
-    let target = client.get_target("local").unwrap();
+    let client =
+        Client::new(config, harness.lab_path.clone()).expect("creating client must succeed");
+    let target = client
+        .get_target("local")
+        .expect("getting local target must succeed");
 
     for _ in 0..7 {
-        target.register_gc_root(project_id, lab_hash).unwrap();
+        target
+            .register_gc_root(project_id, lab_hash)
+            .expect("registering gc root must succeed");
         thread::sleep(Duration::from_millis(1100));
     }
 
     let gcroots_auto = base_path.join("gcroots/auto").join(project_id);
-    let count = fs::read_dir(gcroots_auto).unwrap().count();
+    let count = fs::read_dir(gcroots_auto)
+        .expect("reading gcroots auto dir must succeed")
+        .count();
     assert_eq!(count, 5, "Should keep exactly 5 GC roots after rotation");
 }
 
@@ -181,7 +191,7 @@ fn test_project_id_generation_includes_git_remote() {
 
     let mut harness = TestHarness::new();
     let temp_lab_root = harness.cache_dir.join("git_test_lab");
-    fs::create_dir_all(&temp_lab_root).unwrap();
+    fs::create_dir_all(&temp_lab_root).expect("creating temp lab root must succeed");
 
     let status = Command::new("cp")
         .arg("-r")
@@ -210,7 +220,7 @@ fn test_project_id_generation_includes_git_remote() {
 
     harness.stage_lab();
 
-    let lab_abs = fs::canonicalize(&temp_lab_root).unwrap();
+    let lab_abs = fs::canonicalize(&temp_lab_root).expect("canonicalizing lab path must succeed");
     let abs_hash = format!("{:x}", Sha256::digest(lab_abs.to_string_lossy().as_bytes()));
     let remote_hash = format!("{:x}", Sha256::digest(remote_url.as_bytes()));
     let expected_project_id = format!("{}_{}", remote_hash, abs_hash);
@@ -235,20 +245,20 @@ fn test_gc_cleans_collection_directories() {
     let base_path = &harness.cache_dir;
     let artifacts_dir = base_path.join("artifacts");
 
-    fs::create_dir_all(&artifacts_dir).unwrap();
-    fs::create_dir_all(base_path.join("gcroots")).unwrap();
+    fs::create_dir_all(&artifacts_dir).expect("creating artifacts dir must succeed");
+    fs::create_dir_all(base_path.join("gcroots")).expect("creating gcroots dir must succeed");
 
     let dirs_to_check = vec!["host-tools", "images", "image", "jobs"];
 
     for dir_name in &dirs_to_check {
         let dir_path = artifacts_dir.join(dir_name);
-        fs::create_dir_all(&dir_path).unwrap();
-        fs::write(dir_path.join("dead_file"), "content").unwrap();
+        fs::create_dir_all(&dir_path).expect("creating collection dir must succeed");
+        fs::write(dir_path.join("dead_file"), "content").expect("writing dead file must succeed");
     }
 
     let bin_dir = artifacts_dir.join("bin");
-    fs::create_dir_all(&bin_dir).unwrap();
-    fs::write(bin_dir.join("keep_me"), "content").unwrap();
+    fs::create_dir_all(&bin_dir).expect("creating bin dir must succeed");
+    fs::write(bin_dir.join("keep_me"), "content").expect("writing keep_me file must succeed");
 
     harness
         .cmd()
@@ -280,14 +290,15 @@ fn test_gc_handles_broken_symlinks_gracefully() {
     let harness = TestHarness::new();
     let base_path = &harness.cache_dir;
     let gcroots_pinned = base_path.join("gcroots/pinned");
-    fs::create_dir_all(&gcroots_pinned).unwrap();
+    fs::create_dir_all(&gcroots_pinned).expect("creating gcroots/pinned dir must succeed");
 
     let link_path = gcroots_pinned.join("broken-link");
     #[cfg(unix)]
-    symlink(Path::new("/does/not/exist"), &link_path).unwrap();
+    symlink(Path::new("/does/not/exist"), &link_path)
+        .expect("creating broken symlink must succeed");
 
     let dead_artifact = base_path.join("artifacts/dead-one");
-    fs::create_dir_all(&dead_artifact).unwrap();
+    fs::create_dir_all(&dead_artifact).expect("creating dead artifact dir must succeed");
 
     harness
         .cmd()
@@ -311,11 +322,12 @@ fn test_gc_handles_lab_load_failure() {
 
     let corrupt_hash = "corrupt-hash";
     let corrupt_path = base_path.join("artifacts").join(corrupt_hash);
-    fs::create_dir_all(&corrupt_path).unwrap();
+    fs::create_dir_all(&corrupt_path).expect("creating corrupt artifact dir must succeed");
 
-    fs::create_dir_all(&gcroots_pinned).unwrap();
+    fs::create_dir_all(&gcroots_pinned).expect("creating gcroots/pinned dir must succeed");
     #[cfg(unix)]
-    symlink(&corrupt_path, gcroots_pinned.join("my-corrupt-pin")).unwrap();
+    symlink(&corrupt_path, gcroots_pinned.join("my-corrupt-pin"))
+        .expect("creating symlink to corrupt artifact must succeed");
 
     harness
         .cmd()
@@ -358,8 +370,10 @@ fn make_client_and_target(
         ..Default::default()
     };
 
-    let client = Client::new(config, lab_path.to_path_buf()).unwrap();
-    let target = client.get_target("local").unwrap();
+    let client = Client::new(config, lab_path.to_path_buf()).expect("creating client must succeed");
+    let target = client
+        .get_target("local")
+        .expect("getting local target must succeed");
     (client, target)
 }
 
@@ -371,7 +385,9 @@ fn test_gc_pin_creates_symlink_in_pinned_dir() {
     let lab_hash = harness.get_lab_content_hash();
     let (_client, target) = make_client_and_target(base_path, &harness.lab_path);
 
-    target.pin_gc_root(&lab_hash, "my-experiment").unwrap();
+    target
+        .pin_gc_root(&lab_hash, "my-experiment")
+        .expect("pinning gc root must succeed");
 
     let pinned_link = base_path.join("gcroots/pinned/my-experiment");
     assert!(
@@ -395,7 +411,9 @@ fn test_gc_pin_default_name_uses_lab_hash() {
     let lab_hash = harness.get_lab_content_hash();
     let (_client, target) = make_client_and_target(base_path, &harness.lab_path);
 
-    target.pin_gc_root(&lab_hash, &lab_hash).unwrap();
+    target
+        .pin_gc_root(&lab_hash, &lab_hash)
+        .expect("pinning gc root with hash name must succeed");
 
     let pinned_link = base_path.join("gcroots/pinned").join(&lab_hash);
     assert!(
@@ -412,7 +430,9 @@ fn test_gc_unpin_removes_symlink() {
     let lab_hash = harness.get_lab_content_hash();
     let (_client, target) = make_client_and_target(base_path, &harness.lab_path);
 
-    target.pin_gc_root(&lab_hash, "to-remove").unwrap();
+    target
+        .pin_gc_root(&lab_hash, "to-remove")
+        .expect("pinning gc root must succeed");
 
     let pinned_link = base_path.join("gcroots/pinned/to-remove");
     assert!(
@@ -420,7 +440,9 @@ fn test_gc_unpin_removes_symlink() {
         "Pin should exist before unpin"
     );
 
-    target.unpin_gc_root("to-remove").unwrap();
+    target
+        .unpin_gc_root("to-remove")
+        .expect("unpinning gc root must succeed");
 
     assert!(
         pinned_link.symlink_metadata().is_err(),
@@ -437,7 +459,10 @@ fn test_gc_unpin_nonexistent_name_fails() {
 
     let result = target.unpin_gc_root("does-not-exist");
     assert!(result.is_err(), "Unpin of nonexistent name should fail");
-    let err_msg = format!("{}", result.unwrap_err());
+    let err_msg = format!(
+        "{}",
+        result.expect_err("unpinning nonexistent name must fail")
+    );
     assert!(
         err_msg.contains("No pinned GC root named"),
         "Error should mention the missing name. Got: {}",
@@ -454,7 +479,10 @@ fn test_gc_pin_nonexistent_hash_fails() {
 
     let result = target.pin_gc_root("nonexistent-hash-xyz", "bad-pin");
     assert!(result.is_err(), "Pin with nonexistent lab hash should fail");
-    let err_msg = format!("{}", result.unwrap_err());
+    let err_msg = format!(
+        "{}",
+        result.expect_err("pinning nonexistent hash must fail")
+    );
     assert!(
         err_msg.contains("No lab manifest found"),
         "Error should mention missing manifest. Got: {}",
@@ -472,11 +500,17 @@ fn test_gc_list_shows_auto_and_pinned() {
     let lab_hash = harness.get_lab_content_hash();
     let (_client, target) = make_client_and_target(base_path, &harness.lab_path);
 
-    target.pin_gc_root(&lab_hash, "my-pin").unwrap();
+    target
+        .pin_gc_root(&lab_hash, "my-pin")
+        .expect("pinning gc root must succeed");
 
-    target.register_gc_root("test-project", &lab_hash).unwrap();
+    target
+        .register_gc_root("test-project", &lab_hash)
+        .expect("registering gc root must succeed");
 
-    let roots = target.list_gc_roots().unwrap();
+    let roots = target
+        .list_gc_roots()
+        .expect("listing gc roots must succeed");
     assert!(!roots.is_empty(), "Should have at least 2 roots");
 
     let has_pinned = roots
@@ -495,7 +529,9 @@ fn test_gc_list_empty() {
 
     let (_client, target) = make_client_and_target(base_path, &harness.lab_path);
 
-    let roots = target.list_gc_roots().unwrap();
+    let roots = target
+        .list_gc_roots()
+        .expect("listing gc roots must succeed");
     assert!(roots.is_empty(), "Should have no roots on fresh setup");
 }
 
@@ -506,12 +542,12 @@ fn test_gc_no_subcommand_still_runs_gc() {
     let artifacts_dir = base_path.join("artifacts");
     let gcroots_dir = base_path.join("gcroots");
 
-    fs::create_dir_all(&artifacts_dir).unwrap();
-    fs::create_dir_all(&gcroots_dir).unwrap();
+    fs::create_dir_all(&artifacts_dir).expect("creating artifacts dir must succeed");
+    fs::create_dir_all(&gcroots_dir).expect("creating gcroots dir must succeed");
 
     let dead_artifact = artifacts_dir.join("dead-hash-999");
-    fs::create_dir_all(&dead_artifact).unwrap();
-    fs::write(dead_artifact.join("file"), "data").unwrap();
+    fs::create_dir_all(&dead_artifact).expect("creating dead artifact dir must succeed");
+    fs::write(dead_artifact.join("file"), "data").expect("writing dead artifact file must succeed");
 
     harness
         .cmd()
@@ -535,11 +571,13 @@ fn test_pinned_root_survives_gc() {
     let lab_hash = harness.get_lab_content_hash();
     let (_client, target) = make_client_and_target(base_path, &harness.lab_path);
 
-    target.pin_gc_root(&lab_hash, "keep-me").unwrap();
+    target
+        .pin_gc_root(&lab_hash, "keep-me")
+        .expect("pinning gc root must succeed");
 
     let dead = base_path.join("artifacts/dead-thing");
-    fs::create_dir_all(&dead).unwrap();
-    fs::write(dead.join("f"), "data").unwrap();
+    fs::create_dir_all(&dead).expect("creating dead artifact dir must succeed");
+    fs::write(dead.join("f"), "data").expect("writing dead artifact file must succeed");
 
     harness
         .cmd()
@@ -555,11 +593,14 @@ fn test_pinned_root_survives_gc() {
         "Pinned symlink should survive GC"
     );
 
-    let link_target = fs::read_link(&pinned_link).unwrap();
+    let link_target = fs::read_link(&pinned_link).expect("reading pinned symlink must succeed");
     let abs_target = if link_target.is_absolute() {
         link_target
     } else {
-        pinned_link.parent().unwrap().join(link_target)
+        pinned_link
+            .parent()
+            .expect("pinned link must have parent")
+            .join(link_target)
     };
     assert!(
         fs::canonicalize(&abs_target).is_ok(),
@@ -577,8 +618,12 @@ fn test_pin_overwrite_existing() {
     let lab_hash = harness.get_lab_content_hash();
     let (_client, target) = make_client_and_target(base_path, &harness.lab_path);
 
-    target.pin_gc_root(&lab_hash, "same-name").unwrap();
-    target.pin_gc_root(&lab_hash, "same-name").unwrap();
+    target
+        .pin_gc_root(&lab_hash, "same-name")
+        .expect("first pin must succeed");
+    target
+        .pin_gc_root(&lab_hash, "same-name")
+        .expect("overwriting pin must succeed");
 
     let pinned_link = base_path.join("gcroots/pinned/same-name");
     assert!(
@@ -587,7 +632,7 @@ fn test_pin_overwrite_existing() {
     );
 
     let count = fs::read_dir(base_path.join("gcroots/pinned"))
-        .unwrap()
+        .expect("reading gcroots/pinned dir must succeed")
         .count();
     assert_eq!(
         count, 1,

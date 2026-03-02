@@ -8,6 +8,10 @@ pub mod ui;
 pub mod widgets;
 
 use crate::app::{ExternalAction, LogPollerCommand};
+
+fn shell_quote_single(s: &str) -> String {
+    format!("'{}'", s.replace('\'', "'\\''"))
+}
 use crate::error::TuiError;
 use crate::{
     app::{App, SubmissionResult},
@@ -92,8 +96,14 @@ pub fn run(args: TuiArgs) -> Result<(), TuiError> {
             break;
         }
 
-        let target_name = active_target_clone_for_status.lock().unwrap().clone();
-        let scheduler_name = active_scheduler_clone_for_status.lock().unwrap().clone();
+        let target_name = active_target_clone_for_status
+            .lock()
+            .expect("active_target mutex must not be poisoned")
+            .clone();
+        let scheduler_name = active_scheduler_clone_for_status
+            .lock()
+            .expect("active_scheduler mutex must not be poisoned")
+            .clone();
         let scheduler_type: Option<SchedulerType> = scheduler_name.parse().ok();
 
         let statuses = status_client_clone
@@ -183,7 +193,10 @@ pub fn run(args: TuiArgs) -> Result<(), TuiError> {
 
             if let Some(job_id) = &current_job_to_watch {
                 if last_fetch.elapsed() >= polling_interval {
-                    let target_name = active_target_clone_for_logs.lock().unwrap().clone();
+                    let target_name = active_target_clone_for_logs
+                        .lock()
+                        .expect("active_target mutex must not be poisoned")
+                        .clone();
                     let log_result = log_client_clone.get_log_tail(
                         job_id.clone(),
                         &target_name,
@@ -254,7 +267,7 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<Stdout>>, app: &mut App) -> 
                 ExternalAction::ExploreRemote { address, path } => {
                     suspend_tui(terminal)?;
                     let remote_path = path.to_string_lossy().replace('\\', "/");
-                    let remote_cmd = format!("yazi '{}'", remote_path);
+                    let remote_cmd = format!("yazi {}", shell_quote_single(&remote_path));
                     let _ = std::process::Command::new("ssh")
                         .arg("-t")
                         .arg(address)
@@ -274,7 +287,7 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<Stdout>>, app: &mut App) -> 
                     suspend_tui(terminal)?;
                     let remote_paths: Vec<String> = paths
                         .iter()
-                        .map(|p| format!("'{}'", p.to_string_lossy().replace('\\', "/")))
+                        .map(|p| shell_quote_single(&p.to_string_lossy().replace('\\', "/")))
                         .collect();
                     let remote_paths_str = remote_paths.join(" ");
                     let remote_cmd = format!("${{EDITOR:-vi}} {}", remote_paths_str);

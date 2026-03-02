@@ -169,7 +169,7 @@ mod tests {
     fn test_tui_scheduler_roundtrip() {
         for scheduler in [TuiScheduler::Local, TuiScheduler::Slurm] {
             let s = scheduler.as_str();
-            let parsed: TuiScheduler = s.parse().unwrap();
+            let parsed: TuiScheduler = s.parse().expect("roundtrip parse must succeed");
             assert_eq!(scheduler, parsed);
         }
     }
@@ -206,7 +206,7 @@ mod tests {
             TuiExecutor::Bwrap,
         ] {
             let s = executor.as_str();
-            let parsed: TuiExecutor = s.parse().unwrap();
+            let parsed: TuiExecutor = s.parse().expect("roundtrip parse must succeed");
             assert_eq!(executor, parsed);
         }
     }
@@ -309,8 +309,9 @@ mod tests {
             logs: vec!["log line 1".to_string(), "log line 2".to_string()],
         };
 
-        let serialized = serde_json::to_string(&job).unwrap();
-        let deserialized: TuiJob = serde_json::from_str(&serialized).unwrap();
+        let serialized = serde_json::to_string(&job).expect("TuiJob must serialize");
+        let deserialized: TuiJob =
+            serde_json::from_str(&serialized).expect("serialized TuiJob must deserialize");
 
         assert_eq!(deserialized.id, "job-123");
         assert_eq!(deserialized.name, "Test Job");

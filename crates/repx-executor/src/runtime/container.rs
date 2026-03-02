@@ -6,6 +6,17 @@ use std::process::Stdio;
 use tokio::fs::File;
 use tokio::process::Command as TokioCommand;
 
+const LOCK_POLL_INTERVAL_MS: u64 = 100;
+const LOCK_TIMEOUT_SECS_DEFAULT: u64 = 300;
+
+fn lock_timeout() -> std::time::Duration {
+    let secs = std::env::var("REPX_LOCK_TIMEOUT_SECS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(LOCK_TIMEOUT_SECS_DEFAULT);
+    std::time::Duration::from_secs(secs)
+}
+
 pub struct ContainerRuntime;
 
 use super::Runtime;
@@ -32,6 +43,8 @@ impl ContainerRuntime {
         let lock_path = temp_path.join(format!("repx-load-{}.lock", image_hash));
 
         let mut lock_file = std::fs::File::create(&lock_path)?;
+        let timeout = lock_timeout();
+        let lock_start = std::time::Instant::now();
         let _lock = loop {
             match Flock::lock(lock_file, FlockArg::LockExclusiveNonblock) {
                 Ok(lock) => break lock,
@@ -39,8 +52,15 @@ impl ContainerRuntime {
                     if errno == nix::errno::Errno::EWOULDBLOCK
                         || errno == nix::errno::Errno::EAGAIN =>
                 {
+                    if lock_start.elapsed() > timeout {
+                        return Err(ExecutorError::Io(std::io::Error::other(format!(
+                            "Timed out waiting for image load lock after {}s (set REPX_LOCK_TIMEOUT_SECS to override)",
+                            timeout.as_secs()
+                        ))));
+                    }
                     lock_file = f;
-                    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                    tokio::time::sleep(std::time::Duration::from_millis(LOCK_POLL_INTERVAL_MS))
+                        .await;
                 }
                 Err((_, e)) => {
                     return Err(ExecutorError::Io(std::io::Error::other(format!(
@@ -115,7 +135,10 @@ impl ContainerRuntime {
                     tracing::debug!("tar command failed with status {}", tar_status);
                 }
 
-                if let Err(e) = copy_task.await.unwrap() {
+                if let Err(e) = copy_task
+                    .await
+                    .expect("tar-to-load copy task must not panic")
+                {
                     tracing::debug!("Copying tar output to {} load failed: {}", binary, e);
                 }
             } else {

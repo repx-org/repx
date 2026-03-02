@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 
 #[test]
 fn test_data_only_local_target_initialization() {
-    let temp_dir = tempfile::tempdir().unwrap();
+    let temp_dir = tempfile::tempdir().expect("tempdir creation must succeed");
     let base_path = temp_dir.path().join("repx-data");
 
     let lab_path_str = std::env::var("REFERENCE_LAB_PATH").expect("REFERENCE_LAB_PATH must be set");

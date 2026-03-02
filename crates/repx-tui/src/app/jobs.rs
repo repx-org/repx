@@ -76,7 +76,10 @@ impl JobsState {
                     .split_once('-')
                     .map_or((short_id.as_str(), ""), |(id, name)| (id, name));
 
-                let job_def = lab.jobs.get(&job_id).unwrap();
+                let job_def = match lab.jobs.get(&job_id) {
+                    Some(j) => j,
+                    None => continue,
+                };
                 let tui_job = TuiJob {
                     full_id: job_id.clone(),
                     id: id_part.to_string(),
@@ -285,11 +288,13 @@ impl JobsState {
 
         let visible_runs: Vec<_> = run_ids
             .iter()
-            .filter(|run_id| {
-                let run = lab.runs.get(run_id).unwrap();
-                let name_match = self.run_matches(&run_id.0, filters);
-                let has_jobs = run.jobs.iter().any(|id| visible_job_ids.contains(id));
-                name_match || has_jobs
+            .filter(|run_id| match lab.runs.get(run_id) {
+                Some(run) => {
+                    let name_match = self.run_matches(&run_id.0, filters);
+                    let has_jobs = run.jobs.iter().any(|id| visible_job_ids.contains(id));
+                    name_match || has_jobs
+                }
+                None => false,
             })
             .cloned()
             .collect();
@@ -340,10 +345,14 @@ impl JobsState {
             .iter()
             .filter(|run_id| {
                 !grouped_run_ids.contains(run_id) && {
-                    let run = lab.runs.get(run_id).unwrap();
-                    let name_match = self.run_matches(&run_id.0, filters);
-                    let has_jobs = run.jobs.iter().any(|id| visible_job_ids.contains(id));
-                    name_match || has_jobs
+                    match lab.runs.get(run_id) {
+                        Some(run) => {
+                            let name_match = self.run_matches(&run_id.0, filters);
+                            let has_jobs = run.jobs.iter().any(|id| visible_job_ids.contains(id));
+                            name_match || has_jobs
+                        }
+                        None => false,
+                    }
                 }
             })
             .cloned()
@@ -492,7 +501,10 @@ impl JobsState {
         parent_is_last: bool,
         run_depth: usize,
     ) {
-        let run = lab.runs.get(run_id).unwrap();
+        let run = match lab.runs.get(run_id) {
+            Some(r) => r,
+            None => return,
+        };
         let run_jobs_set: HashSet<_> = run.jobs.iter().collect();
         let mut dep_ids_in_run: HashSet<&JobId> = HashSet::new();
 
@@ -550,11 +562,14 @@ impl JobsState {
         parent_path: &str,
     ) {
         let job_instance_id = format!("{}/job:{}", parent_path, job_id);
-        let tui_job = self
+        let tui_job = match self
             .job_index_map
             .get(job_id)
             .and_then(|&idx| self.jobs.get(idx))
-            .unwrap();
+        {
+            Some(j) => j,
+            None => return,
+        };
 
         self.display_rows.push(TuiDisplayRow {
             item: TuiRowItem::Job {
@@ -568,17 +583,17 @@ impl JobsState {
         });
 
         if !self.collapsed_nodes.contains(&job_instance_id) {
-            let mut deps: Vec<_> = lab
-                .jobs
-                .get(job_id)
-                .unwrap()
-                .executables
-                .values()
-                .flat_map(|e| e.inputs.iter())
-                .filter_map(|m| m.job_id.clone())
-                .collect::<HashSet<_>>()
-                .into_iter()
-                .collect();
+            let mut deps: Vec<_> = match lab.jobs.get(job_id) {
+                Some(j) => j,
+                None => return,
+            }
+            .executables
+            .values()
+            .flat_map(|e| e.inputs.iter())
+            .filter_map(|m| m.job_id.clone())
+            .collect::<HashSet<_>>()
+            .into_iter()
+            .collect();
             deps.sort();
 
             let visible_deps: Vec<_> = deps

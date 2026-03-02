@@ -2,6 +2,7 @@ use super::{Client, ClientEvent, SubmitOptions};
 use crate::error::{ClientError, Result};
 use crate::orchestration::OrchestrationPlan;
 use crate::resources::{self, SbatchDirectives};
+use crate::targets::common::shell_quote;
 use crate::targets::Target;
 use fs_err;
 use repx_core::{
@@ -101,7 +102,10 @@ pub fn submit_slurm_batch_run(
             "native"
         } else {
             options.execution_type.as_deref().unwrap_or_else(|| {
-                let scheduler_config = target.config().slurm.as_ref().unwrap();
+                let scheduler_config = match target.config().slurm.as_ref() {
+                    Some(cfg) => cfg,
+                    None => return "native",
+                };
                 target
                     .config()
                     .default_execution_type
@@ -113,16 +117,19 @@ pub fn submit_slurm_batch_run(
         };
         let mut repx_args = format!(
             "--job-id {} --runtime {} {} --base-path {} --host-tools-dir {}",
-            job_id,
-            execution_type,
+            shell_quote(&job_id.0),
+            shell_quote(execution_type),
             image_tag
-                .map(|t| format!("--image-tag {}", t))
+                .map(|t| format!("--image-tag {}", shell_quote(t)))
                 .unwrap_or_default(),
-            target.base_path().display(),
-            client.lab.host_tools_dir_name
+            shell_quote(&target.base_path().to_string_lossy()),
+            shell_quote(&client.lab.host_tools_dir_name)
         );
         if let Some(local_path) = &target.config().node_local_path {
-            repx_args.push_str(&format!(" --node-local-path {}", local_path.display()));
+            repx_args.push_str(&format!(
+                " --node-local-path {}",
+                shell_quote(&local_path.to_string_lossy())
+            ));
         }
         if target.config().mount_host_paths {
             if !target.config().mount_paths.is_empty() {
@@ -133,7 +140,7 @@ pub fn submit_slurm_batch_run(
             repx_args.push_str(" --mount-host-paths");
         } else {
             for path in &target.config().mount_paths {
-                repx_args.push_str(&format!(" --mount-paths {}", path));
+                repx_args.push_str(&format!(" --mount-paths {}", shell_quote(path)));
             }
         }
         let (repx_command_to_wrap, directives) = if job.stage_type
@@ -170,7 +177,9 @@ pub fn submit_slurm_batch_run(
                     .keys()
                     .filter(|k| k.starts_with("step-"))
                     .filter(|k| {
-                        let name = k.strip_prefix("step-").unwrap();
+                        let name = k
+                            .strip_prefix("step-")
+                            .expect("prefix guaranteed by starts_with filter");
                         !all_deps.contains(name)
                     })
                     .collect();
@@ -267,7 +276,7 @@ pub fn submit_slurm_batch_run(
         file.write_all(script_content.as_bytes())
             .map_err(|e| ClientError::Config(ConfigError::Io(e)))?;
 
-        plan.add_job(job_id.clone(), job, script_hash, &job_ids_in_batch);
+        plan.add_job(job_id.clone(), job, script_hash, &job_ids_in_batch)?;
     }
     let plan_filename = "plan.json";
     let plan_content = serde_json::to_string_pretty(&plan)
@@ -311,7 +320,7 @@ pub fn submit_slurm_batch_run(
                 client
                     .slurm_map
                     .lock()
-                    .unwrap()
+                    .expect("slurm_map mutex must not be poisoned")
                     .insert(repx_id.clone(), (target_name.to_string(), slurm_id));
                 submitted_count += 1;
                 send(ClientEvent::JobSubmitted {

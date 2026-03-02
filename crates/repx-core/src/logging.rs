@@ -114,15 +114,19 @@ fn rotate_logs(log_dir: &Path, prefix: &str, config: &LoggingConfig) -> Result<(
         let max_age = Duration::from_secs(config.max_age_days * 24 * 60 * 60);
 
         entries.retain(|path| {
-            let name = path.file_name().unwrap().to_string_lossy();
+            let name = path
+                .file_name()
+                .expect("log file entry must have a file name")
+                .to_string_lossy();
             let parts: Vec<&str> = name.split('_').collect();
             if parts.len() >= 2 {
                 if let Ok(date) = chrono::NaiveDate::parse_from_str(parts[1], "%Y-%m-%d") {
                     let log_time = date
                         .and_hms_opt(0, 0, 0)
-                        .unwrap()
+                        .expect("midnight HMS is always valid")
                         .and_local_timezone(chrono::Local)
-                        .unwrap();
+                        .earliest()
+                        .expect("midnight in local timezone must be resolvable");
                     let log_sys_time = SystemTime::from(log_time);
                     if let Ok(age) = now.duration_since(log_sys_time) {
                         if age > max_age {
@@ -387,7 +391,7 @@ mod tests {
 
     #[test]
     fn test_rotate_logs_max_files() {
-        let dir = tempdir().unwrap();
+        let dir = tempdir().expect("failed to create temp dir");
         let path = dir.path();
 
         let filenames = vec![
@@ -399,17 +403,17 @@ mod tests {
         ];
 
         for name in &filenames {
-            File::create(path.join(name)).unwrap();
+            File::create(path.join(name)).expect("failed to create test log file");
         }
 
-        File::create(path.join("other.txt")).unwrap();
+        File::create(path.join("other.txt")).expect("failed to create test file");
 
         let config = LoggingConfig {
             max_files: 3,
             max_age_days: 0,
         };
 
-        rotate_logs(path, "repx_", &config).unwrap();
+        rotate_logs(path, "repx_", &config).expect("rotate_logs should succeed");
 
         assert!(
             !path.join(filenames[0]).exists(),
@@ -430,7 +434,7 @@ mod tests {
 
     #[test]
     fn test_rotate_logs_max_age() {
-        let dir = tempdir().unwrap();
+        let dir = tempdir().expect("failed to create temp dir");
         let path = dir.path();
 
         let now = Local::now();
@@ -443,16 +447,16 @@ mod tests {
         let name_yesterday = format!("repx_{}_10-00-00_1.log", yesterday.format(fmt));
         let name_old = format!("repx_{}_10-00-00_1.log", eight_days_ago.format(fmt));
 
-        File::create(path.join(&name_now)).unwrap();
-        File::create(path.join(&name_yesterday)).unwrap();
-        File::create(path.join(&name_old)).unwrap();
+        File::create(path.join(&name_now)).expect("failed to create test log file");
+        File::create(path.join(&name_yesterday)).expect("failed to create test log file");
+        File::create(path.join(&name_old)).expect("failed to create test log file");
 
         let config = LoggingConfig {
             max_files: 0,
             max_age_days: 7,
         };
 
-        rotate_logs(path, "repx_", &config).unwrap();
+        rotate_logs(path, "repx_", &config).expect("rotate_logs should succeed");
 
         assert!(path.join(&name_now).exists(), "Current file should exist");
         assert!(

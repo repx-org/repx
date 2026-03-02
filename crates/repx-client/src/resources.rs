@@ -214,7 +214,7 @@ mem = "16G" # Workers are heavy
 cpus-per-task = 4
 "#,
         )
-        .unwrap()
+        .expect("test resource config must parse")
     }
 
     #[test]

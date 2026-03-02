@@ -95,7 +95,7 @@ fn test_simple_linear_chain() {
         "C" => ["B"],
     };
     let mut harness = SchedulerTestHarness::new(graph, HashSet::new());
-    harness.run().unwrap();
+    harness.run().expect("harness run must succeed");
 
     let expected = waves! {
         ["A"],
@@ -113,7 +113,7 @@ fn test_simple_fan_out() {
         "C" => ["A"],
     };
     let mut harness = SchedulerTestHarness::new(graph, HashSet::new());
-    harness.run().unwrap();
+    harness.run().expect("harness run must succeed");
 
     let expected = waves! {
         ["A"],
@@ -130,7 +130,7 @@ fn test_simple_fan_in() {
         "C" => ["A", "B"],
     };
     let mut harness = SchedulerTestHarness::new(graph, HashSet::new());
-    harness.run().unwrap();
+    harness.run().expect("harness run must succeed");
 
     let expected = waves! {
         ["A", "B"],
@@ -149,7 +149,7 @@ fn test_complex_dag() {
         "E" => ["C"],
     };
     let mut harness = SchedulerTestHarness::new(graph, HashSet::new());
-    harness.run().unwrap();
+    harness.run().expect("harness run must succeed");
 
     let expected = waves! {
         ["A"],
@@ -168,7 +168,7 @@ fn test_disconnected_graphs() {
         "Y" => ["X"],
     };
     let mut harness = SchedulerTestHarness::new(graph, HashSet::new());
-    harness.run().unwrap();
+    harness.run().expect("harness run must succeed");
 
     let expected = waves! {
         ["A", "X"],
@@ -188,7 +188,7 @@ fn test_graph_with_pre_completed_dependency() {
 
     let pre_completed = waves! { ["B"] }[0].clone();
     let mut harness = SchedulerTestHarness::new(graph, pre_completed);
-    harness.run().unwrap();
+    harness.run().expect("harness run must succeed");
 
     let expected = waves! {
         ["A"],
@@ -210,7 +210,7 @@ fn test_cycle_detection() {
 
     assert!(result.is_err());
     assert_eq!(
-        result.unwrap_err(),
+        result.expect_err("result must be Err"),
         SchedulerError::CycleDetected(vec!["A".to_string(), "B".to_string(), "C".to_string()])
     );
     assert!(harness.submission_log.is_empty());
@@ -220,7 +220,7 @@ fn test_cycle_detection() {
 fn test_empty_input_graph() {
     let graph = graph! {};
     let mut harness = SchedulerTestHarness::new(graph, HashSet::new());
-    harness.run().unwrap();
+    harness.run().expect("harness run must succeed");
 
     let expected: Vec<HashSet<JobId>> = Vec::new();
     assert_eq!(harness.submission_log, expected);
@@ -235,7 +235,7 @@ fn test_diamond_dependency() {
         "end"   => ["mid_a", "mid_b"],
     };
     let mut harness = SchedulerTestHarness::new(graph, HashSet::new());
-    harness.run().unwrap();
+    harness.run().expect("harness run must succeed");
 
     let expected = waves! {
         ["start"],
@@ -255,7 +255,7 @@ fn test_shared_sub_graph() {
         "shared_leaf" => ["shared_mid"],
     };
     let mut harness = SchedulerTestHarness::new(graph, HashSet::new());
-    harness.run().unwrap();
+    harness.run().expect("harness run must succeed");
 
     let expected = waves! {
         ["top_a", "top_b"],
@@ -284,7 +284,7 @@ fn test_multiple_independent_diamond_graphs() {
         "end_c"   => ["mid_c1", "mid_c2"],
     };
     let mut harness = SchedulerTestHarness::new(graph, HashSet::new());
-    harness.run().unwrap();
+    harness.run().expect("harness run must succeed");
 
     let expected = waves! {
         ["start_a", "start_b", "start_c"],
@@ -312,7 +312,7 @@ fn test_intertwined_graphs_with_shared_dependency() {
     };
 
     let mut harness = SchedulerTestHarness::new(graph, HashSet::new());
-    harness.run().unwrap();
+    harness.run().expect("harness run must succeed");
 
     let expected = waves! {
         ["start_a", "start_b"],

@@ -19,7 +19,10 @@ pub fn get_statuses(
         all_outcomes.extend(outcomes);
     }
 
-    let mut slurm_map_guard = client.slurm_map.lock().unwrap();
+    let mut slurm_map_guard = client
+        .slurm_map
+        .lock()
+        .expect("slurm_map mutex must not be poisoned");
     let mut map_was_changed = false;
     slurm_map_guard.retain(|job_id, _| {
         let is_done = matches!(
@@ -75,7 +78,10 @@ pub fn get_statuses_for_active_target(
     let outcomes = target.check_outcome_markers()?;
     job_statuses.extend(outcomes.clone());
 
-    let mut slurm_map_guard = client.slurm_map.lock().unwrap();
+    let mut slurm_map_guard = client
+        .slurm_map
+        .lock()
+        .expect("slurm_map mutex must not be poisoned");
     let mut map_was_changed = false;
     slurm_map_guard.retain(|job_id, (target_name, _slurm_id)| {
         if target_name != active_target_name {

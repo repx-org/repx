@@ -89,7 +89,7 @@ local_concurrency = 2
 
     pub fn stage_lab(&self) {
         let dest = self.cache_dir.join("artifacts");
-        fs::create_dir_all(&dest).unwrap();
+        fs::create_dir_all(&dest).expect("failed to create artifacts dir");
 
         let host_tools_dir = self.get_host_tools_dir_name();
         let bin_dir = self
@@ -174,7 +174,10 @@ local_concurrency = 2
                             );
                         }
 
-                        let rel_path = path.strip_prefix(&dest).unwrap().to_path_buf();
+                        let rel_path = path
+                            .strip_prefix(&dest)
+                            .expect("path must start with dest")
+                            .to_path_buf();
                         image_mapping.insert(rel_path, extract_dir);
                     }
                 }
@@ -197,8 +200,8 @@ local_concurrency = 2
     }
     pub fn stage_job_dirs(&self, job_id: &str) {
         let job_out_path = self.get_job_output_path(job_id);
-        fs::create_dir_all(job_out_path.join("out")).unwrap();
-        fs::create_dir_all(job_out_path.join("repx")).unwrap();
+        fs::create_dir_all(job_out_path.join("out")).expect("failed to create job out dir");
+        fs::create_dir_all(job_out_path.join("repx")).expect("failed to create job repx dir");
     }
 
     pub fn get_job_id_by_name(&self, name_substring: &str) -> String {

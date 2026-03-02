@@ -79,7 +79,10 @@ pub(crate) fn build_steps_json(
     let mut all_step_names: Vec<String> = Vec::new();
 
     for (key, exe) in &step_entries {
-        let step_name = key.strip_prefix("step-").unwrap().to_string();
+        let step_name = key
+            .strip_prefix("step-")
+            .expect("prefix guaranteed by starts_with filter")
+            .to_string();
         all_step_names.push(step_name.clone());
 
         let exe_path = artifacts_base.join(&exe.path);
@@ -125,10 +128,9 @@ pub(crate) fn build_steps_json(
         step_obj.insert("inputs".into(), serde_json::Value::Array(inputs));
 
         if let Some(ref hints) = exe.resource_hints {
-            step_obj.insert(
-                "resource_hints".into(),
-                serde_json::to_value(hints).unwrap(),
-            );
+            if let Ok(hints_val) = serde_json::to_value(hints) {
+                step_obj.insert("resource_hints".into(), hints_val);
+            }
         }
 
         steps.insert(step_name, serde_json::Value::Object(step_obj));
@@ -153,7 +155,10 @@ pub(crate) fn build_steps_json(
     let sink_step = sink_candidates[0].clone();
 
     let sink_key = format!("step-{}", sink_step);
-    let sink_exe = job.executables.get(&sink_key).unwrap();
+    let sink_exe = job
+        .executables
+        .get(&sink_key)
+        .ok_or_else(|| format!("Sink step executable '{}' not found in job", sink_key))?;
     let last_step_outputs_json = serde_json::to_string(&sink_exe.outputs)
         .map_err(|e| format!("Failed to serialize sink step outputs: {}", e))?;
 
@@ -293,8 +298,18 @@ fn build_sg_common_args(
     image_tag: Option<&str>,
 ) -> std::result::Result<Vec<String>, ClientError> {
     let artifacts_base = target.artifacts_base_path();
-    let scatter_exe = job.executables.get("scatter").unwrap();
-    let gather_exe = job.executables.get("gather").unwrap();
+    let scatter_exe = job.executables.get("scatter").ok_or_else(|| {
+        ClientError::Config(ConfigError::General(format!(
+            "Scatter-gather job '{}' missing required 'scatter' executable",
+            job_id
+        )))
+    })?;
+    let gather_exe = job.executables.get("gather").ok_or_else(|| {
+        ClientError::Config(ConfigError::General(format!(
+            "Scatter-gather job '{}' missing required 'gather' executable",
+            job_id
+        )))
+    })?;
     let job_package_path = artifacts_base.join(format!("jobs/{}", job_id));
     let scatter_exe_path = artifacts_base.join(&scatter_exe.path);
     let gather_exe_path = artifacts_base.join(&gather_exe.path);
@@ -359,8 +374,13 @@ fn build_simple_job_args(
     client: &Client,
     execution_type: &str,
     image_tag: Option<&str>,
-) -> Vec<String> {
-    let main_exe = job.executables.get("main").unwrap();
+) -> std::result::Result<Vec<String>, ClientError> {
+    let main_exe = job.executables.get("main").ok_or_else(|| {
+        ClientError::Config(ConfigError::General(format!(
+            "Job '{}' missing required 'main' executable",
+            job_id
+        )))
+    })?;
     let executable_path = target.artifacts_base_path().join(&main_exe.path);
 
     let mut args = vec![
@@ -398,7 +418,7 @@ fn build_simple_job_args(
         "--executable-path".to_string(),
         executable_path.to_string_lossy().to_string(),
     ]);
-    args
+    Ok(args)
 }
 
 fn resolve_execution_type<'a>(
@@ -410,7 +430,10 @@ fn resolve_execution_type<'a>(
         return "native";
     }
     options.execution_type.as_deref().unwrap_or_else(|| {
-        let scheduler_config = target.config().local.as_ref().unwrap();
+        let scheduler_config = match target.config().local.as_ref() {
+            Some(cfg) => cfg,
+            None => return "native",
+        };
         target
             .config()
             .default_execution_type
@@ -488,7 +511,14 @@ fn expand_scatter_gather<'a>(
         .executables
         .iter()
         .filter(|(k, _)| k.starts_with("step-"))
-        .map(|(k, v)| (k.strip_prefix("step-").unwrap().to_string(), v))
+        .map(|(k, v)| {
+            (
+                k.strip_prefix("step-")
+                    .expect("prefix guaranteed by starts_with filter")
+                    .to_string(),
+                v,
+            )
+        })
         .collect();
 
     let mut in_degree: HashMap<&str, usize> = HashMap::new();
@@ -516,7 +546,9 @@ fn expand_scatter_gather<'a>(
         if let Some(deps) = dependents.get(name) {
             let mut newly_ready: Vec<&str> = Vec::new();
             for &dep_name in deps {
-                let deg = in_degree.get_mut(dep_name).unwrap();
+                let deg = in_degree
+                    .get_mut(dep_name)
+                    .expect("in_degree must contain all step names from initialization");
                 *deg -= 1;
                 if *deg == 0 {
                     newly_ready.push(dep_name);
@@ -686,12 +718,12 @@ pub fn submit_local_batch_run(
             .executables
             .get("main")
             .or_else(|| job.executables.get("scatter"))
-            .unwrap_or_else(|| {
-                panic!(
+            .ok_or_else(|| {
+                ClientError::Config(ConfigError::General(format!(
                     "Job '{}' missing required executable 'main' or 'scatter'",
                     job_id
-                )
-            });
+                )))
+            })?;
         let job_deps: Vec<WorkUnitId> = entrypoint_exe
             .inputs
             .iter()
@@ -750,7 +782,7 @@ pub fn submit_local_batch_run(
                 client,
                 execution_type,
                 image_tag,
-            );
+            )?;
 
             work_units.insert(
                 unit_id.clone(),
@@ -913,11 +945,13 @@ pub fn submit_local_batch_run(
 
             let mut ready: Vec<WorkUnitId> = units_left
                 .iter()
-                .filter(|uid| {
-                    let unit = work_units.get(uid).unwrap();
-                    let deps_met = unit.deps.iter().all(|d| completed.contains(d));
-                    let no_failed = unit.deps.iter().all(|d| !failed_ids.contains(d));
-                    deps_met && no_failed
+                .filter(|uid| match work_units.get(uid) {
+                    Some(unit) => {
+                        let deps_met = unit.deps.iter().all(|d| completed.contains(d));
+                        let no_failed = unit.deps.iter().all(|d| !failed_ids.contains(d));
+                        deps_met && no_failed
+                    }
+                    None => false,
                 })
                 .cloned()
                 .collect();
@@ -938,7 +972,10 @@ pub fn submit_local_batch_run(
                 if spawned >= slots_available {
                     break;
                 }
-                let unit = work_units.get(&uid).unwrap();
+                let unit = match work_units.get(&uid) {
+                    Some(u) => u,
+                    None => continue,
+                };
 
                 if !resource_tracker.can_fit(&uid, unit.mem_bytes, unit.cpus) {
                     tracing::debug!(

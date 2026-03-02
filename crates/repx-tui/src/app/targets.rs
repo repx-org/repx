@@ -89,7 +89,10 @@ impl TargetsState {
                             target.selected_executor_idx = 0;
                         }
                         if target.state == crate::model::TargetState::Active {
-                            *self.active_scheduler_ref.lock().unwrap() =
+                            *self
+                                .active_scheduler_ref
+                                .lock()
+                                .expect("active_scheduler mutex must not be poisoned") =
                                 target.get_selected_scheduler().as_str().to_string();
                         }
                     }
@@ -126,7 +129,10 @@ impl TargetsState {
                             target.selected_executor_idx = 0;
                         }
                         if target.state == crate::model::TargetState::Active {
-                            *self.active_scheduler_ref.lock().unwrap() =
+                            *self
+                                .active_scheduler_ref
+                                .lock()
+                                .expect("active_scheduler mutex must not be poisoned") =
                                 target.get_selected_scheduler().as_str().to_string();
                         }
                     }
@@ -140,8 +146,14 @@ impl TargetsState {
         if let Some(idx) = self.table_state.selected() {
             if let Some(target) = self.items.get(idx) {
                 let new_name = target.name.clone();
-                *self.active_target_ref.lock().unwrap() = new_name.clone();
-                *self.active_scheduler_ref.lock().unwrap() =
+                *self
+                    .active_target_ref
+                    .lock()
+                    .expect("active_target mutex must not be poisoned") = new_name.clone();
+                *self
+                    .active_scheduler_ref
+                    .lock()
+                    .expect("active_scheduler mutex must not be poisoned") =
                     target.get_selected_scheduler().as_str().to_string();
 
                 for t in self.items.iter_mut() {
@@ -156,6 +168,9 @@ impl TargetsState {
     }
 
     pub fn get_active_target_name(&self) -> String {
-        self.active_target_ref.lock().unwrap().clone()
+        self.active_target_ref
+            .lock()
+            .expect("active_target mutex must not be poisoned")
+            .clone()
     }
 }

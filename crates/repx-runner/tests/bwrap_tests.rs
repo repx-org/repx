@@ -37,7 +37,8 @@ fn test_bwrap_overlay_fallback_when_disabled() {
         "Job should succeed with overlay fallback"
     );
 
-    let total_sum_content = fs::read_to_string(stage_e_path.join("out/total_sum.txt")).unwrap();
+    let total_sum_content = fs::read_to_string(stage_e_path.join("out/total_sum.txt"))
+        .expect("reading total_sum.txt must succeed");
     let val = total_sum_content.trim();
     assert!(
         val == "540" || val == "595",
@@ -45,8 +46,8 @@ fn test_bwrap_overlay_fallback_when_disabled() {
         val
     );
 
-    let cache_content_after =
-        fs::read_to_string(capabilities_dir.join("overlay_support.json")).unwrap();
+    let cache_content_after = fs::read_to_string(capabilities_dir.join("overlay_support.json"))
+        .expect("reading overlay_support.json after run must succeed");
     assert!(
         cache_content_after.contains("\"tmp_overlay_supported\": false"),
         "Cache should still show overlay as unsupported"
@@ -73,7 +74,8 @@ fn test_bwrap_overlay_capability_detection() {
         "Overlay capability cache should be created after first run"
     );
 
-    let cache_content = fs::read_to_string(&cache_file).unwrap();
+    let cache_content =
+        fs::read_to_string(&cache_file).expect("reading overlay capability cache must succeed");
     assert!(
         cache_content.contains("tmp_overlay_supported"),
         "Cache should contain overlay support status"
@@ -98,8 +100,13 @@ fn test_full_run_local_bwrap() {
     );
     if host_tools_bin.exists() {
         let mut entries: Vec<_> = fs::read_dir(&host_tools_bin)
-            .unwrap()
-            .map(|r| r.unwrap().file_name().to_string_lossy().to_string())
+            .expect("reading host-tools bin dir must succeed")
+            .map(|r| {
+                r.expect("reading dir entry must succeed")
+                    .file_name()
+                    .to_string_lossy()
+                    .to_string()
+            })
             .collect();
         entries.sort();
         eprintln!("[TEST DEBUG] Files found: {:?}", entries);
@@ -124,7 +131,8 @@ fn test_full_run_local_bwrap() {
     let stage_e_path = harness.get_job_output_path(&stage_e_job_id);
 
     assert!(stage_e_path.join("repx/SUCCESS").exists());
-    let total_sum_content = fs::read_to_string(stage_e_path.join("out/total_sum.txt")).unwrap();
+    let total_sum_content = fs::read_to_string(stage_e_path.join("out/total_sum.txt"))
+        .expect("reading total_sum.txt must succeed");
     let val = total_sum_content.trim();
     assert!(
         val == "540" || val == "595",
@@ -139,21 +147,22 @@ fn test_bwrap_isolation_properties() {
 
     let base_path = &harness.cache_dir;
     let victim_dir = base_path.join("outputs").join("victim").join("out");
-    fs::create_dir_all(&victim_dir).unwrap();
+    fs::create_dir_all(&victim_dir).expect("creating victim dir must succeed");
     let victim_file = victim_dir.join("secret.txt");
-    fs::write(&victim_file, "original content").unwrap();
+    fs::write(&victim_file, "original content").expect("writing victim file must succeed");
 
     let artifact_file = base_path.join("artifacts").join("host_file.txt");
-    fs::write(&artifact_file, "host content").unwrap();
+    fs::write(&artifact_file, "host content").expect("writing artifact file must succeed");
 
     let isolated_job_id = "job-isolated";
     harness.stage_job_dirs(isolated_job_id);
     let isolated_job_out_path = harness.get_job_output_path(isolated_job_id);
-    fs::write(isolated_job_out_path.join("repx/inputs.json"), "{}").unwrap();
+    fs::write(isolated_job_out_path.join("repx/inputs.json"), "{}")
+        .expect("writing inputs.json must succeed");
 
     let job_package_dir = base_path.join("artifacts/jobs").join(isolated_job_id);
     let bin_dir = job_package_dir.join("bin");
-    fs::create_dir_all(&bin_dir).unwrap();
+    fs::create_dir_all(&bin_dir).expect("creating job bin dir must succeed");
     let script_path = bin_dir.join("isolated.sh");
 
     let _own_out_path = isolated_job_out_path.join("out/own_output.txt");
@@ -184,12 +193,14 @@ exit 0
         artifact_file.to_string_lossy()
     );
 
-    fs::write(&script_path, script_content).unwrap();
+    fs::write(&script_path, script_content).expect("writing isolation test script must succeed");
 
     use std::os::unix::fs::PermissionsExt;
-    let mut perms = fs::metadata(&script_path).unwrap().permissions();
+    let mut perms = fs::metadata(&script_path)
+        .expect("reading script metadata must succeed")
+        .permissions();
     perms.set_mode(0o755);
-    fs::set_permissions(&script_path, perms).unwrap();
+    fs::set_permissions(&script_path, perms).expect("setting script permissions must succeed");
 
     let image_tag = harness
         .get_any_image_tag()
@@ -250,21 +261,22 @@ fn test_bwrap_impure_mode_access_host() {
 
     let base_path = &harness.cache_dir;
     let host_marker_file = base_path.join("i_am_on_host.txt");
-    fs::write(&host_marker_file, "host data").unwrap();
+    fs::write(&host_marker_file, "host data").expect("writing host marker file must succeed");
 
     let job_id = "job-impure";
     harness.stage_job_dirs(job_id);
     let job_out_path = harness.get_job_output_path(job_id);
-    fs::write(job_out_path.join("repx/inputs.json"), "{}").unwrap();
+    fs::write(job_out_path.join("repx/inputs.json"), "{}")
+        .expect("writing inputs.json must succeed");
 
     let job_package_dir = base_path.join("artifacts/jobs").join(job_id);
     let bin_dir = job_package_dir.join("bin");
-    fs::create_dir_all(&bin_dir).unwrap();
+    fs::create_dir_all(&bin_dir).expect("creating job bin dir must succeed");
     let script_path = bin_dir.join("check_host.sh");
 
-    let temp_outside = tempfile::tempdir().unwrap();
+    let temp_outside = tempfile::tempdir().expect("tempdir creation must succeed");
     let outside_file = temp_outside.path().join("outside.txt");
-    fs::write(&outside_file, "outside").unwrap();
+    fs::write(&outside_file, "outside").expect("writing outside file must succeed");
 
     let shell = if std::path::Path::new("/bin/sh").exists() {
         "/bin/sh".to_string()
@@ -286,11 +298,13 @@ fi
         outside_file.to_string_lossy()
     );
 
-    fs::write(&script_path, script_content).unwrap();
+    fs::write(&script_path, script_content).expect("writing check_host script must succeed");
     use std::os::unix::fs::PermissionsExt;
-    let mut perms = fs::metadata(&script_path).unwrap().permissions();
+    let mut perms = fs::metadata(&script_path)
+        .expect("reading script metadata must succeed")
+        .permissions();
     perms.set_mode(0o755);
-    fs::set_permissions(&script_path, perms).unwrap();
+    fs::set_permissions(&script_path, perms).expect("setting script permissions must succeed");
 
     let image_tag = harness.get_any_image_tag().expect("No image found");
 
@@ -310,15 +324,18 @@ fi
         .arg(&image_tag);
 
     cmd.assert().success();
-    let content = fs::read_to_string(job_out_path.join("out/found.txt")).unwrap();
+    let content = fs::read_to_string(job_out_path.join("out/found.txt"))
+        .expect("reading found.txt in pure mode must succeed");
     assert_eq!(
         content.trim(),
         "NOT_FOUND",
         "Pure mode should NOT see host temp files"
     );
 
-    fs::remove_file(job_out_path.join("out/found.txt")).unwrap();
-    fs::remove_file(job_out_path.join("repx/SUCCESS")).unwrap();
+    fs::remove_file(job_out_path.join("out/found.txt"))
+        .expect("removing found.txt for re-run must succeed");
+    fs::remove_file(job_out_path.join("repx/SUCCESS"))
+        .expect("removing SUCCESS marker for re-run must succeed");
 
     let mut cmd2 = harness.cmd();
     cmd2.arg("internal-execute")
@@ -337,7 +354,8 @@ fi
         .arg("--mount-host-paths");
 
     cmd2.assert().success();
-    let content2 = fs::read_to_string(job_out_path.join("out/found.txt")).unwrap();
+    let content2 = fs::read_to_string(job_out_path.join("out/found.txt"))
+        .expect("reading found.txt in impure mode must succeed");
     assert_eq!(
         content2.trim(),
         "FOUND",
@@ -354,16 +372,17 @@ fn test_bwrap_mount_paths_specific() {
     let job_id = "job-mount-paths";
     harness.stage_job_dirs(job_id);
     let job_out_path = harness.get_job_output_path(job_id);
-    fs::write(job_out_path.join("repx/inputs.json"), "{}").unwrap();
+    fs::write(job_out_path.join("repx/inputs.json"), "{}")
+        .expect("writing inputs.json must succeed");
 
     let job_package_dir = base_path.join("artifacts/jobs").join(job_id);
     let bin_dir = job_package_dir.join("bin");
-    fs::create_dir_all(&bin_dir).unwrap();
+    fs::create_dir_all(&bin_dir).expect("creating job bin dir must succeed");
     let script_path = bin_dir.join("check_specific.sh");
 
-    let temp_outside = tempfile::tempdir().unwrap();
+    let temp_outside = tempfile::tempdir().expect("tempdir creation must succeed");
     let secret_file = temp_outside.path().join("secret.txt");
-    fs::write(&secret_file, "secret-data").unwrap();
+    fs::write(&secret_file, "secret-data").expect("writing secret file must succeed");
 
     let shell = if std::path::Path::new("/bin/sh").exists() {
         "/bin/sh".to_string()
@@ -385,11 +404,13 @@ fi
         secret_file.to_string_lossy()
     );
 
-    fs::write(&script_path, script_content).unwrap();
+    fs::write(&script_path, script_content).expect("writing check_specific script must succeed");
     use std::os::unix::fs::PermissionsExt;
-    let mut perms = fs::metadata(&script_path).unwrap().permissions();
+    let mut perms = fs::metadata(&script_path)
+        .expect("reading script metadata must succeed")
+        .permissions();
     perms.set_mode(0o755);
-    fs::set_permissions(&script_path, perms).unwrap();
+    fs::set_permissions(&script_path, perms).expect("setting script permissions must succeed");
 
     let image_tag = harness.get_any_image_tag().expect("No image found");
 
@@ -409,15 +430,18 @@ fi
         .arg(&image_tag);
 
     cmd.assert().success();
-    let content = fs::read_to_string(job_out_path.join("out/found.txt")).unwrap();
+    let content = fs::read_to_string(job_out_path.join("out/found.txt"))
+        .expect("reading found.txt without mount-paths must succeed");
     assert_eq!(
         content.trim(),
         "NOT_FOUND",
         "Without mount-paths, should NOT see external file"
     );
 
-    fs::remove_file(job_out_path.join("out/found.txt")).unwrap();
-    fs::remove_file(job_out_path.join("repx/SUCCESS")).unwrap();
+    fs::remove_file(job_out_path.join("out/found.txt"))
+        .expect("removing found.txt for re-run must succeed");
+    fs::remove_file(job_out_path.join("repx/SUCCESS"))
+        .expect("removing SUCCESS marker for re-run must succeed");
 
     let mut cmd2 = harness.cmd();
     cmd2.arg("internal-execute")
@@ -437,7 +461,8 @@ fi
         .arg(secret_file.to_string_lossy().to_string());
 
     cmd2.assert().success();
-    let content2 = fs::read_to_string(job_out_path.join("out/found.txt")).unwrap();
+    let content2 = fs::read_to_string(job_out_path.join("out/found.txt"))
+        .expect("reading found.txt with mount-paths must succeed");
     assert_eq!(
         content2.trim(),
         "FOUND",
