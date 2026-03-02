@@ -53,33 +53,24 @@ impl BwrapRuntime {
         );
 
         let image_path = ctx.find_image_file(image_tag).ok_or_else(|| {
-            ExecutorError::Io(std::io::Error::new(
-                std::io::ErrorKind::NotFound,
-                format!(
-                    "Image file for tag '{}' not found in artifacts/images or artifacts/image",
-                    image_tag
-                ),
+            ExecutorError::ImageNotFound(format!(
+                "Image file for tag '{}' not found in artifacts/images or artifacts/image",
+                image_tag
             ))
         })?;
 
         if !image_path.is_dir() {
-            return Err(ExecutorError::Io(std::io::Error::new(
-                std::io::ErrorKind::InvalidInput,
-                format!(
-                    "Image artifact at {:?} must be a directory (exploded OCI layout), but it is a file.",
-                    image_path
-                ),
+            return Err(ExecutorError::InvalidImage(format!(
+                "Image artifact at {:?} must be a directory (exploded OCI layout), but it is a file.",
+                image_path
             )));
         }
 
         let manifest_path = image_path.join("manifest.json");
         if !manifest_path.exists() {
-            return Err(ExecutorError::Io(std::io::Error::new(
-                std::io::ErrorKind::NotFound,
-                format!(
-                    "Could not find 'manifest.json' inside the image directory {:?}.",
-                    image_path
-                ),
+            return Err(ExecutorError::InvalidImage(format!(
+                "Could not find 'manifest.json' inside the image directory {:?}.",
+                image_path
             )));
         }
 
@@ -92,14 +83,13 @@ impl BwrapRuntime {
         let manifest_content = tokio::fs::read_to_string(&manifest_path).await?;
         let manifest: Vec<ManifestEntry> =
             serde_json::from_str(&manifest_content).map_err(|e| {
-                ExecutorError::Io(std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+                ExecutorError::InvalidImage(format!("Failed to parse manifest.json: {}", e))
             })?;
 
         if manifest.is_empty() {
-            return Err(ExecutorError::Io(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                "manifest.json is empty or invalid array",
-            )));
+            return Err(ExecutorError::InvalidImage(
+                "manifest.json is empty or invalid array".to_string(),
+            ));
         }
 
         let layers = &manifest[0].layers;

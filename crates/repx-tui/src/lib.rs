@@ -25,6 +25,7 @@ use crossterm::{
 };
 use ratatui::{backend::CrosstermBackend, Terminal};
 use repx_client::Client;
+use repx_core::constants::targets;
 use repx_core::{config, model::JobId, model::SchedulerType, theme};
 use std::{
     fs,
@@ -77,13 +78,13 @@ pub fn run(args: TuiArgs) -> Result<(), TuiError> {
         .config()
         .submission_target
         .clone()
-        .unwrap_or_else(|| "local".to_string());
+        .unwrap_or_else(|| targets::LOCAL.to_string());
 
     let initial_target_config = client.config().targets.get(&initial_active_target);
     let initial_active_scheduler = initial_target_config
         .and_then(|t| t.default_scheduler.clone())
         .or_else(|| client.config().default_scheduler.clone())
-        .unwrap_or_else(|| "local".to_string());
+        .unwrap_or_else(|| targets::LOCAL.to_string());
 
     let active_target = Arc::new(Mutex::new(initial_active_target.clone()));
     let active_target_clone_for_status = active_target.clone();

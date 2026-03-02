@@ -297,7 +297,7 @@ pub fn default_theme() -> Theme {
     dracula_theme()
 }
 
-pub fn load_theme(config: &Config) -> Result<Theme, std::io::Error> {
+pub fn load_theme(config: &Config) -> Result<Theme, crate::errors::ConfigError> {
     let mut base_theme = match config.theme.as_deref() {
         Some("dracula") => dracula_theme(),
         _ => default_theme(),
@@ -306,17 +306,20 @@ pub fn load_theme(config: &Config) -> Result<Theme, std::io::Error> {
     let xdg_dirs = BaseDirectories::with_prefix("repx");
     if let Some(theme_path) = xdg_dirs.find_config_file("theme.toml") {
         let user_theme_str = fs::read_to_string(theme_path)?;
-        let user_theme_value: toml::Value = toml::from_str(&user_theme_str)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+        let user_theme_value: toml::Value = toml::from_str(&user_theme_str)?;
 
-        let mut base_theme_value =
-            toml::Value::try_from(&base_theme).map_err(std::io::Error::other)?;
+        let mut base_theme_value = toml::Value::try_from(&base_theme).map_err(|e| {
+            crate::errors::ConfigError::General(format!("Failed to serialize base theme: {}", e))
+        })?;
 
         config::merge_toml_values(&mut base_theme_value, &user_theme_value);
 
-        base_theme = base_theme_value
-            .try_into::<Theme>()
-            .map_err(std::io::Error::other)?;
+        base_theme = base_theme_value.try_into::<Theme>().map_err(|e| {
+            crate::errors::ConfigError::General(format!(
+                "Failed to deserialize merged theme: {}",
+                e
+            ))
+        })?;
     }
 
     Ok(base_theme)

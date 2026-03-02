@@ -3,6 +3,7 @@ use regex::Regex;
 use repx_core::model::{Job, JobId, Lab, StageType};
 use serde_json::Value;
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::fmt::Write;
 use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
@@ -111,14 +112,14 @@ impl<'a> VizGenerator<'a> {
         dot.push_str("digraph \"RepX Topology\" {\n");
 
         if args.format.as_deref() != Some("svg") {
-            dot.push_str(&format!("    dpi=\"{}\";\n", DPI));
+            writeln!(dot, "    dpi=\"{}\";", DPI).expect("write to String failed");
         }
         dot.push_str("    compound=\"true\";\n");
         dot.push_str("    rankdir=\"LR\";\n");
         dot.push_str("    bgcolor=\"#FFFFFF\";\n");
-        dot.push_str(&format!("    nodesep=\"{}\";\n", NODE_SEP));
-        dot.push_str(&format!("    ranksep=\"{}\";\n", RANK_SEP));
-        dot.push_str(&format!("    node [fontname=\"{}\"];\n", FONT_NAME));
+        writeln!(dot, "    nodesep=\"{}\";", NODE_SEP).expect("write to String failed");
+        writeln!(dot, "    ranksep=\"{}\";", RANK_SEP).expect("write to String failed");
+        writeln!(dot, "    node [fontname=\"{}\"];", FONT_NAME).expect("write to String failed");
         dot.push_str("    edge [color=\"#000000\", penwidth=\"1.2\", arrowsize=\"0.7\"];\n\n");
 
         let mut grouped_jobs: BTreeMap<String, BTreeMap<String, Vec<&JobId>>> = BTreeMap::new();
@@ -212,14 +213,15 @@ impl<'a> VizGenerator<'a> {
                 }
 
                 let clean_group = clean_id(group_name);
-                dot.push_str(&format!("    subgraph cluster_group_{} {{\n", clean_group));
-                dot.push_str(&format!(
-                    "        label=\"@{}\";\n",
-                    escape_dot_label(group_name)
-                ));
+                writeln!(dot, "    subgraph cluster_group_{} {{", clean_group)
+                    .expect("write to String failed");
+                writeln!(dot, "        label=\"@{}\";", escape_dot_label(group_name))
+                    .expect("write to String failed");
                 dot.push_str("        style=\"solid,rounded\";\n");
-                dot.push_str(&format!("        color=\"{}\";\n", COLOR_GROUP_BORDER));
-                dot.push_str(&format!("        fontsize=\"{}\";\n", GROUP_FONT_SIZE));
+                writeln!(dot, "        color=\"{}\";", COLOR_GROUP_BORDER)
+                    .expect("write to String failed");
+                writeln!(dot, "        fontsize=\"{}\";", GROUP_FONT_SIZE)
+                    .expect("write to String failed");
                 dot.push_str("        penwidth=\"2\";\n");
                 dot.push_str("        margin=\"20\";\n\n");
 
@@ -273,15 +275,19 @@ impl<'a> VizGenerator<'a> {
                         dst_node.clone()
                     };
 
-                    dot.push_str(&format!(
+                    write!(
+                        dot,
                         "    {} -> {} [penwidth=\"{}\"",
                         actual_src, actual_dst, width
-                    ));
+                    )
+                    .expect("write to String failed");
                     if src_is_sg {
-                        dot.push_str(&format!(", ltail=\"cluster_{}_sg\"", src_node));
+                        write!(dot, ", ltail=\"cluster_{}_sg\"", src_node)
+                            .expect("write to String failed");
                     }
                     if dst_is_sg {
-                        dot.push_str(&format!(", lhead=\"cluster_{}_sg\"", dst_node));
+                        write!(dot, ", lhead=\"cluster_{}_sg\"", dst_node)
+                            .expect("write to String failed");
                     }
                     dot.push_str("];\n");
                 }
@@ -310,9 +316,12 @@ impl<'a> VizGenerator<'a> {
                         let prefixed_tgt = format!("{}_{}", tgt_prefix, tgt_job);
 
                         let style = if dtype == "soft" { "dashed" } else { "solid" };
-                        dot.push_str(&format!("    {} -> {} [\n", unique_anchor, prefixed_tgt));
-                        dot.push_str(&format!("        ltail=\"cluster_{}\",\n", src_prefix));
-                        dot.push_str(&format!("        style=\"{}\",\n", style));
+                        writeln!(dot, "    {} -> {} [", unique_anchor, prefixed_tgt)
+                            .expect("write to String failed");
+                        writeln!(dot, "        ltail=\"cluster_{}\",", src_prefix)
+                            .expect("write to String failed");
+                        writeln!(dot, "        style=\"{}\",", style)
+                            .expect("write to String failed");
                         dot.push_str("        color=\"#64748B\"\n");
                         dot.push_str("    ];\n");
                     }
@@ -339,19 +348,19 @@ impl<'a> VizGenerator<'a> {
         jobs: &BTreeMap<String, Vec<&JobId>>,
         indent: &str,
     ) {
-        dot.push_str(&format!("{}subgraph cluster_{} {{\n", indent, prefix));
-        dot.push_str(&format!(
-            "{}    label=\"Run: {}\";\n",
+        writeln!(dot, "{}subgraph cluster_{} {{", indent, prefix).expect("write to String failed");
+        writeln!(
+            dot,
+            "{}    label=\"Run: {}\";",
             indent,
             escape_dot_label(run_name)
-        ));
-        dot.push_str(&format!("{}    style=\"dashed,rounded\";\n", indent));
-        dot.push_str(&format!(
-            "{}    color=\"{}\";\n",
-            indent, COLOR_CLUSTER_BORDER
-        ));
-        dot.push_str(&format!("{}    fontsize=\"14\";\n", indent));
-        dot.push_str(&format!("{}    margin=\"16\";\n", indent));
+        )
+        .expect("write to String failed");
+        writeln!(dot, "{}    style=\"dashed,rounded\";", indent).expect("write to String failed");
+        writeln!(dot, "{}    color=\"{}\";", indent, COLOR_CLUSTER_BORDER)
+            .expect("write to String failed");
+        writeln!(dot, "{}    fontsize=\"14\";", indent).expect("write to String failed");
+        writeln!(dot, "{}    margin=\"16\";", indent).expect("write to String failed");
 
         for (job_name, job_ids) in jobs {
             let count = job_ids.len();
@@ -376,20 +385,19 @@ impl<'a> VizGenerator<'a> {
                 let job_label = format!("{}\\n(x{})", escape_dot_label(job_name), count);
                 let fill_color = get_fill_color(job_name);
 
-                dot.push_str(&format!("{}    {} [\n", indent, unique_node_id));
-                dot.push_str(&format!("{}        label=\"{}\",\n", indent, job_label));
-                dot.push_str(&format!("{}        shape=\"box\",\n", indent));
-                dot.push_str(&format!("{}        style=\"filled,rounded\",\n", indent));
-                dot.push_str(&format!(
-                    "{}        fontsize=\"{}\",\n",
-                    indent, JOB_FONT_SIZE
-                ));
-                dot.push_str(&format!(
-                    "{}        fillcolor=\"{}\",\n",
-                    indent, fill_color
-                ));
-                dot.push_str(&format!("{}        penwidth=\"1\"\n", indent));
-                dot.push_str(&format!("{}    ];\n", indent));
+                writeln!(dot, "{}    {} [", indent, unique_node_id)
+                    .expect("write to String failed");
+                writeln!(dot, "{}        label=\"{}\",", indent, job_label)
+                    .expect("write to String failed");
+                writeln!(dot, "{}        shape=\"box\",", indent).expect("write to String failed");
+                writeln!(dot, "{}        style=\"filled,rounded\",", indent)
+                    .expect("write to String failed");
+                writeln!(dot, "{}        fontsize=\"{}\",", indent, JOB_FONT_SIZE)
+                    .expect("write to String failed");
+                writeln!(dot, "{}        fillcolor=\"{}\",", indent, fill_color)
+                    .expect("write to String failed");
+                writeln!(dot, "{}        penwidth=\"1\"", indent).expect("write to String failed");
+                writeln!(dot, "{}    ];", indent).expect("write to String failed");
             }
 
             let varying_params = self.get_varying_params(job_ids);
@@ -415,26 +423,26 @@ impl<'a> VizGenerator<'a> {
                     escape_dot_label(&val_str)
                 );
 
-                dot.push_str(&format!("{}    {} [\n", indent, param_node_id));
-                dot.push_str(&format!("{}        label=\"{}\",\n", indent, label));
-                dot.push_str(&format!("{}        shape=\"{}\",\n", indent, PARAM_SHAPE));
-                dot.push_str(&format!("{}        style=\"filled\",\n", indent));
-                dot.push_str(&format!(
-                    "{}        fillcolor=\"{}\",\n",
-                    indent, PARAM_FILL
-                ));
-                dot.push_str(&format!("{}        color=\"{}\",\n", indent, PARAM_BORDER));
-                dot.push_str(&format!(
-                    "{}        fontcolor=\"{}\",\n",
-                    indent, PARAM_FONT_COLOR
-                ));
-                dot.push_str(&format!(
-                    "{}        fontsize=\"{}\",\n",
-                    indent, PARAM_FONT_SIZE
-                ));
-                dot.push_str(&format!("{}        margin=\"0.1,0.05\",\n", indent));
-                dot.push_str(&format!("{}        penwidth=\"0.8\"\n", indent));
-                dot.push_str(&format!("{}    ];\n", indent));
+                writeln!(dot, "{}    {} [", indent, param_node_id).expect("write to String failed");
+                writeln!(dot, "{}        label=\"{}\",", indent, label)
+                    .expect("write to String failed");
+                writeln!(dot, "{}        shape=\"{}\",", indent, PARAM_SHAPE)
+                    .expect("write to String failed");
+                writeln!(dot, "{}        style=\"filled\",", indent)
+                    .expect("write to String failed");
+                writeln!(dot, "{}        fillcolor=\"{}\",", indent, PARAM_FILL)
+                    .expect("write to String failed");
+                writeln!(dot, "{}        color=\"{}\",", indent, PARAM_BORDER)
+                    .expect("write to String failed");
+                writeln!(dot, "{}        fontcolor=\"{}\",", indent, PARAM_FONT_COLOR)
+                    .expect("write to String failed");
+                writeln!(dot, "{}        fontsize=\"{}\",", indent, PARAM_FONT_SIZE)
+                    .expect("write to String failed");
+                writeln!(dot, "{}        margin=\"0.1,0.05\",", indent)
+                    .expect("write to String failed");
+                writeln!(dot, "{}        penwidth=\"0.8\"", indent)
+                    .expect("write to String failed");
+                writeln!(dot, "{}    ];", indent).expect("write to String failed");
 
                 let target_node = if is_sg {
                     format!("{}_sg_scatter", unique_node_id)
@@ -442,19 +450,22 @@ impl<'a> VizGenerator<'a> {
                     unique_node_id.clone()
                 };
 
-                dot.push_str(&format!(
-                    "{}    {} -> {} [\n",
-                    indent, param_node_id, target_node
-                ));
-                dot.push_str(&format!("{}        style=\"dotted\",\n", indent));
-                dot.push_str(&format!("{}        color=\"{}\",\n", indent, PARAM_BORDER));
-                dot.push_str(&format!("{}        arrowhead=\"dot\",\n", indent));
-                dot.push_str(&format!("{}        arrowsize=\"0.5\",\n", indent));
-                dot.push_str(&format!("{}        penwidth=\"1.0\"\n", indent));
-                dot.push_str(&format!("{}    ];\n", indent));
+                writeln!(dot, "{}    {} -> {} [", indent, param_node_id, target_node)
+                    .expect("write to String failed");
+                writeln!(dot, "{}        style=\"dotted\",", indent)
+                    .expect("write to String failed");
+                writeln!(dot, "{}        color=\"{}\",", indent, PARAM_BORDER)
+                    .expect("write to String failed");
+                writeln!(dot, "{}        arrowhead=\"dot\",", indent)
+                    .expect("write to String failed");
+                writeln!(dot, "{}        arrowsize=\"0.5\",", indent)
+                    .expect("write to String failed");
+                writeln!(dot, "{}        penwidth=\"1.0\"", indent)
+                    .expect("write to String failed");
+                writeln!(dot, "{}    ];", indent).expect("write to String failed");
             }
         }
-        dot.push_str(&format!("{}}}\n", indent));
+        writeln!(dot, "{}}}", indent).expect("write to String failed");
     }
 
     fn render_scatter_gather_subgraph(
@@ -482,83 +493,83 @@ impl<'a> VizGenerator<'a> {
             .collect();
         step_names.sort();
 
-        dot.push_str(&format!("{}subgraph cluster_{} {{\n", indent, cluster_id));
-        dot.push_str(&format!(
-            "{}    label=\"{}\\n(x{})\";\n",
+        writeln!(dot, "{}subgraph cluster_{} {{", indent, cluster_id)
+            .expect("write to String failed");
+        writeln!(
+            dot,
+            "{}    label=\"{}\\n(x{})\";",
             indent,
             escape_dot_label(job_name),
             count
-        ));
-        dot.push_str(&format!("{}    style=\"filled,rounded,bold\";\n", indent));
-        dot.push_str(&format!("{}    color=\"{}\";\n", indent, SG_CLUSTER_BORDER));
-        dot.push_str(&format!("{}    fillcolor=\"{}\";\n", indent, SG_CLUSTER_BG));
-        dot.push_str(&format!("{}    fontsize=\"{}\";\n", indent, JOB_FONT_SIZE));
-        dot.push_str(&format!("{}    penwidth=\"1.5\";\n", indent));
-        dot.push_str(&format!("{}    margin=\"12\";\n\n", indent));
+        )
+        .expect("write to String failed");
+        writeln!(dot, "{}    style=\"filled,rounded,bold\";", indent)
+            .expect("write to String failed");
+        writeln!(dot, "{}    color=\"{}\";", indent, SG_CLUSTER_BORDER)
+            .expect("write to String failed");
+        writeln!(dot, "{}    fillcolor=\"{}\";", indent, SG_CLUSTER_BG)
+            .expect("write to String failed");
+        writeln!(dot, "{}    fontsize=\"{}\";", indent, JOB_FONT_SIZE)
+            .expect("write to String failed");
+        writeln!(dot, "{}    penwidth=\"1.5\";", indent).expect("write to String failed");
+        writeln!(dot, "{}    margin=\"12\";\n", indent).expect("write to String failed");
 
-        dot.push_str(&format!("{}    {} [\n", indent, scatter_id));
-        dot.push_str(&format!("{}        label=\"scatter\",\n", indent));
-        dot.push_str(&format!("{}        shape=\"trapezium\",\n", indent));
-        dot.push_str(&format!("{}        style=\"filled\",\n", indent));
-        dot.push_str(&format!(
-            "{}        fillcolor=\"{}\",\n",
-            indent, SG_SCATTER_FILL
-        ));
-        dot.push_str(&format!(
-            "{}        color=\"{}\",\n",
-            indent, SG_CLUSTER_BORDER
-        ));
-        dot.push_str(&format!(
-            "{}        fontsize=\"{}\",\n",
+        writeln!(dot, "{}    {} [", indent, scatter_id).expect("write to String failed");
+        writeln!(dot, "{}        label=\"scatter\",", indent).expect("write to String failed");
+        writeln!(dot, "{}        shape=\"trapezium\",", indent).expect("write to String failed");
+        writeln!(dot, "{}        style=\"filled\",", indent).expect("write to String failed");
+        writeln!(dot, "{}        fillcolor=\"{}\",", indent, SG_SCATTER_FILL)
+            .expect("write to String failed");
+        writeln!(dot, "{}        color=\"{}\",", indent, SG_CLUSTER_BORDER)
+            .expect("write to String failed");
+        writeln!(
+            dot,
+            "{}        fontsize=\"{}\",",
             indent, SG_PHASE_FONT_SIZE
-        ));
-        dot.push_str(&format!("{}        penwidth=\"1\"\n", indent));
-        dot.push_str(&format!("{}    ];\n", indent));
+        )
+        .expect("write to String failed");
+        writeln!(dot, "{}        penwidth=\"1\"", indent).expect("write to String failed");
+        writeln!(dot, "{}    ];", indent).expect("write to String failed");
 
         for step_name in &step_names {
             let step_id = format!("{}_sg_step_{}", unique_node_id, clean_id(step_name));
-            dot.push_str(&format!("{}    {} [\n", indent, step_id));
-            dot.push_str(&format!(
-                "{}        label=\"{}\",\n",
+            writeln!(dot, "{}    {} [", indent, step_id).expect("write to String failed");
+            writeln!(
+                dot,
+                "{}        label=\"{}\",",
                 indent,
                 escape_dot_label(step_name)
-            ));
-            dot.push_str(&format!("{}        shape=\"box\",\n", indent));
-            dot.push_str(&format!("{}        style=\"filled,rounded\",\n", indent));
-            dot.push_str(&format!(
-                "{}        fillcolor=\"{}\",\n",
-                indent, SG_STEP_FILL
-            ));
-            dot.push_str(&format!(
-                "{}        color=\"{}\",\n",
-                indent, SG_STEP_BORDER
-            ));
-            dot.push_str(&format!(
-                "{}        fontsize=\"{}\",\n",
-                indent, SG_STEP_FONT_SIZE
-            ));
-            dot.push_str(&format!("{}        penwidth=\"1\"\n", indent));
-            dot.push_str(&format!("{}    ];\n", indent));
+            )
+            .expect("write to String failed");
+            writeln!(dot, "{}        shape=\"box\",", indent).expect("write to String failed");
+            writeln!(dot, "{}        style=\"filled,rounded\",", indent)
+                .expect("write to String failed");
+            writeln!(dot, "{}        fillcolor=\"{}\",", indent, SG_STEP_FILL)
+                .expect("write to String failed");
+            writeln!(dot, "{}        color=\"{}\",", indent, SG_STEP_BORDER)
+                .expect("write to String failed");
+            writeln!(dot, "{}        fontsize=\"{}\",", indent, SG_STEP_FONT_SIZE)
+                .expect("write to String failed");
+            writeln!(dot, "{}        penwidth=\"1\"", indent).expect("write to String failed");
+            writeln!(dot, "{}    ];", indent).expect("write to String failed");
         }
 
-        dot.push_str(&format!("{}    {} [\n", indent, gather_id));
-        dot.push_str(&format!("{}        label=\"gather\",\n", indent));
-        dot.push_str(&format!("{}        shape=\"invtrapezium\",\n", indent));
-        dot.push_str(&format!("{}        style=\"filled\",\n", indent));
-        dot.push_str(&format!(
-            "{}        fillcolor=\"{}\",\n",
-            indent, SG_GATHER_FILL
-        ));
-        dot.push_str(&format!(
-            "{}        color=\"{}\",\n",
-            indent, SG_CLUSTER_BORDER
-        ));
-        dot.push_str(&format!(
-            "{}        fontsize=\"{}\",\n",
+        writeln!(dot, "{}    {} [", indent, gather_id).expect("write to String failed");
+        writeln!(dot, "{}        label=\"gather\",", indent).expect("write to String failed");
+        writeln!(dot, "{}        shape=\"invtrapezium\",", indent).expect("write to String failed");
+        writeln!(dot, "{}        style=\"filled\",", indent).expect("write to String failed");
+        writeln!(dot, "{}        fillcolor=\"{}\",", indent, SG_GATHER_FILL)
+            .expect("write to String failed");
+        writeln!(dot, "{}        color=\"{}\",", indent, SG_CLUSTER_BORDER)
+            .expect("write to String failed");
+        writeln!(
+            dot,
+            "{}        fontsize=\"{}\",",
             indent, SG_PHASE_FONT_SIZE
-        ));
-        dot.push_str(&format!("{}        penwidth=\"1\"\n", indent));
-        dot.push_str(&format!("{}    ];\n\n", indent));
+        )
+        .expect("write to String failed");
+        writeln!(dot, "{}        penwidth=\"1\"", indent).expect("write to String failed");
+        writeln!(dot, "{}    ];\n", indent).expect("write to String failed");
 
         let all_deps: HashSet<String> = step_names
             .iter()
@@ -588,10 +599,12 @@ impl<'a> VizGenerator<'a> {
 
         for root in &root_steps {
             let step_id = format!("{}_sg_step_{}", unique_node_id, clean_id(root));
-            dot.push_str(&format!(
-                "{}    {} -> {} [color=\"{}\", penwidth=\"1.0\", arrowsize=\"0.6\"];\n",
+            writeln!(
+                dot,
+                "{}    {} -> {} [color=\"{}\", penwidth=\"1.0\", arrowsize=\"0.6\"];",
                 indent, scatter_id, step_id, SG_INTERNAL_EDGE_COLOR
-            ));
+            )
+            .expect("write to String failed");
         }
 
         for step_name in &step_names {
@@ -600,23 +613,27 @@ impl<'a> VizGenerator<'a> {
                 let step_id = format!("{}_sg_step_{}", unique_node_id, clean_id(step_name));
                 for dep_name in &exe.deps {
                     let dep_id = format!("{}_sg_step_{}", unique_node_id, clean_id(dep_name));
-                    dot.push_str(&format!(
-                        "{}    {} -> {} [color=\"{}\", penwidth=\"1.0\", arrowsize=\"0.6\"];\n",
+                    writeln!(
+                        dot,
+                        "{}    {} -> {} [color=\"{}\", penwidth=\"1.0\", arrowsize=\"0.6\"];",
                         indent, dep_id, step_id, SG_INTERNAL_EDGE_COLOR
-                    ));
+                    )
+                    .expect("write to String failed");
                 }
             }
         }
 
         for sink in &sink_steps {
             let step_id = format!("{}_sg_step_{}", unique_node_id, clean_id(sink));
-            dot.push_str(&format!(
-                "{}    {} -> {} [color=\"{}\", penwidth=\"1.0\", arrowsize=\"0.6\"];\n",
+            writeln!(
+                dot,
+                "{}    {} -> {} [color=\"{}\", penwidth=\"1.0\", arrowsize=\"0.6\"];",
                 indent, step_id, gather_id, SG_INTERNAL_EDGE_COLOR
-            ));
+            )
+            .expect("write to String failed");
         }
 
-        dot.push_str(&format!("{}}}\n", indent));
+        writeln!(dot, "{}}}", indent).expect("write to String failed");
     }
 
     fn get_job_inputs(job: &'a Job) -> Vec<&'a repx_core::model::InputMapping> {
@@ -631,7 +648,7 @@ impl<'a> VizGenerator<'a> {
                 .get("scatter")
                 .map(|e| e.inputs.iter().collect())
                 .unwrap_or_default(),
-            _ => Vec::new(),
+            StageType::Worker | StageType::Gather => Vec::new(),
         }
     }
 

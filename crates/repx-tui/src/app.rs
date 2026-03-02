@@ -1048,8 +1048,6 @@ impl App {
         self.clear_selection();
     }
 
-    pub fn debug_selected(&mut self) {}
-
     pub fn pin_toggle(&mut self) {
         let target_name = self.targets_state.get_active_target_name();
         let target = match self.client.get_target(&target_name) {

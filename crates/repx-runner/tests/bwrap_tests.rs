@@ -29,8 +29,8 @@ fn test_bwrap_overlay_fallback_when_disabled() {
     println!("STDOUT: {}", String::from_utf8_lossy(&output.stdout));
     println!("STDERR: {}", String::from_utf8_lossy(&output.stderr));
 
-    let stage_e_job_id = harness.get_job_id_by_name("stage-E-total-sum");
-    let stage_e_path = harness.get_job_output_path(&stage_e_job_id);
+    let stage_e_job_id = harness.job_id_by_name("stage-E-total-sum");
+    let stage_e_path = harness.job_output_path(&stage_e_job_id);
 
     assert!(
         stage_e_path.join("repx/SUCCESS").exists(),
@@ -127,8 +127,8 @@ fn test_full_run_local_bwrap() {
 
     cmd.assert().success();
 
-    let stage_e_job_id = harness.get_job_id_by_name("stage-E-total-sum");
-    let stage_e_path = harness.get_job_output_path(&stage_e_job_id);
+    let stage_e_job_id = harness.job_id_by_name("stage-E-total-sum");
+    let stage_e_path = harness.job_output_path(&stage_e_job_id);
 
     assert!(stage_e_path.join("repx/SUCCESS").exists());
     let total_sum_content = fs::read_to_string(stage_e_path.join("out/total_sum.txt"))
@@ -156,7 +156,7 @@ fn test_bwrap_isolation_properties() {
 
     let isolated_job_id = "job-isolated";
     harness.stage_job_dirs(isolated_job_id);
-    let isolated_job_out_path = harness.get_job_output_path(isolated_job_id);
+    let isolated_job_out_path = harness.job_output_path(isolated_job_id);
     fs::write(isolated_job_out_path.join("repx/inputs.json"), "{}")
         .expect("writing inputs.json must succeed");
 
@@ -203,7 +203,7 @@ exit 0
     fs::set_permissions(&script_path, perms).expect("setting script permissions must succeed");
 
     let image_tag = harness
-        .get_any_image_tag()
+        .any_image_tag()
         .expect("No image found in lab metadata");
 
     let mut cmd = harness.cmd();
@@ -215,7 +215,7 @@ exit 0
         .arg("--base-path")
         .arg(base_path)
         .arg("--host-tools-dir")
-        .arg(harness.get_host_tools_dir_name())
+        .arg(harness.host_tools_dir_name())
         .arg("--runtime")
         .arg("bwrap")
         .arg("--image-tag")
@@ -265,7 +265,7 @@ fn test_bwrap_impure_mode_access_host() {
 
     let job_id = "job-impure";
     harness.stage_job_dirs(job_id);
-    let job_out_path = harness.get_job_output_path(job_id);
+    let job_out_path = harness.job_output_path(job_id);
     fs::write(job_out_path.join("repx/inputs.json"), "{}")
         .expect("writing inputs.json must succeed");
 
@@ -306,7 +306,7 @@ fi
     perms.set_mode(0o755);
     fs::set_permissions(&script_path, perms).expect("setting script permissions must succeed");
 
-    let image_tag = harness.get_any_image_tag().expect("No image found");
+    let image_tag = harness.any_image_tag().expect("No image found");
 
     let mut cmd = harness.cmd();
     cmd.arg("internal-execute")
@@ -317,7 +317,7 @@ fi
         .arg("--base-path")
         .arg(base_path)
         .arg("--host-tools-dir")
-        .arg(harness.get_host_tools_dir_name())
+        .arg(harness.host_tools_dir_name())
         .arg("--runtime")
         .arg("bwrap")
         .arg("--image-tag")
@@ -346,7 +346,7 @@ fi
         .arg("--base-path")
         .arg(base_path)
         .arg("--host-tools-dir")
-        .arg(harness.get_host_tools_dir_name())
+        .arg(harness.host_tools_dir_name())
         .arg("--runtime")
         .arg("bwrap")
         .arg("--image-tag")
@@ -371,7 +371,7 @@ fn test_bwrap_mount_paths_specific() {
     let base_path = &harness.cache_dir;
     let job_id = "job-mount-paths";
     harness.stage_job_dirs(job_id);
-    let job_out_path = harness.get_job_output_path(job_id);
+    let job_out_path = harness.job_output_path(job_id);
     fs::write(job_out_path.join("repx/inputs.json"), "{}")
         .expect("writing inputs.json must succeed");
 
@@ -412,7 +412,7 @@ fi
     perms.set_mode(0o755);
     fs::set_permissions(&script_path, perms).expect("setting script permissions must succeed");
 
-    let image_tag = harness.get_any_image_tag().expect("No image found");
+    let image_tag = harness.any_image_tag().expect("No image found");
 
     let mut cmd = harness.cmd();
     cmd.arg("internal-execute")
@@ -423,7 +423,7 @@ fi
         .arg("--base-path")
         .arg(base_path)
         .arg("--host-tools-dir")
-        .arg(harness.get_host_tools_dir_name())
+        .arg(harness.host_tools_dir_name())
         .arg("--runtime")
         .arg("bwrap")
         .arg("--image-tag")
@@ -452,7 +452,7 @@ fi
         .arg("--base-path")
         .arg(base_path)
         .arg("--host-tools-dir")
-        .arg(harness.get_host_tools_dir_name())
+        .arg(harness.host_tools_dir_name())
         .arg("--runtime")
         .arg("bwrap")
         .arg("--image-tag")

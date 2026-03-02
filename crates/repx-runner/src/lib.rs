@@ -3,6 +3,7 @@ use crate::commands::AppContext;
 use repx_client::Client;
 use repx_core::{
     config,
+    constants::targets,
     errors::ConfigError,
     logging::{self, LogLevel},
     model::SchedulerType,
@@ -58,7 +59,7 @@ pub fn run(cli: Cli) -> Result<(), CliError> {
                 .target
                 .as_deref()
                 .or(config.submission_target.as_deref())
-                .unwrap_or("local");
+                .unwrap_or(targets::LOCAL);
             let context = AppContext {
                 lab_path: &cli.lab,
                 client: &client,
@@ -73,7 +74,7 @@ pub fn run(cli: Cli) -> Result<(), CliError> {
                 .target
                 .clone()
                 .or(config.submission_target.clone())
-                .unwrap_or_else(|| "local".to_string());
+                .unwrap_or_else(|| targets::LOCAL.to_string());
             let context = AppContext {
                 lab_path: &cli.lab,
                 client: &client,
@@ -83,7 +84,7 @@ pub fn run(cli: Cli) -> Result<(), CliError> {
         }
         Commands::Run(args) => {
             let config = config::load_config()?;
-            let resources = config::load_resources(cli.resources.as_ref())?;
+            let resources = config::load_resources(cli.resources.as_deref())?;
 
             let client = create_client(&config, &cli.lab)?;
 

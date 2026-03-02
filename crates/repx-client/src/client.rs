@@ -6,7 +6,7 @@ use comfy_table::{modifiers::UTF8_ROUND_CORNERS, presets, Attribute, Cell, Color
 use fs_err;
 use repx_core::{
     config::{Config, Resources},
-    constants::{dirs, logs},
+    constants::{dirs, logs, targets},
     engine,
     errors::ConfigError,
     lab,
@@ -109,7 +109,7 @@ impl Client {
         let lab = lab::load_from_path(&lab_path)?;
         let lab_arc = Arc::new(lab);
 
-        let local_base_path = if let Some(local_target) = config.targets.get("local") {
+        let local_base_path = if let Some(local_target) = config.targets.get(targets::LOCAL) {
             local_target.base_path.clone()
         } else {
             return Err(ClientError::Config(ConfigError::General(
@@ -131,7 +131,7 @@ impl Client {
 
         let mut targets: HashMap<String, Arc<dyn Target>> = HashMap::new();
         for (name, target_config) in &config.targets {
-            let target: Arc<dyn Target> = if name == "local" {
+            let target: Arc<dyn Target> = if name == targets::LOCAL {
                 Arc::new(LocalTarget {
                     name: name.clone(),
                     config: target_config.clone(),
@@ -213,7 +213,7 @@ impl Client {
     }
 
     pub(crate) fn save_slurm_map(&self) -> Result<()> {
-        let local_base_path = if let Some(local_target) = self.config.targets.get("local") {
+        let local_base_path = if let Some(local_target) = self.config.targets.get(targets::LOCAL) {
             local_target.base_path.clone()
         } else {
             return Err(ClientError::Config(ConfigError::General(
@@ -338,7 +338,7 @@ impl Client {
             send(ClientEvent::SyncingArtifacts {
                 total: images_to_sync.len() as u64,
             });
-            let local_target = self.targets.get("local").ok_or_else(|| {
+            let local_target = self.targets.get(targets::LOCAL).ok_or_else(|| {
                 ClientError::Config(ConfigError::General(
                     "Local target ('local') must be defined in the configuration.".to_string(),
                 ))

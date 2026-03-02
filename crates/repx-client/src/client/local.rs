@@ -4,7 +4,7 @@ use crate::resources;
 use crate::targets::Target;
 use num_cpus;
 use repx_core::{
-    constants::dirs,
+    constants::{dirs, targets},
     engine,
     errors::ConfigError,
     model::{Job, JobId},
@@ -59,7 +59,7 @@ fn get_job_cpus(job: &Job, resources_config: &Option<repx_core::config::Resource
 pub(crate) fn build_steps_json(
     job: &Job,
     artifacts_base: &std::path::Path,
-) -> std::result::Result<(String, String), String> {
+) -> Result<(String, String)> {
     use serde_json::json;
     use std::collections::HashSet;
 
@@ -70,9 +70,9 @@ pub(crate) fn build_steps_json(
         .collect();
 
     if step_entries.is_empty() {
-        return Err(
+        return Err(ClientError::Config(ConfigError::General(
             "Scatter-gather job has no step executables (expected step-<name> keys)".into(),
-        );
+        )));
     }
 
     let mut steps = serde_json::Map::new();
@@ -146,28 +146,38 @@ pub(crate) fn build_steps_json(
         .collect();
 
     if sink_candidates.len() != 1 {
-        return Err(format!(
+        return Err(ClientError::Config(ConfigError::General(format!(
             "Expected exactly one sink step but found {}: {:?}",
             sink_candidates.len(),
             sink_candidates
-        ));
+        ))));
     }
     let sink_step = sink_candidates[0].clone();
 
     let sink_key = format!("step-{}", sink_step);
-    let sink_exe = job
-        .executables
-        .get(&sink_key)
-        .ok_or_else(|| format!("Sink step executable '{}' not found in job", sink_key))?;
-    let last_step_outputs_json = serde_json::to_string(&sink_exe.outputs)
-        .map_err(|e| format!("Failed to serialize sink step outputs: {}", e))?;
+    let sink_exe = job.executables.get(&sink_key).ok_or_else(|| {
+        ClientError::Config(ConfigError::General(format!(
+            "Sink step executable '{}' not found in job",
+            sink_key
+        )))
+    })?;
+    let last_step_outputs_json = serde_json::to_string(&sink_exe.outputs).map_err(|e| {
+        ClientError::Config(ConfigError::General(format!(
+            "Failed to serialize sink step outputs: {}",
+            e
+        )))
+    })?;
 
     let steps_metadata = json!({
         "steps": steps,
         "sink_step": sink_step
     });
-    let steps_json = serde_json::to_string(&steps_metadata)
-        .map_err(|e| format!("Failed to serialize steps metadata: {}", e))?;
+    let steps_json = serde_json::to_string(&steps_metadata).map_err(|e| {
+        ClientError::Config(ConfigError::General(format!(
+            "Failed to serialize steps metadata: {}",
+            e
+        )))
+    })?;
 
     Ok((steps_json, last_step_outputs_json))
 }
@@ -314,8 +324,7 @@ fn build_sg_common_args(
     let scatter_exe_path = artifacts_base.join(&scatter_exe.path);
     let gather_exe_path = artifacts_base.join(&gather_exe.path);
 
-    let (steps_json, last_step_outputs_json) = build_steps_json(job, &artifacts_base)
-        .map_err(|e| ClientError::Config(ConfigError::General(e)))?;
+    let (steps_json, last_step_outputs_json) = build_steps_json(job, &artifacts_base)?;
 
     let mut args = vec![
         "internal-scatter-gather".to_string(),
@@ -360,7 +369,7 @@ fn build_sg_common_args(
         "--last-step-outputs-json".to_string(),
         last_step_outputs_json,
         "--scheduler".to_string(),
-        "local".to_string(),
+        targets::LOCAL.to_string(),
         "--step-sbatch-opts".to_string(),
         String::new(),
     ]);

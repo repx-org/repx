@@ -2,7 +2,7 @@ use crate::error::CliError;
 use repx_client::Client;
 use repx_core::errors::ConfigError;
 use repx_executor::Runtime;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 pub mod execute;
 pub mod gc;
@@ -55,7 +55,7 @@ pub(crate) fn parse_runtime(
 }
 
 pub struct AppContext<'a> {
-    pub lab_path: &'a PathBuf,
+    pub lab_path: &'a Path,
     pub client: &'a Client,
     pub submission_target: &'a str,
 }

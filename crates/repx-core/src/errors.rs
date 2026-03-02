@@ -26,9 +26,6 @@ pub enum ConfigError {
     #[error("Error walking directory: {0}")]
     WalkDir(#[from] walkdir::Error),
 
-    #[error("XDG Base Directory Error: {0}")]
-    Xdg(#[from] xdg::BaseDirectoriesError),
-
     #[error("Invalid configuration: {0}")]
     General(String),
 
@@ -41,14 +38,8 @@ pub enum ConfigError {
     #[error("Could not find required lab metadata file(s) in '{0}'. Expected 'lab_manifest.json' and 'revision/metadata.json'. Is this a valid lab directory?")]
     MetadataNotFound(PathBuf),
 
-    #[error("Could not determine HOME directory.")]
-    HomeDirectoryNotFound,
-
     #[error("Lab integrity check failed: {0}")]
     IntegrityError(String),
-
-    #[error("Incompatible Lab version. This repx binary expects repx_version '{expected}', but the Lab was generated with version '{found}'. Please rebuild your Lab with a compatible repx-nix version.")]
-    IncompatibleVersion { expected: String, found: String },
 
     #[error(
         "Lab integrity check failed: file '{path}' has hash '{actual}', expected '{expected}'."

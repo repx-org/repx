@@ -91,7 +91,7 @@ local_concurrency = 2
         let dest = self.cache_dir.join("artifacts");
         fs::create_dir_all(&dest).expect("failed to create artifacts dir");
 
-        let host_tools_dir = self.get_host_tools_dir_name();
+        let host_tools_dir = self.host_tools_dir_name();
         let bin_dir = self
             .lab_path
             .join("host-tools")
@@ -146,7 +146,7 @@ local_concurrency = 2
                             .file_stem()
                             .expect("No file stem")
                             .to_string_lossy()
-                            .to_string();
+                            .into_owned();
                         let extract_dir = images_store.join(&file_stem);
 
                         if !extract_dir.exists() {
@@ -199,12 +199,12 @@ local_concurrency = 2
         }
     }
     pub fn stage_job_dirs(&self, job_id: &str) {
-        let job_out_path = self.get_job_output_path(job_id);
+        let job_out_path = self.job_output_path(job_id);
         fs::create_dir_all(job_out_path.join("out")).expect("failed to create job out dir");
         fs::create_dir_all(job_out_path.join("repx")).expect("failed to create job repx dir");
     }
 
-    pub fn get_job_id_by_name(&self, name_substring: &str) -> String {
+    pub fn job_id_by_name(&self, name_substring: &str) -> String {
         let jobs = self.metadata["jobs"]
             .as_object()
             .expect("metadata.json has no 'jobs' object");
@@ -227,12 +227,12 @@ local_concurrency = 2
         job_id.clone()
     }
 
-    pub fn get_job_package_path(&self, job_id: &str) -> PathBuf {
+    pub fn job_package_path(&self, job_id: &str) -> PathBuf {
         let path_in_lab = PathBuf::from("jobs").join(job_id);
         self.cache_dir.join("artifacts").join(path_in_lab)
     }
 
-    pub fn get_job_output_path(&self, job_id: &str) -> PathBuf {
+    pub fn job_output_path(&self, job_id: &str) -> PathBuf {
         self.cache_dir.join("outputs").join(job_id)
     }
 
@@ -300,7 +300,7 @@ local_concurrency = 2
         combined_metadata.insert("runs_data".to_string(), Value::Object(all_runs));
         Value::Object(combined_metadata)
     }
-    pub fn get_lab_content_hash(&self) -> String {
+    pub fn lab_content_hash(&self) -> String {
         let lab_subdir = self.cache_dir.join("artifacts").join("lab");
         let manifest_path = fs::read_dir(&lab_subdir)
             .expect("Could not read lab/ subdirectory in artifacts")
@@ -322,24 +322,24 @@ local_concurrency = 2
             .to_string()
     }
 
-    pub fn get_staged_executable_path(&self, job_id: &str) -> PathBuf {
+    pub fn staged_executable_path(&self, job_id: &str) -> PathBuf {
         let job_data = &self.metadata["jobs"][job_id];
         let path_in_lab_str = job_data["executables"]["main"]["path"]
             .as_str()
             .expect("Job has no main executable path in metadata");
         self.cache_dir.join("artifacts").join(path_in_lab_str)
     }
-    pub fn get_host_tools_dir_name(&self) -> String {
+    pub fn host_tools_dir_name(&self) -> String {
         let host_tools_path = self.lab_path.join("host-tools");
         let entry = fs::read_dir(host_tools_path)
             .expect("Could not read host-tools dir")
             .filter_map(Result::ok)
             .find(|e| e.path().is_dir())
             .expect("No directory found in host-tools");
-        entry.file_name().to_string_lossy().to_string()
+        entry.file_name().to_string_lossy().into_owned()
     }
 
-    pub fn get_any_image_tag(&self) -> Option<String> {
+    pub fn any_image_tag(&self) -> Option<String> {
         self.metadata
             .get("runs_data")?
             .as_object()?

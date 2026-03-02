@@ -1,5 +1,4 @@
 pub mod braille_graph;
-pub mod braille_sparkline;
 pub mod color;
 pub mod stacked_bar_chart;
 pub mod tree_prefix;

@@ -1459,7 +1459,7 @@ mod tests {
                 base_path: tmp.to_path_buf(),
                 node_local_path: None,
                 host_tools_dir: String::new(),
-                scheduler: "local".into(),
+                scheduler: repx_core::constants::targets::LOCAL.into(),
                 step_sbatch_opts: String::new(),
                 job_package_path: scripts.clone(),
                 scatter_exe_path: scripts.join("scatter.sh"),

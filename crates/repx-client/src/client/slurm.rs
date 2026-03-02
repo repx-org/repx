@@ -6,7 +6,7 @@ use crate::targets::common::shell_quote;
 use crate::targets::Target;
 use fs_err;
 use repx_core::{
-    constants::dirs,
+    constants::{dirs, targets},
     errors::ConfigError,
     model::{Job, JobId},
 };
@@ -70,7 +70,7 @@ pub fn submit_slurm_batch_run(
     send(ClientEvent::GeneratingSlurmScripts {
         num_jobs: jobs_to_submit.len(),
     });
-    let local_target = client.get_target("local").ok_or_else(|| {
+    let local_target = client.get_target(targets::LOCAL).ok_or_else(|| {
         ClientError::Config(ConfigError::General(
             "A 'local' target must be defined in config.toml to store client state.".to_string(),
         ))
@@ -162,8 +162,7 @@ pub fn submit_slurm_batch_run(
             let gather_exe_path = artifacts_base.join(&gather_exe.path);
 
             let (steps_json, last_step_outputs_json) =
-                super::local::build_steps_json(job, &artifacts_base)
-                    .map_err(|e| ClientError::Config(ConfigError::General(e)))?;
+                super::local::build_steps_json(job, &artifacts_base)?;
 
             let sink_step_key = {
                 let all_deps: HashSet<String> = job

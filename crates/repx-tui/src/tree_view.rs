@@ -7,7 +7,6 @@ use ratatui::{
     prelude::*,
     widgets::{Cell, Row},
 };
-use repx_core::model::Lab;
 use std::collections::HashSet;
 
 pub fn shorten_nix_store_path(s: &str) -> String {
@@ -99,9 +98,6 @@ pub fn build_tree_rows<'a>(
     app: &App,
     display_rows: &'a [TuiDisplayRow],
     selected_jobs: &HashSet<String>,
-    _collapsed_nodes: &HashSet<String>,
-    _lab: &Lab,
-    _visible_range: Option<std::ops::Range<usize>>,
 ) -> Vec<Row<'a>> {
     let mut rows = Vec::with_capacity(display_rows.len());
 

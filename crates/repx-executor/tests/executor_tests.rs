@@ -304,22 +304,6 @@ fn test_executor_error_script_failed_display() {
     assert!(display.contains("command not found"));
 }
 
-#[test]
-fn test_executor_error_image_tag_missing() {
-    let err = ExecutorError::ImageTagMissing;
-    let display = format!("{}", err);
-    assert!(display.contains("image tag"));
-}
-
-#[test]
-fn test_executor_error_security_violation() {
-    let err = ExecutorError::SecurityViolation("rm".to_string());
-    let display = format!("{}", err);
-    assert!(display.contains("Security violation"));
-    assert!(display.contains("rm"));
-    assert!(display.contains("allowlist"));
-}
-
 #[tokio::test]
 async fn test_ensure_bwrap_rootfs_extracted_from_directory() {
     let temp = tempdir().expect("tempdir creation must succeed");
