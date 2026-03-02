@@ -1,5 +1,5 @@
 use repx_core::model::JobId;
-use repx_executor::{ExecutionRequest, Executor, ExecutorError, Runtime};
+use repx_executor::{CancellationToken, ExecutionRequest, Executor, ExecutorError, Runtime};
 use std::fs;
 use std::path::PathBuf;
 use tempfile::tempdir;
@@ -453,4 +453,147 @@ async fn test_ensure_bwrap_rootfs_fails_if_file() {
         "Error was: {}",
         err
     );
+}
+
+fn create_runnable_request(temp: &tempfile::TempDir) -> (ExecutionRequest, PathBuf) {
+    let base = temp.path().to_path_buf();
+    let repx_out = base.join("outputs/repx");
+    let user_out = base.join("outputs/out");
+    let job_pkg = base.join("jobs/test-job");
+    fs::create_dir_all(&repx_out).expect("create repx_out_dir");
+    fs::create_dir_all(&user_out).expect("create user_out_dir");
+    fs::create_dir_all(&job_pkg).expect("create job_package_path");
+
+    let request = ExecutionRequest {
+        job_id: JobId("cancel-test-job".to_string()),
+        runtime: Runtime::Native,
+        base_path: base.clone(),
+        node_local_path: None,
+        job_package_path: job_pkg,
+        inputs_json_path: base.join("inputs.json"),
+        user_out_dir: user_out,
+        repx_out_dir: repx_out,
+        host_tools_bin_dir: None,
+        mount_host_paths: false,
+        mount_paths: vec![],
+    };
+    (request, base)
+}
+
+#[cfg(unix)]
+fn write_script(dir: &std::path::Path, name: &str, body: &str) -> PathBuf {
+    use std::os::unix::fs::PermissionsExt;
+    let path = dir.join(name);
+    fs::write(&path, format!("#!/bin/sh\n{}", body)).expect("write script");
+    let mut perms = fs::metadata(&path).expect("metadata").permissions();
+    perms.set_mode(0o755);
+    fs::set_permissions(&path, perms).expect("chmod");
+    path
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn test_execute_script_cancelled_kills_child() {
+    let temp = tempdir().expect("tempdir");
+    let (request, base) = create_runnable_request(&temp);
+    let script = write_script(&base, "sleep.sh", "sleep 300");
+    let executor = Executor::new(request);
+
+    let token = CancellationToken::new();
+    let token_clone = token.clone();
+
+    tokio::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        token_clone.cancel();
+    });
+
+    let result = executor.execute_script(&script, &[], &token).await;
+
+    assert!(result.is_err(), "should return an error on cancellation");
+    let err = result.expect_err("must be Err");
+    assert!(
+        matches!(err, ExecutorError::Cancelled { .. }),
+        "expected Cancelled, got: {err}",
+    );
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn test_execute_script_pre_cancelled_token_returns_immediately() {
+    let temp = tempdir().expect("tempdir");
+    let (request, base) = create_runnable_request(&temp);
+
+    let script = write_script(&base, "long.sh", "sleep 300");
+    let executor = Executor::new(request);
+
+    let token = CancellationToken::new();
+    token.cancel();
+
+    let start = std::time::Instant::now();
+    let result = executor.execute_script(&script, &[], &token).await;
+    let elapsed = start.elapsed();
+
+    assert!(result.is_err(), "pre-cancelled token should error");
+    assert!(
+        matches!(
+            result.expect_err("must be Err"),
+            ExecutorError::Cancelled { .. }
+        ),
+        "expected Cancelled variant",
+    );
+    assert!(
+        elapsed < std::time::Duration::from_secs(2),
+        "pre-cancelled token should not wait; took {:?}",
+        elapsed,
+    );
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn test_execute_script_succeeds_with_live_token() {
+    let temp = tempdir().expect("tempdir");
+    let (request, base) = create_runnable_request(&temp);
+
+    let script = write_script(&base, "ok.sh", "exit 0");
+    let executor = Executor::new(request);
+
+    let token = CancellationToken::new();
+    let result = executor.execute_script(&script, &[], &token).await;
+
+    assert!(
+        result.is_ok(),
+        "script should succeed with a live token: {:?}",
+        result.err(),
+    );
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn test_execute_script_failure_not_masked_by_token() {
+    let temp = tempdir().expect("tempdir");
+    let (request, base) = create_runnable_request(&temp);
+
+    let script = write_script(&base, "fail.sh", "exit 42");
+    let executor = Executor::new(request);
+
+    let token = CancellationToken::new();
+    let result = executor.execute_script(&script, &[], &token).await;
+
+    assert!(result.is_err(), "failing script should return error");
+    match result.expect_err("must be Err") {
+        ExecutorError::ScriptFailed { code, .. } => {
+            assert_eq!(code, 42, "exit code should be preserved");
+        }
+        other => panic!("expected ScriptFailed, got: {other}"),
+    }
+}
+
+#[test]
+fn test_executor_error_cancelled_display() {
+    let err = ExecutorError::Cancelled {
+        job_id: "my-job-123".to_string(),
+    };
+    let display = format!("{}", err);
+    assert!(display.contains("cancelled"));
+    assert!(display.contains("my-job-123"));
 }

@@ -74,7 +74,7 @@ pub fn build_flat_rows<'a>(
             let (job, is_selected) = if let TuiRowItem::Job { job } = &row_data.item {
                 (job, selected_jobs.contains(&row_data.id))
             } else {
-                unreachable!();
+                return Row::new(vec![Cell::from("")]);
             };
 
             let status = Cell::from(Span::styled(

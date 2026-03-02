@@ -6,8 +6,12 @@ use repx_core::{
     errors::ConfigError,
     model::SchedulerType,
 };
-use std::sync::mpsc;
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    mpsc, Arc,
+};
 use std::thread;
+use std::time::Duration;
 
 use crate::{cli::RunArgs, commands::AppContext, error::CliError};
 
@@ -36,6 +40,13 @@ pub fn handle_run(
         args.run_specs
     };
 
+    let cancelled = Arc::new(AtomicBool::new(false));
+    let cancelled_clone = cancelled.clone();
+    let _ = ctrlc::set_handler(move || {
+        eprintln!("\nCancellation requested (Ctrl+C). Waiting for in-flight work to stop...");
+        cancelled_clone.store(true, Ordering::SeqCst);
+    });
+
     let target_name_clone = target_name.to_string();
     let continue_on_failure = args.continue_on_failure;
     let submission_thread = thread::spawn(move || {
@@ -49,8 +60,21 @@ pub fn handle_run(
         client.submit_batch_run(run_specs, &target_name_clone, scheduler, options)
     });
     let mut pb: Option<ProgressBar> = None;
+    let mut user_cancelled = false;
 
-    for event in rx {
+    loop {
+        if cancelled.load(Ordering::SeqCst) {
+            if let Some(pb) = pb.take() {
+                pb.abandon_with_message("Cancelled");
+            }
+            user_cancelled = true;
+            break;
+        }
+        let event = match rx.recv_timeout(Duration::from_millis(200)) {
+            Ok(ev) => ev,
+            Err(mpsc::RecvTimeoutError::Timeout) => continue,
+            Err(mpsc::RecvTimeoutError::Disconnected) => break,
+        };
         match event {
             ClientEvent::DeployingBinary => {
                 println!("- Deploying repx binary...");
@@ -187,14 +211,18 @@ pub fn handle_run(
 
     match submission_thread.join() {
         Ok(Ok(message)) => {
-            println!("{}", message);
+            if !user_cancelled {
+                println!("{}", message);
+            }
         }
         Ok(Err(e)) => {
-            return Err(CliError::ExecutionFailed {
-                message: "Failed to submit run".to_string(),
-                log_path: None,
-                log_summary: e.to_string(),
-            });
+            if !user_cancelled {
+                return Err(CliError::ExecutionFailed {
+                    message: "Failed to submit run".to_string(),
+                    log_path: None,
+                    log_summary: e.to_string(),
+                });
+            }
         }
         Err(_panic) => {
             return Err(CliError::ExecutionFailed {
@@ -203,6 +231,15 @@ pub fn handle_run(
                 log_summary: "Internal error: submission thread panicked unexpectedly".to_string(),
             });
         }
+    }
+
+    if user_cancelled {
+        eprintln!("{}", "Run cancelled by user.".red().bold());
+        return Err(CliError::ExecutionFailed {
+            message: "Run cancelled by user".to_string(),
+            log_path: None,
+            log_summary: "Ctrl+C received during submission".to_string(),
+        });
     }
 
     Ok(())

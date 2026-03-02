@@ -4,7 +4,7 @@ use repx_core::{
     errors::ConfigError,
     model::JobId,
 };
-use repx_executor::{ExecutionRequest, Executor, Runtime};
+use repx_executor::{CancellationToken, ExecutionRequest, Executor, Runtime};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{
@@ -227,8 +227,9 @@ impl ScatterGatherOrchestrator {
             self.scatter_out_dir.to_string_lossy().to_string(),
             self.inputs_json_path.to_string_lossy().to_string(),
         ];
+        let cancel = CancellationToken::new();
         executor
-            .execute_script(exe_path, &args)
+            .execute_script(exe_path, &args, &cancel)
             .await
             .map_err(|e| CliError::ExecutionFailed {
                 message: "Scatter script failed".to_string(),
@@ -289,8 +290,9 @@ impl ScatterGatherOrchestrator {
             gather_inputs_json_path.to_string_lossy().to_string(),
         ];
 
+        let cancel = CancellationToken::new();
         executor
-            .execute_script(exe_path, &args)
+            .execute_script(exe_path, &args, &cancel)
             .await
             .map_err(|e| CliError::ExecutionFailed {
                 message: "Gather script failed".to_string(),
@@ -494,8 +496,9 @@ async fn handle_phase_step(
         step_inputs_path.to_string_lossy().to_string(),
     ];
 
+    let cancel = CancellationToken::new();
     match executor
-        .execute_script(&step_meta.exe_path, &exec_args)
+        .execute_script(&step_meta.exe_path, &exec_args, &cancel)
         .await
     {
         Ok(_) => {

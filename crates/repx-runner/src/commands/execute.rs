@@ -4,7 +4,7 @@ use repx_core::{
     errors::ConfigError,
     model::JobId,
 };
-use repx_executor::{ExecutionRequest, Executor};
+use repx_executor::{CancellationToken, ExecutionRequest, Executor};
 use std::fs;
 
 use super::write_marker;
@@ -69,7 +69,10 @@ async fn async_handle_execute(args: InternalExecuteArgs) -> Result<(), CliError>
         inputs_json_path.to_string_lossy().to_string(),
     ];
 
-    let result = executor.execute_script(&script_path, &exec_args).await;
+    let cancel = CancellationToken::new();
+    let result = executor
+        .execute_script(&script_path, &exec_args, &cancel)
+        .await;
 
     match result {
         Ok(_) => {

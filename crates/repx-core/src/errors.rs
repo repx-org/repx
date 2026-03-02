@@ -52,6 +52,9 @@ pub enum ConfigError {
 
     #[error("Lab integrity check failed: file '{0}' is missing.")]
     IntegrityFileMissing(String),
+
+    #[error("Path traversal rejected: '{path}' escapes the expected base directory.")]
+    PathTraversal { path: String },
 }
 
 #[derive(Error, Debug)]

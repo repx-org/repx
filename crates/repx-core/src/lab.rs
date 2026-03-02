@@ -1,6 +1,7 @@
 use crate::{
     errors::ConfigError,
     model::{FileEntry, Lab, LabManifest, RootMetadata, Run, RunId, RunMetadataForLoading},
+    path_safety::safe_join,
 };
 use rayon::prelude::*;
 use sha2::{Digest, Sha256};
@@ -18,7 +19,7 @@ fn verify_file_integrity(lab_path: &Path, files: &[FileEntry]) -> Result<(), Con
     );
 
     let result: Result<(), ConfigError> = files.par_iter().try_for_each(|entry| {
-        let file_path = lab_path.join(&entry.path);
+        let file_path = safe_join(lab_path, &entry.path)?;
 
         if !file_path.exists() {
             return Err(ConfigError::IntegrityFileMissing(entry.path.clone()));
