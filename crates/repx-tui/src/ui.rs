@@ -294,7 +294,6 @@ fn draw_targets(f: &mut Frame, area: Rect, app: &mut App, border_style: Style) {
                         "[INACTIVE]",
                         get_style(app, &app.theme.elements.target_states.inactive),
                     ),
-                    TargetState::Down => ("[DOWN]", Style::default().add_modifier(Modifier::DIM)),
                 };
                 let mut executor_text = target.get_selected_executor().as_str().to_string();
                 if is_selected_row
@@ -749,9 +748,6 @@ fn draw_right_column(f: &mut Frame, area: Rect, app: &mut App) {
             app,
             &app.jobs_state.display_rows[start..end],
             &app.jobs_state.selected_jobs,
-            &app.jobs_state.collapsed_nodes,
-            app.lab(),
-            None,
         )
     } else {
         build_flat_rows(

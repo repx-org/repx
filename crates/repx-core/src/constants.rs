@@ -25,31 +25,3 @@ pub mod dirs {
 pub mod targets {
     pub const LOCAL: &str = "local";
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_marker_constants() {
-        assert_eq!(markers::SUCCESS, "SUCCESS");
-        assert_eq!(markers::FAIL, "FAIL");
-    }
-
-    #[test]
-    fn test_log_constants() {
-        assert_eq!(logs::STDOUT, "stdout.log");
-        assert_eq!(logs::STDERR, "stderr.log");
-    }
-
-    #[test]
-    fn test_dir_constants() {
-        assert_eq!(dirs::REPX, "repx");
-        assert_eq!(dirs::OUTPUTS, "outputs");
-    }
-
-    #[test]
-    fn test_manifest_constants() {
-        assert_eq!(manifests::WORKER_SLURM_IDS, "worker_slurm_ids.json");
-    }
-}

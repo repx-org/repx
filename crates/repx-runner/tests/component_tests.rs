@@ -7,11 +7,11 @@ use std::fs;
 #[test]
 fn test_internal_execute_simple_job_ok() {
     let harness = TestHarness::new();
-    let job_id = harness.get_job_id_by_name("stage-A-producer");
+    let job_id = harness.job_id_by_name("stage-A-producer");
 
     harness.stage_job_dirs(&job_id);
 
-    let job_output_path = harness.get_job_output_path(&job_id);
+    let job_output_path = harness.job_output_path(&job_id);
     fs::write(job_output_path.join("repx/inputs.json"), "{}")
         .expect("writing inputs.json must succeed");
 
@@ -20,11 +20,11 @@ fn test_internal_execute_simple_job_ok() {
         .arg("--job-id")
         .arg(&job_id)
         .arg("--executable-path")
-        .arg(harness.get_staged_executable_path(&job_id))
+        .arg(harness.staged_executable_path(&job_id))
         .arg("--base-path")
         .arg(&harness.cache_dir)
         .arg("--host-tools-dir")
-        .arg(harness.get_host_tools_dir_name())
+        .arg(harness.host_tools_dir_name())
         .arg("--runtime")
         .arg("native");
 
@@ -44,22 +44,22 @@ fn test_internal_execute_simple_job_ok() {
 #[test]
 fn test_internal_execute_with_inputs_ok() {
     let harness = TestHarness::new();
-    let job_a_id = harness.get_job_id_by_name("stage-A-producer");
-    let job_b_id = harness.get_job_id_by_name("stage-B-producer");
-    let job_c_id = harness.get_job_id_by_name("stage-C-consumer");
+    let job_a_id = harness.job_id_by_name("stage-A-producer");
+    let job_b_id = harness.job_id_by_name("stage-B-producer");
+    let job_c_id = harness.job_id_by_name("stage-C-consumer");
 
     harness.stage_job_dirs(&job_a_id);
     harness.stage_job_dirs(&job_b_id);
     harness.stage_job_dirs(&job_c_id);
 
-    let job_a_out = harness.get_job_output_path(&job_a_id).join("out");
+    let job_a_out = harness.job_output_path(&job_a_id).join("out");
     fs::write(job_a_out.join("numbers.txt"), "1\n2\n")
         .expect("writing job A numbers.txt must succeed");
-    let job_b_out = harness.get_job_output_path(&job_b_id).join("out");
+    let job_b_out = harness.job_output_path(&job_b_id).join("out");
     fs::write(job_b_out.join("numbers.txt"), "3\n4\n")
         .expect("writing job B numbers.txt must succeed");
 
-    let job_c_output_path = harness.get_job_output_path(&job_c_id);
+    let job_c_output_path = harness.job_output_path(&job_c_id);
     let inputs_json_content = serde_json::json!({
         "data_a": job_a_out.join("numbers.txt"),
         "list_b": job_b_out.join("numbers.txt")
@@ -75,11 +75,11 @@ fn test_internal_execute_with_inputs_ok() {
         .arg("--job-id")
         .arg(&job_c_id)
         .arg("--executable-path")
-        .arg(harness.get_staged_executable_path(&job_c_id))
+        .arg(harness.staged_executable_path(&job_c_id))
         .arg("--base-path")
         .arg(&harness.cache_dir)
         .arg("--host-tools-dir")
-        .arg(harness.get_host_tools_dir_name())
+        .arg(harness.host_tools_dir_name())
         .arg("--runtime")
         .arg("native");
 
@@ -93,13 +93,13 @@ fn test_internal_execute_with_inputs_ok() {
 #[test]
 fn test_internal_execute_fails_if_lab_not_staged() {
     let harness = TestHarness::new();
-    let job_id = harness.get_job_id_by_name("stage-A-producer");
+    let job_id = harness.job_id_by_name("stage-A-producer");
 
     let artifacts_dir = harness.cache_dir.join("artifacts");
     fs::remove_dir_all(&artifacts_dir).expect("Failed to remove artifacts dir");
 
     harness.stage_job_dirs(&job_id);
-    let job_output_path = harness.get_job_output_path(&job_id);
+    let job_output_path = harness.job_output_path(&job_id);
     fs::write(job_output_path.join("repx/inputs.json"), "{}")
         .expect("writing inputs.json must succeed");
     let mut cmd = harness.cmd();
@@ -107,11 +107,11 @@ fn test_internal_execute_fails_if_lab_not_staged() {
         .arg("--job-id")
         .arg(&job_id)
         .arg("--executable-path")
-        .arg(harness.get_staged_executable_path(&job_id))
+        .arg(harness.staged_executable_path(&job_id))
         .arg("--base-path")
         .arg(&harness.cache_dir)
         .arg("--host-tools-dir")
-        .arg(harness.get_host_tools_dir_name())
+        .arg(harness.host_tools_dir_name())
         .arg("--runtime")
         .arg("native");
     cmd.assert()

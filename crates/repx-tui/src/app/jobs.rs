@@ -259,7 +259,6 @@ impl JobsState {
                 },
                 id: format!("job:{}", job.full_id),
                 depth: 0,
-                parent_prefix: "".to_string(),
                 is_last_child: false,
                 cached_tree_prefix: None,
             });
@@ -307,7 +306,6 @@ impl JobsState {
                 id: run_unique_id.clone(),
                 depth: 0,
                 is_last_child: i == num_runs - 1,
-                parent_prefix: "".to_string(),
                 cached_tree_prefix: None,
             });
             if !self.collapsed_nodes.contains(&run_unique_id) {
@@ -391,7 +389,6 @@ impl JobsState {
                 id: group_unique_id.clone(),
                 depth: 0,
                 is_last_child: is_last_top,
-                parent_prefix: "".to_string(),
                 cached_tree_prefix: None,
             });
 
@@ -405,7 +402,6 @@ impl JobsState {
                         id: run_unique_id.clone(),
                         depth: 1,
                         is_last_child: run_is_last,
-                        parent_prefix: "".to_string(),
                         cached_tree_prefix: None,
                     });
                     if !self.collapsed_nodes.contains(&run_unique_id) {
@@ -432,7 +428,6 @@ impl JobsState {
                 id: run_unique_id.clone(),
                 depth: 0,
                 is_last_child: is_last_top,
-                parent_prefix: "".to_string(),
                 cached_tree_prefix: None,
             });
             if !self.collapsed_nodes.contains(&run_unique_id) {
@@ -578,7 +573,6 @@ impl JobsState {
             id: job_instance_id.clone(),
             depth,
             is_last_child: is_last,
-            parent_prefix: prefix.clone(),
             cached_tree_prefix: None,
         });
 

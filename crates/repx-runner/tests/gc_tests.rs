@@ -65,7 +65,7 @@ fn test_gc_preserves_pinned_lab_and_outputs() {
     #[cfg(unix)]
     symlink(&manifest_path, &link_path).expect("Failed to create symlink");
 
-    let job_id = harness.get_job_id_by_name("stage-A-producer");
+    let job_id = harness.job_id_by_name("stage-A-producer");
 
     let valid_job_output = outputs_dir.join(&job_id);
     fs::create_dir_all(&valid_job_output).expect("creating valid job output dir must succeed");
@@ -225,7 +225,7 @@ fn test_project_id_generation_includes_git_remote() {
     let remote_hash = format!("{:x}", Sha256::digest(remote_url.as_bytes()));
     let expected_project_id = format!("{}_{}", remote_hash, abs_hash);
 
-    let job_id = harness.get_job_id_by_name("stage-A-producer");
+    let job_id = harness.job_id_by_name("stage-A-producer");
     harness.cmd().arg("run").arg(job_id).assert().success();
 
     let gcroots_auto = harness.cache_dir.join("gcroots/auto");
@@ -382,7 +382,7 @@ fn test_gc_pin_creates_symlink_in_pinned_dir() {
     let harness = TestHarness::new();
     let base_path = &harness.cache_dir;
 
-    let lab_hash = harness.get_lab_content_hash();
+    let lab_hash = harness.lab_content_hash();
     let (_client, target) = make_client_and_target(base_path, &harness.lab_path);
 
     target
@@ -408,7 +408,7 @@ fn test_gc_pin_default_name_uses_lab_hash() {
     let harness = TestHarness::new();
     let base_path = &harness.cache_dir;
 
-    let lab_hash = harness.get_lab_content_hash();
+    let lab_hash = harness.lab_content_hash();
     let (_client, target) = make_client_and_target(base_path, &harness.lab_path);
 
     target
@@ -427,7 +427,7 @@ fn test_gc_unpin_removes_symlink() {
     let harness = TestHarness::new();
     let base_path = &harness.cache_dir;
 
-    let lab_hash = harness.get_lab_content_hash();
+    let lab_hash = harness.lab_content_hash();
     let (_client, target) = make_client_and_target(base_path, &harness.lab_path);
 
     target
@@ -497,7 +497,7 @@ fn test_gc_list_shows_auto_and_pinned() {
     let harness = TestHarness::new();
     let base_path = &harness.cache_dir;
 
-    let lab_hash = harness.get_lab_content_hash();
+    let lab_hash = harness.lab_content_hash();
     let (_client, target) = make_client_and_target(base_path, &harness.lab_path);
 
     target
@@ -568,7 +568,7 @@ fn test_pinned_root_survives_gc() {
     let harness = TestHarness::new();
     let base_path = &harness.cache_dir;
 
-    let lab_hash = harness.get_lab_content_hash();
+    let lab_hash = harness.lab_content_hash();
     let (_client, target) = make_client_and_target(base_path, &harness.lab_path);
 
     target
@@ -615,7 +615,7 @@ fn test_pin_overwrite_existing() {
     let harness = TestHarness::new();
     let base_path = &harness.cache_dir;
 
-    let lab_hash = harness.get_lab_content_hash();
+    let lab_hash = harness.lab_content_hash();
     let (_client, target) = make_client_and_target(base_path, &harness.lab_path);
 
     target

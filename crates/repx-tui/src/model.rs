@@ -94,8 +94,6 @@ pub struct TuiDisplayRow {
     pub item: TuiRowItem,
     pub id: String,
     pub depth: usize,
-    #[allow(dead_code)]
-    pub parent_prefix: String,
     pub is_last_child: bool,
     pub cached_tree_prefix: Option<String>,
 }
@@ -103,8 +101,6 @@ pub struct TuiDisplayRow {
 pub enum TargetState {
     Active,
     Inactive,
-    #[allow(dead_code)]
-    Down,
 }
 
 pub struct TuiTarget {

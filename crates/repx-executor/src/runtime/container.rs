@@ -44,9 +44,9 @@ impl ContainerRuntime {
             tracing::info!("Image '{}' not found in cache. Loading...", image_tag);
 
             let image_full_path = ctx.find_image_file(image_tag).ok_or_else(|| {
-                ExecutorError::Io(std::io::Error::new(
-                    std::io::ErrorKind::NotFound,
-                    format!("Image file for tag '{}' not found", image_tag),
+                ExecutorError::ImageNotFound(format!(
+                    "Image file for tag '{}' not found",
+                    image_tag
                 ))
             })?;
 

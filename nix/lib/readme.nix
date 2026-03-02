@@ -81,25 +81,11 @@ let
     ''}
   '';
 
-  containerContent = "";
-  unifiedContainerContent = "";
-
 in
 {
   readmeNative = pkgs.writeTextFile {
     name = "readme-native";
     destination = "/README.md";
     text = nativeContent;
-  };
-
-  readmeContainer = pkgs.writeTextFile {
-    name = "readme-container";
-    destination = "/README_container.md";
-    text = containerContent;
-  };
-  readmeContainerUnified = pkgs.writeTextFile {
-    name = "readme-unified";
-    destination = "/README_unified.md";
-    text = unifiedContainerContent;
   };
 }

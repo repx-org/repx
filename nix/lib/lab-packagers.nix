@@ -309,8 +309,7 @@ let
         includeImages = true;
       };
       readme = pkgs.runCommand "README.md" { } ''
-        cat ${artifacts.allReadmeParts.readmeNative}/README.md \
-            ${artifacts.allReadmeParts.readmeContainer}/README_container.md > $out
+        cat ${artifacts.allReadmeParts.readmeNative}/README.md > $out
       '';
     in
     {

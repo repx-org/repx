@@ -11,14 +11,6 @@ const BRAILLE_PATTERNS: [[&str; 5]; 5] = [
     ["⢸", "⣸", "⣼", "⣾", "⣿"],
 ];
 
-const INVERTED_BRAILLE_PATTERNS: [[&str; 5]; 5] = [
-    ["⠀", "⠁", "⠃", "⠇", "⡇"],
-    ["⠈", "⠉", "⠋", "⠏", "⡏"],
-    ["⠘", "⠙", "⠛", "⠟", "⡟"],
-    ["⠸", "⠹", "⠻", "⠿", "⡿"],
-    ["⢸", "⢹", "⢻", "⢿", "⣿"],
-];
-
 fn interpolate_color(c1: Color, c2: Color, t: f64) -> Color {
     if let (Color::Rgb(r1, g1, b1), Color::Rgb(r2, g2, b2)) = (c1, c2) {
         let t = t.clamp(0.0, 1.0);
@@ -36,8 +28,6 @@ fn interpolate_color(c1: Color, c2: Color, t: f64) -> Color {
 #[derive(Clone, Copy)]
 pub enum GraphDirection {
     Upwards,
-    #[allow(dead_code)]
-    Downwards,
 }
 pub struct BrailleGraph<'a> {
     pub data: &'a [f64],
@@ -93,13 +83,10 @@ impl Widget for BrailleGraph<'_> {
             let column_height =
                 (left_total_dots.max(right_total_dots) as f64 / DOTS_PER_ROW as f64).ceil() as u16;
 
-            let rows = match self.direction {
+            let rows: Vec<_> = match self.direction {
                 GraphDirection::Upwards => (0..column_height)
                     .map(|i| area.bottom().saturating_sub(1).saturating_sub(i))
-                    .collect::<Vec<_>>(),
-                GraphDirection::Downwards => (0..column_height)
-                    .map(|i| area.top() + i)
-                    .collect::<Vec<_>>(),
+                    .collect(),
             };
 
             for (i, row_y) in rows.into_iter().enumerate() {
@@ -114,12 +101,10 @@ impl Widget for BrailleGraph<'_> {
 
                 let symbol = match self.direction {
                     GraphDirection::Upwards => BRAILLE_PATTERNS[right_dots][left_dots],
-                    GraphDirection::Downwards => INVERTED_BRAILLE_PATTERNS[right_dots][left_dots],
                 };
 
                 let t = match self.direction {
                     GraphDirection::Upwards => i as f64 / area.height as f64,
-                    GraphDirection::Downwards => 1.0 - (i as f64 / area.height as f64),
                 };
 
                 let color = interpolate_color(self.low_color, self.high_color, t);

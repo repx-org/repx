@@ -16,7 +16,7 @@ fn test_docker_impure_mode_args() {
     let host_tools_dir = harness
         .cache_dir
         .join("artifacts/host-tools")
-        .join(harness.get_host_tools_dir_name())
+        .join(harness.host_tools_dir_name())
         .join("bin");
 
     fs::create_dir_all(&host_tools_dir).expect("creating host-tools dir must succeed");
@@ -44,7 +44,7 @@ exit 0
     fs::set_permissions(&mock_docker_path, perms)
         .expect("setting mock docker permissions must succeed");
 
-    let job_out_path = harness.get_job_output_path(job_id);
+    let job_out_path = harness.job_output_path(job_id);
     fs::write(job_out_path.join("repx/inputs.json"), "{}")
         .expect("writing inputs.json must succeed");
     let job_package_dir = base_path.join("artifacts/jobs").join(job_id);
@@ -59,7 +59,7 @@ exit 0
     fs::set_permissions(&script_path, perms_script)
         .expect("setting script permissions must succeed");
 
-    let image_tag = harness.get_any_image_tag().expect("No image found");
+    let image_tag = harness.any_image_tag().expect("No image found");
 
     let mut cmd = harness.cmd();
     cmd.arg("internal-execute")
@@ -70,7 +70,7 @@ exit 0
         .arg("--base-path")
         .arg(base_path)
         .arg("--host-tools-dir")
-        .arg(harness.get_host_tools_dir_name())
+        .arg(harness.host_tools_dir_name())
         .arg("--runtime")
         .arg("docker")
         .arg("--image-tag")

@@ -17,6 +17,28 @@ pub enum Runtime {
     Bwrap { image_tag: String },
 }
 
+impl Runtime {
+    pub fn image_tag(&self) -> Option<&str> {
+        match self {
+            Runtime::Native => None,
+            Runtime::Podman { image_tag }
+            | Runtime::Docker { image_tag }
+            | Runtime::Bwrap { image_tag } => Some(image_tag),
+        }
+    }
+}
+
+impl std::fmt::Display for Runtime {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Runtime::Native => write!(f, "native"),
+            Runtime::Podman { image_tag } => write!(f, "podman ({})", image_tag),
+            Runtime::Docker { image_tag } => write!(f, "docker ({})", image_tag),
+            Runtime::Bwrap { image_tag } => write!(f, "bwrap ({})", image_tag),
+        }
+    }
+}
+
 const LOCK_POLL_INTERVAL_MS: u64 = 100;
 const LOCK_TIMEOUT_SECS_DEFAULT: u64 = 300;
 
@@ -43,20 +65,20 @@ pub(crate) async fn acquire_flock(
                     || errno == nix::errno::Errno::EAGAIN =>
             {
                 if lock_start.elapsed() > timeout {
-                    return Err(ExecutorError::Io(std::io::Error::other(format!(
+                    return Err(ExecutorError::LockFailed(format!(
                         "Timed out waiting for {} lock after {}s (set REPX_LOCK_TIMEOUT_SECS to override)",
                         context_name,
                         timeout.as_secs()
-                    ))));
+                    )));
                 }
                 lock_file = f;
                 tokio::time::sleep(std::time::Duration::from_millis(LOCK_POLL_INTERVAL_MS)).await;
             }
             Err((_, e)) => {
-                return Err(ExecutorError::Io(std::io::Error::other(format!(
+                return Err(ExecutorError::LockFailed(format!(
                     "Failed to acquire {} lock: {}",
                     context_name, e
-                ))))
+                )))
             }
         }
     }

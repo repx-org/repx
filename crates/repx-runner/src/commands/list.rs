@@ -4,7 +4,7 @@ use crate::error::CliError;
 use repx_client::{client::status as client_status, Client};
 use repx_core::{
     config,
-    constants::dirs,
+    constants::{dirs, targets},
     engine::JobStatus,
     errors::{ConfigError, DomainError},
     lab,
@@ -74,7 +74,7 @@ fn list_jobs(
     let (store_path, job_statuses, resolved_target_name) = if needs_config {
         let config = config::load_config()?;
 
-        let target_name = target.unwrap_or("local").to_string();
+        let target_name = target.unwrap_or(targets::LOCAL).to_string();
 
         let target_config = config.targets.get(&target_name).ok_or_else(|| {
             CliError::Config(ConfigError::General(format!(

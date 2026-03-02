@@ -132,10 +132,6 @@ fn handle_space_menu_key_event(key: KeyEvent, app: &mut App) {
             app.cancel_selected();
             app.input_mode = InputMode::Normal;
         }
-        KeyCode::Char('d') => {
-            app.debug_selected();
-            app.input_mode = InputMode::Normal;
-        }
         KeyCode::Char('p') => {
             app.pin_toggle();
             app.input_mode = InputMode::Normal;

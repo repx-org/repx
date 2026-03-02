@@ -24,13 +24,14 @@ pub enum ExecutorError {
         stderr: String,
     },
 
-    #[error("Container execution requires an image tag, but none was provided.")]
-    ImageTagMissing,
+    #[error("Image not found: {0}")]
+    ImageNotFound(String),
 
-    #[error(
-        "Security violation: Attempted to use system binary '{0}' which is not in the allowlist."
-    )]
-    SecurityViolation(String),
+    #[error("Invalid image: {0}")]
+    InvalidImage(String),
+
+    #[error("Lock acquisition failed: {0}")]
+    LockFailed(String),
 }
 
 pub type Result<T> = std::result::Result<T, ExecutorError>;

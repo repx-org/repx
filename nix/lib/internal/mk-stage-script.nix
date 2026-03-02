@@ -70,37 +70,6 @@ let
   paramsJson = builtins.toJSON paramInputs;
   analyzerScript = ./analyze_deps.py;
 
-  shellBuiltins = [
-    "cd"
-    "echo"
-    "printf"
-    "read"
-    "set"
-    "unset"
-    "export"
-    "declare"
-    "typeset"
-    "local"
-    "eval"
-    "source"
-    "."
-    "test"
-    "true"
-    "false"
-    "exit"
-    "return"
-    "wait"
-    "trap"
-    "exec"
-    "shift"
-    "command"
-    "type"
-    "hash"
-    "alias"
-    "unalias"
-    "mapfile"
-    "readarray"
-  ];
 in
 pkgs.stdenv.mkDerivation {
   pname = "${pname}-script";
@@ -134,8 +103,6 @@ pkgs.stdenv.mkDerivation {
   ++ baseContainerPkgs;
 
   doCheck = true;
-
-  ALLOWED_BUILTINS = builtins.concatStringsSep " " shellBuiltins;
 
   checkPhase = ''
     runHook preCheck

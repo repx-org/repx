@@ -14,8 +14,8 @@ fn test_full_run_local_native() {
 
     cmd.assert().success();
 
-    let stage_e_job_id = harness.get_job_id_by_name("stage-E-total-sum");
-    let stage_e_path = harness.get_job_output_path(&stage_e_job_id);
+    let stage_e_job_id = harness.job_id_by_name("stage-E-total-sum");
+    let stage_e_path = harness.job_output_path(&stage_e_job_id);
     assert!(stage_e_path.join("repx/SUCCESS").exists());
     let total_sum_content = fs::read_to_string(stage_e_path.join("out/total_sum.txt"))
         .expect("reading total_sum.txt must succeed");
@@ -26,8 +26,8 @@ fn test_full_run_local_native() {
         val
     );
 
-    let stage_d_job_id = harness.get_job_id_by_name("stage-D-partial-sums");
-    let stage_d_path = harness.get_job_output_path(&stage_d_job_id);
+    let stage_d_job_id = harness.job_id_by_name("stage-D-partial-sums");
+    let stage_d_path = harness.job_output_path(&stage_d_job_id);
     assert!(stage_d_path.join("repx/SUCCESS").exists());
     assert!(stage_d_path.join("branch-0").exists());
     assert!(stage_d_path.join("branch-9").exists());
@@ -56,7 +56,7 @@ fn test_idempotent_run_local_native() {
 fn test_partial_run_by_job_id() {
     let harness = TestHarness::new();
 
-    let stage_c_job_id = harness.get_job_id_by_name("stage-C-consumer");
+    let stage_c_job_id = harness.job_id_by_name("stage-C-consumer");
 
     let c_job_data = &harness.metadata["jobs"][&stage_c_job_id];
     let inputs = c_job_data["executables"]["main"]["inputs"]
@@ -95,8 +95,8 @@ fn test_partial_run_by_job_id() {
         );
     }
 
-    let stage_d_job_id = harness.get_job_id_by_name("stage-D-partial-sums");
-    let stage_e_job_id = harness.get_job_id_by_name("stage-E-total-sum");
+    let stage_d_job_id = harness.job_id_by_name("stage-D-partial-sums");
+    let stage_e_job_id = harness.job_id_by_name("stage-E-total-sum");
 
     assert!(
         !outputs_dir.join(stage_d_job_id).exists(),
@@ -140,7 +140,7 @@ fn test_list_commands() {
         .stdout(predicates::str::contains("stage-A-producer"))
         .stdout(predicates::str::contains("stage-B-producer"));
 
-    let job_id = harness.get_job_id_by_name("stage-C-consumer");
+    let job_id = harness.job_id_by_name("stage-C-consumer");
 
     harness
         .cmd()
@@ -155,7 +155,7 @@ fn test_list_commands() {
         )))
         .stdout(predicates::str::contains(&job_id));
 
-    let full_job_id = harness.get_job_id_by_name("stage-A-producer");
+    let full_job_id = harness.job_id_by_name("stage-A-producer");
     let partial_job_id = &full_job_id[0..10];
 
     harness
@@ -200,7 +200,7 @@ fn test_show_commands() {
         .assert()
         .success();
 
-    let job_id = harness.get_job_id_by_name("stage-A-producer");
+    let job_id = harness.job_id_by_name("stage-A-producer");
     let partial_id = &job_id[0..8];
 
     harness
@@ -257,7 +257,7 @@ fn test_log_command_shows_stdout_by_default() {
         .assert()
         .success();
 
-    let job_id = harness.get_job_id_by_name("stage-A-producer");
+    let job_id = harness.job_id_by_name("stage-A-producer");
 
     harness.cmd().arg("log").arg(&job_id).assert().success();
 }
@@ -273,7 +273,7 @@ fn test_log_command_shows_stderr_with_flag() {
         .assert()
         .success();
 
-    let job_id = harness.get_job_id_by_name("stage-A-producer");
+    let job_id = harness.job_id_by_name("stage-A-producer");
 
     harness
         .cmd()
@@ -295,7 +295,7 @@ fn test_log_command_respects_line_count() {
         .assert()
         .success();
 
-    let job_id = harness.get_job_id_by_name("stage-A-producer");
+    let job_id = harness.job_id_by_name("stage-A-producer");
 
     harness
         .cmd()
@@ -318,7 +318,7 @@ fn test_log_command_resolves_job_prefix() {
         .assert()
         .success();
 
-    let full_job_id = harness.get_job_id_by_name("stage-A-producer");
+    let full_job_id = harness.job_id_by_name("stage-A-producer");
     let partial_id = &full_job_id[0..8];
 
     harness.cmd().arg("log").arg(partial_id).assert().success();
@@ -340,7 +340,7 @@ fn test_log_command_nonexistent_job_errors() {
 fn test_continue_on_failure_runs_independent_jobs() {
     let harness = TestHarness::new();
 
-    let stage_a_job_id = harness.get_job_id_by_name("stage-A-producer");
+    let stage_a_job_id = harness.job_id_by_name("stage-A-producer");
     harness
         .cmd()
         .arg("run")
@@ -348,7 +348,7 @@ fn test_continue_on_failure_runs_independent_jobs() {
         .assert()
         .success();
 
-    let stage_a_path = harness.get_job_output_path(&stage_a_job_id);
+    let stage_a_path = harness.job_output_path(&stage_a_job_id);
     assert!(stage_a_path.join("repx/SUCCESS").exists());
 
     fs::remove_file(stage_a_path.join("repx/SUCCESS"))
@@ -356,8 +356,8 @@ fn test_continue_on_failure_runs_independent_jobs() {
     fs::write(stage_a_path.join("repx/FAIL"), "simulated failure")
         .expect("writing FAIL marker must succeed");
 
-    let stage_b_job_id = harness.get_job_id_by_name("stage-B-producer");
-    let stage_b_path = harness.get_job_output_path(&stage_b_job_id);
+    let stage_b_job_id = harness.job_id_by_name("stage-B-producer");
+    let stage_b_path = harness.job_output_path(&stage_b_job_id);
 
     let _ = fs::remove_dir_all(&stage_b_path);
 

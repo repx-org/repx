@@ -4,7 +4,6 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::PathBuf;
-use std::str::FromStr;
 use std::time::Duration;
 use xdg::BaseDirectories;
 
@@ -258,7 +257,7 @@ pub fn merge_toml_values(a: &mut toml::Value, b: &toml::Value) {
 }
 
 pub fn load_resources(
-    extra_path: Option<&std::path::PathBuf>,
+    extra_path: Option<&std::path::Path>,
 ) -> Result<Option<Resources>, ConfigError> {
     let mut merged_value = toml::Value::Table(toml::map::Map::new());
 
@@ -286,7 +285,7 @@ pub fn load_resources(
             merge_toml_values(&mut merged_value, &cli_value);
         } else {
             return Err(ConfigError::PathIo {
-                path: path.clone(),
+                path: path.to_path_buf(),
                 source: std::io::Error::new(std::io::ErrorKind::NotFound, "File not found"),
             });
         }
@@ -313,16 +312,12 @@ pub fn load_config() -> Result<Config, ConfigError> {
     for (name, target) in config.targets.iter_mut() {
         let path_str = target.base_path.display().to_string();
         let expanded_path_str = shellexpand::tilde(&path_str).into_owned();
-        target.base_path = PathBuf::from_str(&expanded_path_str).map_err(|e| {
-            ConfigError::General(format!("Invalid path '{}': {}", expanded_path_str, e))
-        })?;
+        target.base_path = PathBuf::from(&expanded_path_str);
 
         if let Some(local_path) = &target.node_local_path {
             let local_str = local_path.display().to_string();
             let expanded_local = shellexpand::tilde(&local_str).into_owned();
-            target.node_local_path = Some(PathBuf::from_str(&expanded_local).map_err(|e| {
-                ConfigError::General(format!("Invalid path '{}': {}", expanded_local, e))
-            })?);
+            target.node_local_path = Some(PathBuf::from(&expanded_local));
         }
 
         if target.address.is_none() && !target.base_path.is_absolute() {
