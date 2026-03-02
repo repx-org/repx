@@ -75,6 +75,10 @@ let
   finalResult =
     if !(pkgs.lib.isAttrs stageDef) then
       throw "Stage file '${toString stageFile}' did not return a declarative attribute set."
+    else if !(builtins.isPath stageFile || builtins.isFunction stageFile) then
+      throw "call-stage: 'stageFile' must be a path or a function, got ${builtins.typeOf stageFile}."
+    else if (stageDef ? "run") && !(builtins.isFunction stageDef.run) then
+      throw "Stage '${toString stageFile}': 'run' must be a function, got ${builtins.typeOf stageDef.run}."
     else
       let
         stageDefWithDeps = stageDef // {

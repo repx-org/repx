@@ -191,12 +191,14 @@ impl fmt::Display for JobId {
     }
 }
 
+const SHORT_HASH_LEN: usize = 7;
+
 impl JobId {
     pub fn short_id(&self) -> String {
         let s = &self.0;
         if let Some((hash, rest)) = s.split_once('-') {
-            if hash.len() >= 7 {
-                let short_hash = &hash[..7];
+            if hash.len() >= SHORT_HASH_LEN {
+                let short_hash = &hash[..SHORT_HASH_LEN];
                 format!("{}-{}", short_hash, rest)
             } else {
                 s.to_string()

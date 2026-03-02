@@ -1,6 +1,6 @@
 use crate::{
     app::{App, InputMode, PanelFocus},
-    model::{TargetState, TuiRowItem},
+    model::{JobStatus, TargetState, TuiRowItem},
     style::{get_color, get_style},
     tree_view::{build_flat_rows, build_tree_rows, shorten_nix_store_path},
     widgets::{color, BrailleGraph, GraphDirection, StackedBarChart},
@@ -179,18 +179,39 @@ fn draw_graphs(f: &mut Frame, area: Rect, app: &App) {
 
     let bg = get_color(app, &app.theme.elements.graphs.background.color);
     let status_styles = &app.theme.elements.job_status;
-    let status_colors: BTreeMap<&'static str, Color> = [
-        ("Succeeded", get_color(app, &status_styles.succeeded.color)),
-        ("Failed", get_color(app, &status_styles.failed.color)),
-        ("Running", get_color(app, &status_styles.running.color)),
-        ("Pending", get_color(app, &status_styles.pending.color)),
-        ("Queued", get_color(app, &status_styles.queued.color)),
-        ("Blocked", get_color(app, &status_styles.blocked.color)),
+    let status_colors: BTreeMap<JobStatus, Color> = [
         (
-            "Submitting...",
+            JobStatus::Succeeded,
+            get_color(app, &status_styles.succeeded.color),
+        ),
+        (
+            JobStatus::Failed,
+            get_color(app, &status_styles.failed.color),
+        ),
+        (
+            JobStatus::Running,
+            get_color(app, &status_styles.running.color),
+        ),
+        (
+            JobStatus::Pending,
+            get_color(app, &status_styles.pending.color),
+        ),
+        (
+            JobStatus::Queued,
+            get_color(app, &status_styles.queued.color),
+        ),
+        (
+            JobStatus::Blocked,
+            get_color(app, &status_styles.blocked.color),
+        ),
+        (
+            JobStatus::Submitting,
             get_color(app, &status_styles.submitting.color),
         ),
-        ("Unknown", get_color(app, &status_styles.unknown.color)),
+        (
+            JobStatus::Unknown,
+            get_color(app, &status_styles.unknown.color),
+        ),
     ]
     .iter()
     .map(|(k, v)| (*k, color::muted(*v, bg)))

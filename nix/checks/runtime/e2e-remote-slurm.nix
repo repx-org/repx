@@ -118,37 +118,9 @@ pkgs.testers.runNixOSTest {
 
     LAB_PATH = "${referenceLab}"
 
-    def get_subset_jobs():
-        print(f"Searching for jobs in {LAB_PATH}")
-        for root, dirs, files in os.walk(LAB_PATH):
-            for file in files:
-                if file.endswith(".json"):
-                    full_path = os.path.join(root, file)
-                    try:
-                        with open(full_path, 'r') as f:
-                            data = json.load(f)
-                            if data.get("name") == "simulation-run" and "jobs" in data:
-                                jobs = data["jobs"]
+    exec(open("${./helpers/get-subset-jobs.py}").read())
 
-                                for jid, jval in jobs.items():
-                                    if jval.get("resource_hints"):
-                                        print(f"Found job with resource_hints: {jid} -> {jval.get('resource_hints')}")
-                                        return [jid]
-
-                                for jid, jval in jobs.items():
-                                    if "workload-generator" in jval.get("name", ""):
-                                        print(f"Found workload-generator job: {jid}")
-                                        return [jid]
-
-                                if jobs:
-                                    first_job = list(jobs.keys())[0]
-                                    print(f"No job with resource_hints found. Selecting first available job: {first_job}")
-                                    return [first_job]
-                    except Exception as e:
-                        print(f"Warning: Failed to read or parse {full_path}: {e}")
-        return []
-
-    subset_jobs = get_subset_jobs()
+    subset_jobs = get_subset_jobs(LAB_PATH, prefer_resource_hints=True)
     if not subset_jobs:
         print(f"ERROR: Could not find any jobs for 'simulation-run' in {LAB_PATH}.")
         print(f"Listing files in {LAB_PATH} for debugging:")

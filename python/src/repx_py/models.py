@@ -252,7 +252,7 @@ class Experiment:
     ):
         self.resolver = resolver or LocalCacheResolver()
 
-        if _preloaded_metadata:
+        if _preloaded_metadata is not None:
             self.path = Path(".")
             self._metadata = _preloaded_metadata
         elif lab_path:
@@ -322,9 +322,9 @@ class Experiment:
         if not lab_dir.exists():
             lab_dir = self.path
 
-        manifest_candidates = list(lab_dir.glob("*.json"))
+        manifest_candidates = sorted(lab_dir.glob("*.json"))
         if not manifest_candidates and (self.path / "lab").exists():
-            manifest_candidates = list((self.path / "lab").glob("*.json"))
+            manifest_candidates = sorted((self.path / "lab").glob("*.json"))
 
         if not manifest_candidates:
             raise FileNotFoundError(

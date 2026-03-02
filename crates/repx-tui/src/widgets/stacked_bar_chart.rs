@@ -1,4 +1,4 @@
-use crate::model::StatusCounts;
+use crate::model::{JobStatus, StatusCounts};
 use ratatui::{
     prelude::{Buffer, Color, Rect},
     widgets::Widget,
@@ -7,7 +7,7 @@ use std::collections::BTreeMap;
 
 pub struct StackedBarChart<'a> {
     pub data: &'a [StatusCounts],
-    pub status_colors: &'a BTreeMap<&'static str, Color>,
+    pub status_colors: &'a BTreeMap<JobStatus, Color>,
 }
 impl Widget for StackedBarChart<'_> {
     fn render(self, area: Rect, buf: &mut Buffer) {
@@ -59,21 +59,42 @@ impl Widget for StackedBarChart<'_> {
                 continue;
             }
 
-            let status_percentages: BTreeMap<&str, f64> = BTreeMap::from([
-                ("Succeeded", counts.succeeded as f64 / counts.total as f64),
-                ("Failed", counts.failed as f64 / counts.total as f64),
-                ("Running", counts.running as f64 / counts.total as f64),
-                ("Pending", counts.pending as f64 / counts.total as f64),
-                ("Queued", counts.queued as f64 / counts.total as f64),
-                ("Blocked", counts.blocked as f64 / counts.total as f64),
+            let status_percentages: BTreeMap<JobStatus, f64> = BTreeMap::from([
                 (
-                    "Submitting...",
+                    JobStatus::Succeeded,
+                    counts.succeeded as f64 / counts.total as f64,
+                ),
+                (
+                    JobStatus::Failed,
+                    counts.failed as f64 / counts.total as f64,
+                ),
+                (
+                    JobStatus::Running,
+                    counts.running as f64 / counts.total as f64,
+                ),
+                (
+                    JobStatus::Pending,
+                    counts.pending as f64 / counts.total as f64,
+                ),
+                (
+                    JobStatus::Queued,
+                    counts.queued as f64 / counts.total as f64,
+                ),
+                (
+                    JobStatus::Blocked,
+                    counts.blocked as f64 / counts.total as f64,
+                ),
+                (
+                    JobStatus::Submitting,
                     counts.submitting as f64 / counts.total as f64,
                 ),
-                ("Unknown", counts.unknown as f64 / counts.total as f64),
+                (
+                    JobStatus::Unknown,
+                    counts.unknown as f64 / counts.total as f64,
+                ),
             ]);
 
-            let mut segments: Vec<(&str, f64)> = Vec::new();
+            let mut segments: Vec<(JobStatus, f64)> = Vec::new();
             for (status, percentage) in status_percentages.iter() {
                 if *percentage > 0.0 {
                     segments.push((*status, *percentage));

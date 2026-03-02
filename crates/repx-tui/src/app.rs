@@ -2,7 +2,7 @@ pub mod jobs;
 pub mod targets;
 
 use crate::app::{jobs::JobsState, targets::TargetsState};
-use crate::model::{StatusCounts, TuiExecutor, TuiRowItem, TuiScheduler, TuiTarget};
+use crate::model::{JobStatus, StatusCounts, TuiExecutor, TuiRowItem, TuiScheduler, TuiTarget};
 use repx_client::{error::ClientError, Client, SubmitOptions};
 use repx_core::{
     config::Resources,
@@ -344,9 +344,10 @@ impl App {
                         submitted_job_ids.len()
                     );
                     for job in self.jobs_state.jobs.iter_mut() {
-                        if submitted_job_ids.contains(&job.full_id) && job.status == "Submitting..."
+                        if submitted_job_ids.contains(&job.full_id)
+                            && job.status == JobStatus::Submitting
                         {
-                            job.status = "Queued".to_string();
+                            job.status = JobStatus::Queued;
                         }
                     }
                 }
@@ -362,9 +363,10 @@ impl App {
                         affected_job_ids.len()
                     );
                     for job in self.jobs_state.jobs.iter_mut() {
-                        if affected_job_ids.contains(&job.full_id) && job.status == "Submitting..."
+                        if affected_job_ids.contains(&job.full_id)
+                            && job.status == JobStatus::Submitting
                         {
-                            job.status = "Submit Failed".to_string();
+                            job.status = JobStatus::SubmitFailed;
                         }
                     }
                 }
@@ -389,21 +391,21 @@ impl App {
 
         for job in &self.jobs_state.jobs {
             counts.total += 1;
-            match job.status.as_str() {
-                "Succeeded" => {
+            match job.status {
+                JobStatus::Succeeded => {
                     counts.succeeded += 1;
                     current_completed_count += 1;
                 }
-                "Failed" | "Submit Failed" => {
+                JobStatus::Failed | JobStatus::SubmitFailed => {
                     counts.failed += 1;
                     current_completed_count += 1;
                 }
-                "Running" => counts.running += 1,
-                "Pending" => counts.pending += 1,
-                "Queued" => counts.queued += 1,
-                "Blocked" => counts.blocked += 1,
-                "Submitting..." => counts.submitting += 1,
-                _ => counts.unknown += 1,
+                JobStatus::Running => counts.running += 1,
+                JobStatus::Pending => counts.pending += 1,
+                JobStatus::Queued => counts.queued += 1,
+                JobStatus::Blocked => counts.blocked += 1,
+                JobStatus::Submitting => counts.submitting += 1,
+                JobStatus::Unknown => counts.unknown += 1,
             }
         }
         (counts, current_completed_count)
@@ -872,8 +874,11 @@ impl App {
             .filter(|id_str| {
                 if let Some(job) = self.jobs_state.jobs.iter().find(|j| j.full_id.0 == *id_str) {
                     let is_submittable = !matches!(
-                        job.status.as_str(),
-                        "Succeeded" | "Running" | "Queued" | "Submitting..."
+                        job.status,
+                        JobStatus::Succeeded
+                            | JobStatus::Running
+                            | JobStatus::Queued
+                            | JobStatus::Submitting
                     );
                     if !is_submittable {
                         tracing::info!(
@@ -913,9 +918,12 @@ impl App {
         );
         for job in self.jobs_state.jobs.iter_mut() {
             if all_jobs_to_submit.contains(&job.full_id)
-                && !matches!(job.status.as_str(), "Succeeded" | "Running" | "Queued")
+                && !matches!(
+                    job.status,
+                    JobStatus::Succeeded | JobStatus::Running | JobStatus::Queued
+                )
             {
-                job.status = "Submitting...".to_string();
+                job.status = JobStatus::Submitting;
             }
         }
         let target_name = self.targets_state.get_active_target_name();
