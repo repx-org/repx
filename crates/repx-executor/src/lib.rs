@@ -14,6 +14,7 @@ use repx_core::{constants::logs, model::JobId};
 use std::path::{Path, PathBuf};
 use tokio::fs::{File, OpenOptions};
 use tokio::process::Command as TokioCommand;
+pub use tokio_util::sync::CancellationToken;
 
 #[derive(Debug, Clone)]
 pub struct ExecutionRequest {
@@ -43,7 +44,12 @@ impl Executor {
         RuntimeContext::new(&self.request)
     }
 
-    pub async fn execute_script(&self, script_path: &Path, args: &[String]) -> Result<()> {
+    pub async fn execute_script(
+        &self,
+        script_path: &Path,
+        args: &[String],
+        cancel: &CancellationToken,
+    ) -> Result<()> {
         let (stdout_log, stderr_log) = self.create_log_files().await?;
         let stderr_path = self.request.repx_out_dir.join(logs::STDERR);
 
@@ -55,15 +61,33 @@ impl Executor {
             cmd
         );
 
-        let status = cmd
+        let mut child = cmd
             .stdout(stdout_log.into_std().await)
             .stderr(stderr_log.into_std().await)
-            .status()
-            .await
+            .spawn()
             .map_err(|e| ExecutorError::CommandFailed {
                 command: format!("{:?}", cmd.as_std().get_program()),
                 source: e,
             })?;
+
+        let status = tokio::select! {
+            result = child.wait() => {
+                result.map_err(|e| ExecutorError::CommandFailed {
+                    command: format!("{:?}", cmd.as_std().get_program()),
+                    source: e,
+                })?
+            }
+            _ = cancel.cancelled() => {
+                tracing::warn!(
+                    "Cancellation requested for job '{}', killing child process...",
+                    self.request.job_id,
+                );
+                let _ = child.kill().await;
+                return Err(ExecutorError::Cancelled {
+                    job_id: self.request.job_id.to_string(),
+                });
+            }
+        };
 
         if !status.success() {
             let stderr_content = tokio::fs::read_to_string(&stderr_path)

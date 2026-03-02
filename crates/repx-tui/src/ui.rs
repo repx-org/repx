@@ -437,9 +437,8 @@ fn draw_context_panel(f: &mut Frame, area: Rect, app: &App) {
                 Span::styled(
                     context_title
                         .strip_prefix("[Job: ")
-                        .expect("context_title always starts with '[Job: '")
-                        .strip_suffix(']')
-                        .expect("context_title always ends with ']'"),
+                        .and_then(|s| s.strip_suffix(']'))
+                        .unwrap_or(&context_title),
                     Style::default().add_modifier(Modifier::DIM),
                 ),
                 Span::styled("]", Style::default().add_modifier(Modifier::DIM)),

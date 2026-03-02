@@ -46,6 +46,13 @@ pub struct TuiArgs {
 }
 
 pub fn run(args: TuiArgs) -> Result<(), TuiError> {
+    let original_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |panic_info| {
+        let _ = disable_raw_mode();
+        let _ = execute!(io::stdout(), LeaveAlternateScreen, DisableMouseCapture);
+        original_hook(panic_info);
+    }));
+
     repx_core::logging::set_log_level_from_env();
 
     let logging_config = config::load_config().map(|c| c.logging).unwrap_or_default();

@@ -8,6 +8,7 @@ repx-core = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 tokio = { workspace = true }
+tokio-util = { workspace = true }
 nix = { workspace = true, features = ["fs"] }
 tempfile = { workspace = true }
 serde = { workspace = true }

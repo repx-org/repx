@@ -5,6 +5,7 @@ pub mod errors;
 pub mod lab;
 pub mod logging;
 pub mod model;
+pub mod path_safety;
 pub mod resolver;
 pub mod store;
 pub mod theme;

@@ -1,16 +1,18 @@
 use crate::errors::ConfigError;
+use crate::path_safety::safe_join;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
 const ARTIFACTS_DIR: &str = "artifacts";
 
-pub fn has_artifact(base_path: &Path, hash_path: &str) -> bool {
-    base_path.join(ARTIFACTS_DIR).join(hash_path).exists()
+pub fn has_artifact(base_path: &Path, hash_path: &str) -> Result<bool, ConfigError> {
+    let full = safe_join(&base_path.join(ARTIFACTS_DIR), hash_path)?;
+    Ok(full.exists())
 }
 
 pub fn put_artifact(base_path: &Path, hash_path: &str, content: &[u8]) -> Result<(), ConfigError> {
-    let dest_path = base_path.join(ARTIFACTS_DIR).join(hash_path);
+    let dest_path = safe_join(&base_path.join(ARTIFACTS_DIR), hash_path)?;
 
     if let Some(parent) = dest_path.parent() {
         fs::create_dir_all(parent).map_err(|e| ConfigError::PathIo {
@@ -45,6 +47,6 @@ pub fn put_artifact(base_path: &Path, hash_path: &str, content: &[u8]) -> Result
     Ok(())
 }
 
-pub fn get_artifact_path(base_path: &Path, hash_path: &str) -> PathBuf {
-    base_path.join(ARTIFACTS_DIR).join(hash_path)
+pub fn get_artifact_path(base_path: &Path, hash_path: &str) -> Result<PathBuf, ConfigError> {
+    safe_join(&base_path.join(ARTIFACTS_DIR), hash_path)
 }

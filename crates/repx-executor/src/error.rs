@@ -32,6 +32,9 @@ pub enum ExecutorError {
 
     #[error("Lock acquisition failed: {0}")]
     LockFailed(String),
+
+    #[error("Execution cancelled for job '{job_id}'.")]
+    Cancelled { job_id: String },
 }
 
 pub type Result<T> = std::result::Result<T, ExecutorError>;

@@ -59,6 +59,7 @@ shellexpand = "3.1.2"
 anyhow = "1.0"
 uuid = { version = "1.21.0", features = ["v4", "fast-rng", "macro-diagnostics"] }
 sysinfo = "0.32"
+tokio-util = "0.7"
 
 [workspace.lints.clippy]
 unwrap_used = "deny"
