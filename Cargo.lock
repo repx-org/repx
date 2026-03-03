@@ -2053,8 +2053,6 @@ name = "repx-viz"
 version = "0.3.0"
 dependencies = [
  "anyhow",
- "lazy_static",
- "regex",
  "repx-core",
  "serde_json",
 ]
