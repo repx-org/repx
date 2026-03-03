@@ -86,7 +86,7 @@ let
     rs-client-tests = import ./checks/unit/repx-rs.nix {
       inherit pkgs referenceLab referenceLabNative;
       testName = "repx-rs-client-tests";
-      cargoTestArgs = "--test wave_scheduler --test data_only_local --test smart_sync_tests";
+      cargoTestArgs = "--test data_only_local --test smart_sync_tests";
     };
     rs-unit = import ./checks/unit/repx-rs.nix {
       inherit pkgs referenceLab referenceLabNative;

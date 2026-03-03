@@ -4,8 +4,14 @@
   referenceLab,
 }:
 
+let
+  getSubsetJobs = pkgs.python3Packages.callPackage ./helpers/get-subset-jobs { };
+in
+
 pkgs.testers.runNixOSTest {
   name = "repx-remote-slurm-test";
+
+  extraPythonPackages = _: [ getSubsetJobs ];
 
   nodes = {
     client =
@@ -89,6 +95,8 @@ pkgs.testers.runNixOSTest {
   };
 
   testScript = ''
+    import os
+    from get_subset_jobs import get_subset_jobs
     start_all()
 
     client.succeed("mkdir -p /root/.ssh")
@@ -113,12 +121,7 @@ pkgs.testers.runNixOSTest {
 
     cluster.succeed("sinfo")
 
-    import json
-    import os
-
     LAB_PATH = "${referenceLab}"
-
-    exec(open("${./helpers/get-subset-jobs.py}").read())
 
     subset_jobs = get_subset_jobs(LAB_PATH, prefer_resource_hints=True)
     if not subset_jobs:
