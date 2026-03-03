@@ -7,9 +7,7 @@ use tokio::process::Command as TokioCommand;
 
 pub struct ContainerRuntime;
 
-use super::Runtime;
-
-const CONTAINER_HOSTNAME: &str = "repx-container";
+use super::{Runtime, CONTAINER_HOSTNAME};
 
 impl ContainerRuntime {
     fn get_runtime_details(runtime: &Runtime) -> Result<(&str, &str)> {

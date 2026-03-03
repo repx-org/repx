@@ -9,6 +9,8 @@ pub use native::NativeRuntime;
 use crate::error::ExecutorError;
 use nix::fcntl::{Flock, FlockArg};
 
+pub(crate) const CONTAINER_HOSTNAME: &str = "repx-container";
+
 #[derive(Debug, Clone)]
 pub enum Runtime {
     Native,
