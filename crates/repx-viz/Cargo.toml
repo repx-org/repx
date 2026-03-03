@@ -7,8 +7,6 @@ edition = { workspace = true }
 repx-core = { workspace = true }
 anyhow = { workspace = true }
 serde_json = { workspace = true }
-regex = { workspace = true }
-lazy_static = "1.5"
 
 [lints]
 workspace = true
