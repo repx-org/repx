@@ -349,7 +349,7 @@ impl Job {
             .values()
             .flat_map(|exe| exe.inputs.iter())
             .filter_map(|mapping| mapping.job_id.as_ref())
-            .collect::<std::collections::HashSet<_>>()
+            .collect::<std::collections::BTreeSet<_>>()
             .into_iter()
     }
 }

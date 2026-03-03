@@ -220,8 +220,8 @@ impl ArtifactSync for LocalTarget {
                 path: image_path.to_path_buf(),
                 reason: "Image path has no filename".to_string(),
             })?;
-        let image_hash_name = super::common::parse_image_hash(image_filename);
-        let image_cache_dir = images_cache.join(image_hash_name);
+        let image_hash_name = super::common::parse_image_hash(image_filename)?;
+        let image_cache_dir = images_cache.join(&image_hash_name);
 
         fs_err::create_dir_all(&image_cache_dir)
             .map_err(|e| ClientError::Config(ConfigError::Io(e)))?;

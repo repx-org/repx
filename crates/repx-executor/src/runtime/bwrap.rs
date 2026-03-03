@@ -27,10 +27,10 @@ impl BwrapRuntime {
         ctx: &RuntimeContext<'_>,
         image_tag: &str,
     ) -> Result<PathBuf> {
-        let image_hash = crate::util::extract_image_hash(image_tag);
+        let image_hash = crate::util::extract_image_hash(image_tag)?;
 
         let images_cache_dir = ctx.get_images_cache_dir();
-        let image_dir = images_cache_dir.join(image_hash);
+        let image_dir = images_cache_dir.join(&image_hash);
         let extract_dir = image_dir.join("rootfs");
         let success_marker = image_dir.join(SUCCESS_MARKER);
 

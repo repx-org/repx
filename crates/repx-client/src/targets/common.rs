@@ -7,8 +7,8 @@ pub fn shell_quote(s: &str) -> String {
     format!("'{}'", s.replace('\'', "'\\''"))
 }
 
-pub fn parse_image_hash(filename: &str) -> &str {
-    if let Some(stripped) = filename.strip_suffix(".tar.gz") {
+pub fn parse_image_hash(filename: &str) -> Result<String> {
+    let raw = if let Some(stripped) = filename.strip_suffix(".tar.gz") {
         stripped
     } else if let Some(stripped) = filename.strip_suffix(".tar") {
         stripped
@@ -17,7 +17,35 @@ pub fn parse_image_hash(filename: &str) -> &str {
             .file_stem()
             .and_then(|s| s.to_str())
             .unwrap_or(filename)
+    };
+
+    validate_image_hash_str(raw)?;
+    Ok(raw.to_string())
+}
+
+fn validate_image_hash_str(id: &str) -> Result<()> {
+    if id.is_empty() {
+        return Err(ClientError::InvalidPath {
+            path: std::path::PathBuf::from(id),
+            reason: "Image identifier is empty".to_string(),
+        });
     }
+
+    if !id
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | ':' | '-'))
+    {
+        return Err(ClientError::InvalidPath {
+            path: std::path::PathBuf::from(id),
+            reason: format!(
+                "Image identifier '{}' contains invalid characters. \
+                 Only [a-zA-Z0-9._:-] are allowed.",
+                id
+            ),
+        });
+    }
+
+    Ok(())
 }
 
 pub fn generate_gc_link_name(lab_hash: &str) -> String {
@@ -38,9 +66,9 @@ pub fn extract_image_to_cache(
             reason: "Image path has no filename".to_string(),
         })?;
 
-    let image_hash_name = parse_image_hash(image_filename);
+    let image_hash_name = parse_image_hash(image_filename)?;
     let images_cache = cache_root.join("images");
-    let image_extract_dir = images_cache.join(image_hash_name);
+    let image_extract_dir = images_cache.join(&image_hash_name);
 
     if image_extract_dir.exists() {
         return Ok(image_extract_dir);
@@ -156,17 +184,37 @@ mod tests {
 
     #[test]
     fn test_parse_image_hash_tar_gz() {
-        assert_eq!(parse_image_hash("image-abc123.tar.gz"), "image-abc123");
+        assert_eq!(
+            parse_image_hash("image-abc123.tar.gz").expect("valid"),
+            "image-abc123"
+        );
     }
 
     #[test]
     fn test_parse_image_hash_tar() {
-        assert_eq!(parse_image_hash("image-abc123.tar"), "image-abc123");
+        assert_eq!(
+            parse_image_hash("image-abc123.tar").expect("valid"),
+            "image-abc123"
+        );
     }
 
     #[test]
     fn test_parse_image_hash_no_extension() {
-        assert_eq!(parse_image_hash("image-abc123"), "image-abc123");
+        assert_eq!(
+            parse_image_hash("image-abc123").expect("valid"),
+            "image-abc123"
+        );
+    }
+
+    #[test]
+    fn test_parse_image_hash_rejects_path_traversal() {
+        assert!(parse_image_hash("../../etc/cron.d.tar.gz").is_err());
+        assert!(parse_image_hash("image/subdir.tar").is_err());
+    }
+
+    #[test]
+    fn test_parse_image_hash_rejects_empty_stem() {
+        assert!(parse_image_hash(".tar.gz").is_err());
     }
 
     #[test]

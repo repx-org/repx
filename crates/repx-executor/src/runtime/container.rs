@@ -27,7 +27,7 @@ impl ContainerRuntime {
 
     pub async fn ensure_image_loaded(ctx: &RuntimeContext<'_>, runtime: &Runtime) -> Result<()> {
         let (binary, image_tag) = Self::get_runtime_details(runtime)?;
-        let image_hash = crate::util::extract_image_hash(image_tag);
+        let image_hash = crate::util::extract_image_hash(image_tag)?;
 
         let temp_path = ctx.get_temp_path();
         let lock_path = temp_path.join(format!("repx-load-{}.lock", image_hash));
