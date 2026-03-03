@@ -384,8 +384,7 @@ impl BwrapRuntime {
         if request.mount_host_paths {
             Self::configure_host_path_mounts(&mut cmd, ctx, rootfs_path).await?;
 
-            cmd.arg("--unshare-user")
-                .arg("--unshare-pid")
+            cmd.arg("--unshare-pid")
                 .arg("--unshare-ipc")
                 .arg("--unshare-uts")
                 .arg("--dev-bind")
@@ -394,9 +393,19 @@ impl BwrapRuntime {
                 .arg("--proc")
                 .arg("/proc");
         } else {
-            cmd.arg("--unshare-all")
-                .arg("--hostname")
-                .arg(super::CONTAINER_HOSTNAME);
+            if request.mount_paths.is_empty() {
+                cmd.arg("--unshare-all");
+            } else {
+                tracing::info!(
+                    "Skipping user namespace isolation to preserve supplementary groups for mounted paths"
+                );
+                cmd.arg("--unshare-ipc")
+                    .arg("--unshare-pid")
+                    .arg("--unshare-uts")
+                    .arg("--unshare-net")
+                    .arg("--unshare-cgroup");
+            }
+            cmd.arg("--hostname").arg(super::CONTAINER_HOSTNAME);
 
             let overlay_supported = Self::check_tmp_overlay_support(ctx, rootfs_path).await;
 
@@ -475,7 +484,11 @@ impl BwrapRuntime {
                     request.mount_paths
                 );
                 for path in &request.mount_paths {
-                    cmd.arg("--bind").arg(path).arg(path);
+                    if path.starts_with("/dev/") {
+                        cmd.arg("--dev-bind").arg(path).arg(path);
+                    } else {
+                        cmd.arg("--bind").arg(path).arg(path);
+                    }
                 }
             }
         }
