@@ -85,6 +85,8 @@ pkgs.testers.runNixOSTest {
   };
 
   testScript = ''
+    import json
+    import os
     start_all()
 
     client.succeed("mkdir -p /root/.ssh")
