@@ -87,6 +87,19 @@ pub enum ClientEvent {
 }
 type SlurmIdMap = Arc<Mutex<HashMap<JobId, (String, u32)>>>;
 
+pub(crate) fn lock_slurm_map(
+    map: &Mutex<HashMap<JobId, (String, u32)>>,
+) -> std::sync::MutexGuard<'_, HashMap<JobId, (String, u32)>> {
+    map.lock().unwrap_or_else(|e| {
+        tracing::warn!(
+            "SLURM ID map mutex was poisoned (a thread panicked while holding it). \
+             Recovering with potentially stale data. This may cause incorrect job \
+             status reporting or cancellation of wrong SLURM jobs."
+        );
+        e.into_inner()
+    })
+}
+
 pub(crate) fn resolve_execution_type(
     image_tag: Option<&str>,
     explicit_execution_type: Option<&str>,
@@ -264,7 +277,7 @@ impl Client {
         let map_filename = format!("slurm_map_{}.json", lab_hash);
 
         let map_path = client_state_dir.join(map_filename);
-        let data = self.slurm_map.lock().unwrap_or_else(|e| e.into_inner());
+        let data = lock_slurm_map(&self.slurm_map);
         let json_string = serde_json::to_string_pretty(&*data)
             .map_err(|e| ClientError::Config(ConfigError::Json(e)))?;
         fs_err::write(map_path, json_string)
@@ -461,7 +474,7 @@ impl Client {
                 .join(logs::STDOUT),
             LogType::Auto => {
                 let slurm_info = {
-                    let slurm_map_guard = self.slurm_map.lock().unwrap_or_else(|e| e.into_inner());
+                    let slurm_map_guard = lock_slurm_map(&self.slurm_map);
                     slurm_map_guard.get(&job_id).cloned()
                 };
 
@@ -497,7 +510,7 @@ impl Client {
 
     pub fn cancel_job(&self, job_id: JobId) -> Result<()> {
         let slurm_info = {
-            let slurm_map_guard = self.slurm_map.lock().unwrap_or_else(|e| e.into_inner());
+            let slurm_map_guard = lock_slurm_map(&self.slurm_map);
             slurm_map_guard.get(&job_id).cloned()
         };
 

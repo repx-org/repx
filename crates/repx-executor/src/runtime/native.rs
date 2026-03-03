@@ -10,6 +10,14 @@ impl NativeRuntime {
         script_path: &Path,
         args: &[String],
     ) -> TokioCommand {
+        tracing::warn!(
+            job_id = %request.job_id,
+            script = %script_path.display(),
+            "Executing job in native mode (no isolation). The script has full access to the \
+             host filesystem and all system binaries. Use bwrap or container runtime for \
+             sandboxed execution."
+        );
+
         let mut cmd = TokioCommand::new(script_path);
         cmd.args(args);
 

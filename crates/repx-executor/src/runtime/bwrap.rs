@@ -20,7 +20,6 @@ pub struct BwrapRuntime;
 const EXCLUDED_HOST_DIRS: &[&str] = &["dev", "proc", "sys", "nix"];
 const WRITABLE_HOST_DIRS: &[&str] = &["home", "tmp", "var", "opt", "srv", "mnt", "media", "run"];
 const DEFAULT_CONTAINER_PATH: &str = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
-const CONTAINER_HOSTNAME: &str = "repx-container";
 
 impl BwrapRuntime {
     pub async fn ensure_rootfs_extracted(
@@ -97,10 +96,11 @@ impl BwrapRuntime {
 
         let layers = &manifest[0].layers;
 
-        if extract_dir.exists() {
-            tokio::fs::remove_dir_all(&extract_dir).await?;
+        let staging_dir = image_dir.join(".rootfs_staging");
+        if staging_dir.exists() {
+            tokio::fs::remove_dir_all(&staging_dir).await?;
         }
-        tokio::fs::create_dir_all(&extract_dir).await?;
+        tokio::fs::create_dir_all(&staging_dir).await?;
 
         let tar_path = ctx.resolve_tool("tar")?;
 
@@ -122,7 +122,7 @@ impl BwrapRuntime {
                 .arg("-xf")
                 .arg(&layer_path)
                 .arg("-C")
-                .arg(&extract_dir)
+                .arg(&staging_dir)
                 .arg("--no-same-owner")
                 .arg("--no-same-permissions")
                 .arg("--mode=0755")
@@ -134,7 +134,7 @@ impl BwrapRuntime {
 
             let output = cmd_layer.output().await?;
             if !output.status.success() {
-                let _ = tokio::fs::remove_dir_all(&extract_dir).await;
+                let _ = tokio::fs::remove_dir_all(&staging_dir).await;
                 return Err(ExecutorError::Io(std::io::Error::other(format!(
                     "Failed to extract layer '{}'. Stderr: {}",
                     layer,
@@ -144,10 +144,20 @@ impl BwrapRuntime {
         }
 
         for dir in &["dev", "proc", "tmp"] {
-            let p = extract_dir.join(dir);
+            let p = staging_dir.join(dir);
             if !p.exists() {
                 tokio::fs::create_dir(&p).await?;
             }
+        }
+
+        if extract_dir.exists() && !success_marker.exists() {
+            tokio::fs::remove_dir_all(&extract_dir).await?;
+        }
+
+        if !extract_dir.exists() {
+            tokio::fs::rename(&staging_dir, &extract_dir).await?;
+        } else {
+            let _ = tokio::fs::remove_dir_all(&staging_dir).await;
         }
 
         std::fs::File::create(&success_marker).map_err(ExecutorError::Io)?;
@@ -384,7 +394,7 @@ impl BwrapRuntime {
         } else {
             cmd.arg("--unshare-all")
                 .arg("--hostname")
-                .arg(CONTAINER_HOSTNAME);
+                .arg(super::CONTAINER_HOSTNAME);
 
             let overlay_supported = Self::check_tmp_overlay_support(ctx, rootfs_path).await;
 
