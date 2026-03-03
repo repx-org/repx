@@ -11,112 +11,8 @@ const CONFIG_FILE_NAME: &str = "config.toml";
 const THEME_FILE_NAME: &str = "theme.toml";
 const RESOURCES_FILE_NAME: &str = "resources.toml";
 
-const DEFAULT_CONFIG_CONTENT: &str = r#"# Repx Configuration File
-# This file was generated automatically. You can edit it to customize Repx's behavior.
-
-# The theme for the command-line interface.
-# A custom theme can be defined in `theme.toml` in the same directory.
-theme = "default"
-
-# The default target to use for `repx run` if not specified via --target.
-# This must match one of the names in the [targets] section below.
-submission_target = "local"
-
-# The default scheduler to use if not specified in a target or via the CLI.
-# Can be "slurm" or "local".
-default_scheduler = "local"
-
-# --- Logging Configuration ---
-[logging]
-# Maximum number of log files to keep. Set to 0 for infinite.
-max_files = 50
-# Maximum age of log files in days. Set to 0 for infinite.
-max_age_days = 7
-
-# --- Execution Targets ---
-# Defines the machines (local or remote) where jobs can be submitted.
-[targets]
-
-  # The 'local' target runs jobs on your current machine.
-  [targets.local]
-  # The base path for the shared path on the target. Tilde expansion (~) is supported.
-  base_path = "~/Desktop/repx-store"
-  # Optional: For HPC clusters with slow shared storage, specify a fast local scratch path.
-  # This is used to cache container images on the node's local SSD/NVMe.
-  # node_local_path = "/mnt/local/$USER/repx"
-
-  # Optional: Mount host paths into the container.
-  # mount_host_paths = false
-  # mount_paths = ["/home/user/data", "/opt/tools"]
-
-  # Optional: set the default scheduler and execution type for this target.
-  default_scheduler = "local"
-  default_execution_type = "bwrap"
-
-    # Configuration for when the 'local' scheduler is used.
-    [targets.local.local]
-    # List of execution types supported by this scheduler on this target.
-    execution_types = ["bwrap", "native"]
-    # The maximum number of jobs to run in parallel.
-# If not set, it defaults to the number of available CPU cores.
-    local_concurrency = 4
-
-    # Configuration for when the 'slurm' scheduler is used (if supported).
-    # [targets.local.slurm]
-    # execution_types = ["podman"]
-
-  # Example of a remote SSH target for a SLURM HPC cluster.
-  # [targets.safari]
-  # # The SSH connection string.
-  # address = "safari"
-  # # The base path for the shared path on the target.
-  # base_path = "/mnt/galactica/demirlie/.local/share/repx-store"
-  # # Fast local storage on compute nodes (e.g., NVMe). Critical for 'bwrap' performance on NFS.
-  # node_local_path = "/mnt/local/$USER/repx"
-  # # Optional: Mount host paths (impure mode).
-  # # mount_host_paths = false
-  # # mount_paths = ["/home/user/data"]
-  # default_scheduler = "slurm"
-  # default_execution_type = "podman"
-  #
-  #   [targets.safari.slurm]
-  #   execution_types = ["podman", "native"]
-"#;
-
-const DEFAULT_RESOURCES_CONTENT: &str = r#"# Repx Resource Configuration File
-# This file allows you to specify SLURM resource requirements for your jobs.
-# Repx applies these rules by matching against the job ID and the target name.
-
-# The `[defaults]` section applies to all jobs unless overridden by a specific rule.
-[defaults]
-# partition = "compute"
-# cpus-per-task = 1
-# mem = "4G"
-# time = "01:00:00" # 1 hour
-# sbatch_opts = ["--gres=gpu:1"] # Custom SBATCH options
-
-# The `[[rules]]` array defines specific overrides. Rules are applied in order,
-# with later matching rules overwriting earlier ones.
-[[rules]]
-# Example: Match any job whose ID contains "-heavy-" and run it on a specific partition.
-# job_id_glob = "*-heavy-*"
-# partition = "high-mem"
-# mem = "64G"
-# time = "24:00:00"
-
-[[rules]]
-# Example: Override resources for a scatter-gather orchestrator AND its workers.
-# job_id_glob = "*-stage-champsim-trace" # Matches the orchestrator job
-# mem = "1G" # The orchestrator is lightweight
-# time = "00:10:00"
-#
-#   # This special nested table defines resources for the parallel WORKER jobs.
-#   # If this is omitted, workers will inherit the orchestrator's settings (1G mem, 10min time).
-#   [rules.worker_resources]
-#   mem = "8G"
-#   cpus-per-task = 1
-#   time = "02:00:00"
-"#;
+const DEFAULT_CONFIG_CONTENT: &str = include_str!("defaults/config.toml");
+const DEFAULT_RESOURCES_CONTENT: &str = include_str!("defaults/resources.toml");
 
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
 #[serde(deny_unknown_fields)]
@@ -261,7 +157,7 @@ pub fn load_resources(
 ) -> Result<Option<Resources>, ConfigError> {
     let mut merged_value = toml::Value::Table(toml::map::Map::new());
 
-    let xdg_dirs = BaseDirectories::with_prefix("repx");
+    let xdg_dirs = crate::xdg_dirs();
     if let Some(global_path) = xdg_dirs.find_config_file(RESOURCES_FILE_NAME) {
         tracing::debug!("Loading global resources from: {}", global_path.display());
         let content = fs::read_to_string(global_path)?;
@@ -300,11 +196,11 @@ pub fn load_resources(
 }
 
 pub fn load_config() -> Result<Config, ConfigError> {
-    let xdg_dirs = BaseDirectories::with_prefix("repx");
+    let xdg_dirs = crate::xdg_dirs();
 
-    let config_path = create_default_config_if_missing(&xdg_dirs)?;
-    create_default_theme_if_missing(&xdg_dirs)?;
-    create_default_resources_if_missing(&xdg_dirs)?;
+    let config_path = create_default_config_if_missing(xdg_dirs)?;
+    create_default_theme_if_missing(xdg_dirs)?;
+    create_default_resources_if_missing(xdg_dirs)?;
 
     let file_content = fs::read_to_string(config_path)?;
     let mut config: Config = toml::from_str(&file_content)?;
@@ -332,7 +228,7 @@ pub fn load_config() -> Result<Config, ConfigError> {
 }
 
 pub fn save_config(config: &Config) -> Result<(), ConfigError> {
-    let xdg_dirs = BaseDirectories::with_prefix("repx");
+    let xdg_dirs = crate::xdg_dirs();
     let config_path = xdg_dirs.place_config_file(CONFIG_FILE_NAME)?;
 
     let toml_string = toml::to_string_pretty(config).map_err(std::io::Error::other)?;

@@ -1,3 +1,5 @@
+#![allow(clippy::expect_used)]
+
 use repx_core::model::JobId;
 use repx_executor::{CancellationToken, ExecutionRequest, Executor, ExecutorError, Runtime};
 use std::fs;

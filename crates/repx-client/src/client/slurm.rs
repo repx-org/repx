@@ -57,6 +57,7 @@ fn generate_repx_invoker_script(
     Ok(s)
 }
 
+#[allow(clippy::expect_used)]
 pub fn submit_slurm_batch_run(
     client: &Client,
     jobs_to_submit: HashMap<JobId, &Job>,
@@ -312,11 +313,13 @@ pub fn submit_slurm_batch_run(
             if let (Ok(repx_id), Ok(slurm_id)) =
                 (JobId::from_str(parts[0]), parts[1].parse::<u32>())
             {
-                client
-                    .slurm_map
-                    .lock()
-                    .unwrap_or_else(|e| e.into_inner())
-                    .insert(repx_id.clone(), (target_name.to_string(), slurm_id));
+                super::lock_slurm_map(&client.slurm_map).insert(
+                    repx_id.clone(),
+                    super::SlurmJobEntry {
+                        target_name: target_name.to_string(),
+                        slurm_id,
+                    },
+                );
                 submitted_count += 1;
                 send(ClientEvent::JobSubmitted {
                     job_id: repx_id,

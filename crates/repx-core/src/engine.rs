@@ -26,7 +26,7 @@ pub fn determine_job_statuses(
     cache
 }
 
-pub fn resolve_job_status<'a>(
+pub(crate) fn resolve_job_status<'a>(
     job_id: &'a JobId,
     lab: &'a Lab,
     cache: &'a mut HashMap<JobId, JobStatus>,
@@ -35,6 +35,7 @@ pub fn resolve_job_status<'a>(
     resolve_job_status_inner(job_id, lab, cache, &mut visiting)
 }
 
+#[allow(clippy::expect_used)]
 fn resolve_job_status_inner<'a>(
     job_id: &'a JobId,
     lab: &'a Lab,
@@ -121,16 +122,16 @@ pub fn determine_run_aggregate_statuses(
                 }
             }
 
-            let aggregate_status = if has_failed {
-                JobStatus::Failed {
-                    location: "".to_string(),
-                }
-            } else if has_running {
+            let aggregate_status = if has_running {
                 JobStatus::Running
             } else if has_queued {
                 JobStatus::Queued
             } else if has_pending {
                 JobStatus::Pending
+            } else if has_failed {
+                JobStatus::Failed {
+                    location: "".to_string(),
+                }
             } else if has_blocked {
                 JobStatus::Blocked {
                     missing_deps: Default::default(),

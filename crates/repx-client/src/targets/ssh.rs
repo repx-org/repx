@@ -700,7 +700,11 @@ impl FileOps for SshTarget {
             .spawn()
             .map_err(|e| ClientError::Config(ConfigError::Io(e)))?;
 
-        let mut stdin = child.stdin.take().expect("Failed to open stdin");
+        let mut stdin = child.stdin.take().ok_or_else(|| {
+            ClientError::Config(ConfigError::General(
+                "Failed to capture stdin pipe for remote write command".to_string(),
+            ))
+        })?;
         let content_bytes = content.as_bytes().to_vec();
         std::thread::spawn(move || {
             if let Err(e) = stdin.write_all(&content_bytes) {

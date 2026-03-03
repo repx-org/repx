@@ -596,6 +596,7 @@ impl LocalTarget {
         Ok(())
     }
 
+    #[allow(clippy::expect_used)]
     fn copy_directory_with_permissions(&self, src: &Path, dest: &Path) -> Result<()> {
         for entry in WalkDir::new(src) {
             let entry = entry?;

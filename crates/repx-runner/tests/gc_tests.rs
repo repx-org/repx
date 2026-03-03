@@ -1,4 +1,5 @@
 #![allow(dead_code)]
+#![allow(clippy::expect_used)]
 
 mod harness;
 use harness::TestHarness;

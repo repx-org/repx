@@ -69,6 +69,7 @@ pub struct MergeProgress {
     pub current_path: PathBuf,
 }
 
+#[allow(clippy::expect_used)]
 pub fn merge_stores(
     sources: &[PathBuf],
     destination: &Path,
@@ -108,6 +109,27 @@ pub fn merge_stores(
             .strip_prefix(source_root)
             .expect("strip_prefix guaranteed by starts_with check");
         let dest_path = destination.join(relative_path);
+
+        if entry.path_is_symlink() {
+            if let Ok(link_target) = fs::read_link(path) {
+                let resolved = if link_target.is_absolute() {
+                    link_target.clone()
+                } else {
+                    path.parent().unwrap_or(Path::new(".")).join(&link_target)
+                };
+                if let Ok(canonical) = resolved.canonicalize() {
+                    let canonical_root = source_root
+                        .canonicalize()
+                        .unwrap_or(source_root.to_path_buf());
+                    if !canonical.starts_with(&canonical_root) {
+                        return Err(ConfigError::SymlinkEscape {
+                            link: path.to_path_buf(),
+                            target: canonical,
+                        });
+                    }
+                }
+            }
+        }
 
         on_progress(MergeProgress {
             total_entries,

@@ -21,6 +21,7 @@ pub fn handle_gc_dispatch(
     }
 }
 
+#[allow(clippy::expect_used)]
 fn handle_gc_collect(
     target_arg: Option<&str>,
     context: &AppContext,
@@ -170,6 +171,7 @@ pub async fn async_handle_internal_gc(args: InternalGcArgs) -> Result<(), CliErr
     let mut live_artifacts = HashSet::new();
     let mut live_jobs = HashSet::new();
 
+    #[allow(clippy::expect_used)]
     let process_link = |path: PathBuf,
                         live_arts: &mut HashSet<PathBuf>,
                         live_js: &mut HashSet<String>|

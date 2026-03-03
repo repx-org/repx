@@ -124,6 +124,7 @@ fn print_command_help(cmd: &clap::Command, depth: usize) {
     }
 }
 
+#[allow(clippy::expect_used)]
 fn main() {
     let cli = Cli::parse();
 

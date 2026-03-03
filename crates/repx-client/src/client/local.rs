@@ -57,6 +57,7 @@ fn get_job_cpus(job: &Job, resources_config: &Option<repx_core::config::Resource
     directives.cpus_per_task.unwrap_or(DEFAULT_JOB_CPUS)
 }
 
+#[allow(clippy::expect_used)]
 pub(crate) fn build_steps_json(
     job: &Job,
     artifacts_base: &std::path::Path,
@@ -482,6 +483,7 @@ fn get_step_resources(
     (mem, cpus)
 }
 
+#[allow(clippy::expect_used)]
 fn expand_scatter_gather<'a>(
     job_id: &JobId,
     job: &'a Job,

@@ -15,6 +15,7 @@ use std::time::Duration;
 
 use crate::{cli::RunArgs, commands::AppContext, error::CliError};
 
+#[allow(clippy::expect_used)]
 pub fn handle_run(
     args: RunArgs,
     context: &AppContext<'_>,

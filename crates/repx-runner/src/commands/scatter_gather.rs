@@ -60,6 +60,7 @@ pub struct StepsMetadata {
     pub sink_step: String,
 }
 
+#[allow(clippy::expect_used)]
 fn toposort_steps(steps: &HashMap<String, StepMeta>) -> Result<Vec<String>, CliError> {
     let mut in_degree: HashMap<&str, usize> = HashMap::new();
     let mut dependents: HashMap<&str, Vec<&str>> = HashMap::new();
@@ -842,6 +843,7 @@ async fn submit_slurm_gather_job(
     Ok(())
 }
 
+#[allow(clippy::expect_used)]
 async fn submit_slurm_branches(
     orch: &ScatterGatherOrchestrator,
     work_items: &[Value],

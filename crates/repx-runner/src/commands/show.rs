@@ -13,6 +13,7 @@ use std::collections::HashSet;
 use std::fs;
 use std::path::Path;
 
+#[allow(clippy::expect_used)]
 pub fn handle_show(args: ShowArgs, lab_path: &Path, target: Option<&str>) -> Result<(), CliError> {
     match args.entity {
         ShowEntity::Job(job_args) => handle_show_job(job_args, lab_path, target),
@@ -20,6 +21,7 @@ pub fn handle_show(args: ShowArgs, lab_path: &Path, target: Option<&str>) -> Res
     }
 }
 
+#[allow(clippy::expect_used)]
 fn handle_show_job(
     args: ShowJobArgs,
     lab_path: &Path,
