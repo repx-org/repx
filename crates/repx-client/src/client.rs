@@ -32,6 +32,23 @@ pub enum LogType {
     Stderr,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WorkUnitPhase {
+    Scatter,
+    Step { branch: usize, step: String },
+    Gather,
+}
+
+impl std::fmt::Display for WorkUnitPhase {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            WorkUnitPhase::Scatter => write!(f, "scatter"),
+            WorkUnitPhase::Step { branch, step } => write!(f, "branch {}, step: {}", branch, step),
+            WorkUnitPhase::Gather => write!(f, "gather"),
+        }
+    }
+}
+
 #[derive(Debug)]
 pub enum ClientEvent {
     DeployingBinary,
@@ -61,16 +78,20 @@ pub enum ClientEvent {
         pid: u32,
         total: usize,
         current: usize,
+        phase: Option<WorkUnitPhase>,
     },
     JobSucceeded {
         job_id: JobId,
+        phase: Option<WorkUnitPhase>,
     },
     JobFailed {
         job_id: JobId,
+        phase: Option<WorkUnitPhase>,
     },
     JobBlocked {
         job_id: JobId,
         blocked_by: JobId,
+        phase: Option<WorkUnitPhase>,
     },
     LocalProgress {
         running: usize,
