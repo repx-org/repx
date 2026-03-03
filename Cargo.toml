@@ -63,6 +63,7 @@ tokio-util = "0.7"
 
 [workspace.lints.clippy]
 unwrap_used = "deny"
+expect_used = "warn"
 
 [profile.release]
 lto = "thin"

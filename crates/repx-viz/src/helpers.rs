@@ -55,6 +55,7 @@ pub(crate) fn clean_id(s: &str) -> String {
         .collect()
 }
 
+#[allow(clippy::expect_used)]
 pub(crate) fn canonical_json(v: &Value) -> String {
     match v {
         Value::String(s) => s.clone(),
@@ -62,6 +63,7 @@ pub(crate) fn canonical_json(v: &Value) -> String {
     }
 }
 
+#[allow(clippy::expect_used)]
 pub(crate) fn smart_truncate(val: &Value, max_len: usize) -> String {
     let mut s = match val {
         Value::String(s) => s.clone(),

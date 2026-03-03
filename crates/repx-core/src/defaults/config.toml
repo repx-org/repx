@@ -1,0 +1,25 @@
+
+theme = "default"
+
+submission_target = "local"
+
+default_scheduler = "local"
+
+[logging]
+max_files = 50
+max_age_days = 7
+
+[targets]
+
+  [targets.local]
+  base_path = "~/Desktop/repx-store"
+
+
+  default_scheduler = "local"
+  default_execution_type = "bwrap"
+
+    [targets.local.local]
+    execution_types = ["bwrap", "native"]
+    local_concurrency = 4
+
+

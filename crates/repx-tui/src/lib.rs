@@ -129,7 +129,7 @@ pub fn run(args: TuiArgs) -> Result<(), TuiError> {
     let should_quit_clone_for_logs = should_quit.clone();
     let active_target_clone_for_logs = active_target.clone();
 
-    let xdg_dirs = xdg::BaseDirectories::with_prefix("repx");
+    let xdg_dirs = repx_core::xdg_dirs();
     let cache_home = xdg_dirs.get_cache_home().ok_or_else(|| {
         TuiError::Io(std::io::Error::new(
             std::io::ErrorKind::NotFound,

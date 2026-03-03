@@ -6,6 +6,10 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use crate::helpers::*;
 use crate::VizArgs;
 
+type StageJobs<'a> = BTreeMap<String, Vec<&'a JobId>>;
+
+type RunStages<'a> = BTreeMap<String, StageJobs<'a>>;
+
 pub(crate) struct VizGenerator<'a> {
     pub lab: &'a Lab,
 }
@@ -15,6 +19,7 @@ impl<'a> VizGenerator<'a> {
         Self { lab }
     }
 
+    #[allow(clippy::expect_used)]
     pub fn generate_dot(&mut self, args: &VizArgs) -> Result<String> {
         let mut dot = String::new();
         dot.push_str("digraph \"RepX Topology\" {\n");
@@ -30,7 +35,7 @@ impl<'a> VizGenerator<'a> {
         dot_writeln!(dot, "    node [fontname=\"{}\"];", FONT_NAME);
         dot.push_str("    edge [color=\"#000000\", penwidth=\"1.2\", arrowsize=\"0.7\"];\n\n");
 
-        let mut grouped_jobs: BTreeMap<String, BTreeMap<String, Vec<&JobId>>> = BTreeMap::new();
+        let mut grouped_jobs: RunStages<'_> = BTreeMap::new();
         let mut run_anchors: HashMap<String, String> = HashMap::new();
 
         let mut job_to_run: HashMap<JobId, String> = HashMap::new();
@@ -240,6 +245,7 @@ impl<'a> VizGenerator<'a> {
         })
     }
 
+    #[allow(clippy::expect_used)]
     fn render_run_cluster(
         &self,
         dot: &mut String,
@@ -346,6 +352,7 @@ impl<'a> VizGenerator<'a> {
         dot_writeln!(dot, "{}}}", indent);
     }
 
+    #[allow(clippy::expect_used)]
     fn render_scatter_gather_subgraph(
         &self,
         dot: &mut String,

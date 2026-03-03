@@ -77,7 +77,8 @@ pub fn get_statuses_for_active_target(
 
     let mut slurm_map_guard = super::lock_slurm_map(&client.slurm_map);
     let mut map_was_changed = false;
-    slurm_map_guard.retain(|job_id, (target_name, _slurm_id)| {
+    slurm_map_guard.retain(|job_id, entry| {
+        let target_name = &entry.target_name;
         if target_name != active_target_name {
             return true;
         }
@@ -93,7 +94,7 @@ pub fn get_statuses_for_active_target(
 
     let has_tracked_slurm_jobs = slurm_map_guard
         .values()
-        .any(|(t, _)| t == active_target_name);
+        .any(|entry| entry.target_name == active_target_name);
 
     drop(slurm_map_guard);
 

@@ -180,13 +180,17 @@ impl ContainerRuntime {
             .join(format!("podman-{:x}", unique_id));
 
         if !xdg_runtime_dir.exists() {
-            std::fs::create_dir_all(&xdg_runtime_dir).map_err(ExecutorError::Io)?;
+            tokio::fs::create_dir_all(&xdg_runtime_dir)
+                .await
+                .map_err(ExecutorError::Io)?;
 
             #[cfg(unix)]
             {
                 use std::os::unix::fs::PermissionsExt;
                 let perms = std::fs::Permissions::from_mode(0o700);
-                std::fs::set_permissions(&xdg_runtime_dir, perms).map_err(ExecutorError::Io)?;
+                tokio::fs::set_permissions(&xdg_runtime_dir, perms)
+                    .await
+                    .map_err(ExecutorError::Io)?;
             }
         }
 

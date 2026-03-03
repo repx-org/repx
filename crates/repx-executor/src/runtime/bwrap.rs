@@ -160,7 +160,9 @@ impl BwrapRuntime {
             let _ = tokio::fs::remove_dir_all(&staging_dir).await;
         }
 
-        std::fs::File::create(&success_marker).map_err(ExecutorError::Io)?;
+        tokio::fs::File::create(&success_marker)
+            .await
+            .map_err(ExecutorError::Io)?;
 
         let _ = tokio::fs::remove_file(&lock_path).await;
 
@@ -511,25 +513,33 @@ impl BwrapRuntime {
         let exclude_dirs = EXCLUDED_HOST_DIRS;
         let writable_dirs = WRITABLE_HOST_DIRS;
 
-        if let Ok(entries) = std::fs::read_dir(root) {
-            for entry in entries.flatten() {
-                if let Ok(file_type) = entry.file_type() {
-                    if file_type.is_dir() {
-                        let dir_name = entry.file_name();
-                        let dir_name_str = dir_name.to_string_lossy();
-
-                        if exclude_dirs.contains(&dir_name_str.as_ref()) {
-                            continue;
-                        }
-
-                        let dir_path = entry.path();
-                        if writable_dirs.contains(&dir_name_str.as_ref()) {
-                            cmd.arg("--bind").arg(&dir_path).arg(&dir_path);
-                        } else {
-                            cmd.arg("--ro-bind").arg(&dir_path).arg(&dir_path);
+        let host_dirs: Vec<(std::path::PathBuf, bool)> = tokio::task::spawn_blocking(move || {
+            let mut dirs = Vec::new();
+            if let Ok(entries) = std::fs::read_dir(root) {
+                for entry in entries.flatten() {
+                    if let Ok(file_type) = entry.file_type() {
+                        if file_type.is_dir() {
+                            let dir_name = entry.file_name();
+                            let dir_name_str = dir_name.to_string_lossy();
+                            if exclude_dirs.contains(&dir_name_str.as_ref()) {
+                                continue;
+                            }
+                            let writable = writable_dirs.contains(&dir_name_str.as_ref());
+                            dirs.push((entry.path(), writable));
                         }
                     }
                 }
+            }
+            dirs
+        })
+        .await
+        .unwrap_or_default();
+
+        for (dir_path, writable) in &host_dirs {
+            if *writable {
+                cmd.arg("--bind").arg(dir_path).arg(dir_path);
+            } else {
+                cmd.arg("--ro-bind").arg(dir_path).arg(dir_path);
             }
         }
 
@@ -618,40 +628,84 @@ impl BwrapRuntime {
         cmd: &mut TokioCommand,
         rootfs_path: &Path,
     ) -> Result<()> {
-        let entries = match std::fs::read_dir(rootfs_path) {
-            Ok(e) => e,
-            Err(e) => {
-                return Err(ExecutorError::Io(std::io::Error::new(
-                    std::io::ErrorKind::NotFound,
-                    format!("Failed to read rootfs directory {:?}: {}", rootfs_path, e),
-                )));
-            }
-        };
+        enum RootfsMount {
+            Symlink {
+                target_path: String,
+                link_target: PathBuf,
+            },
+            Bind {
+                source: PathBuf,
+                target_path: String,
+            },
+        }
 
-        for entry in entries.flatten() {
-            let file_name = entry.file_name();
-            let file_name_str = file_name.to_string_lossy();
+        let rootfs = rootfs_path.to_path_buf();
+        let mounts: std::result::Result<Vec<RootfsMount>, ExecutorError> =
+            tokio::task::spawn_blocking(move || {
+                let entries = std::fs::read_dir(&rootfs).map_err(|e| {
+                    ExecutorError::Io(std::io::Error::new(
+                        std::io::ErrorKind::NotFound,
+                        format!("Failed to read rootfs directory {:?}: {}", rootfs, e),
+                    ))
+                })?;
 
-            if EXCLUDED_ROOTFS_DIRS.contains(&file_name_str.as_ref()) {
-                continue;
-            }
+                let mut result = Vec::new();
+                for entry in entries.flatten() {
+                    let file_name = entry.file_name();
+                    let file_name_str = file_name.to_string_lossy();
 
-            let source_path = entry.path();
-            let target_path = format!("/{}", file_name_str);
-
-            let file_type = entry.file_type();
-            if let Ok(ft) = file_type {
-                if ft.is_symlink() {
-                    if let Ok(link_target) = std::fs::read_link(&source_path) {
-                        cmd.arg("--symlink")
-                            .arg(link_target.to_string_lossy().as_ref())
-                            .arg(&target_path);
+                    if EXCLUDED_ROOTFS_DIRS.contains(&file_name_str.as_ref()) {
+                        continue;
                     }
-                    continue;
+
+                    let source_path = entry.path();
+                    let target_path = format!("/{}", file_name_str);
+
+                    if let Ok(ft) = entry.file_type() {
+                        if ft.is_symlink() {
+                            if let Ok(link_target) = std::fs::read_link(&source_path) {
+                                result.push(RootfsMount::Symlink {
+                                    target_path,
+                                    link_target,
+                                });
+                            }
+                            continue;
+                        }
+                    }
+
+                    result.push(RootfsMount::Bind {
+                        source: source_path,
+                        target_path,
+                    });
+                }
+                Ok(result)
+            })
+            .await
+            .map_err(|e| {
+                ExecutorError::Io(std::io::Error::other(format!(
+                    "Rootfs mount task panicked: {}",
+                    e
+                )))
+            })?;
+
+        for mount in mounts? {
+            match mount {
+                RootfsMount::Symlink {
+                    target_path,
+                    link_target,
+                    ..
+                } => {
+                    cmd.arg("--symlink")
+                        .arg(link_target.to_string_lossy().as_ref())
+                        .arg(&target_path);
+                }
+                RootfsMount::Bind {
+                    source,
+                    target_path,
+                } => {
+                    cmd.arg("--ro-bind").arg(&source).arg(&target_path);
                 }
             }
-
-            cmd.arg("--ro-bind").arg(&source_path).arg(&target_path);
         }
 
         Ok(())

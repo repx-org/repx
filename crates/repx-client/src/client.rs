@@ -85,11 +85,17 @@ pub enum ClientEvent {
         num_jobs: usize,
     },
 }
-type SlurmIdMap = Arc<Mutex<HashMap<JobId, (String, u32)>>>;
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub(crate) struct SlurmJobEntry {
+    pub target_name: String,
+    pub slurm_id: u32,
+}
+
+type SlurmIdMap = Arc<Mutex<HashMap<JobId, SlurmJobEntry>>>;
 
 pub(crate) fn lock_slurm_map(
-    map: &Mutex<HashMap<JobId, (String, u32)>>,
-) -> std::sync::MutexGuard<'_, HashMap<JobId, (String, u32)>> {
+    map: &Mutex<HashMap<JobId, SlurmJobEntry>>,
+) -> std::sync::MutexGuard<'_, HashMap<JobId, SlurmJobEntry>> {
     map.lock().unwrap_or_else(|e| {
         tracing::warn!(
             "SLURM ID map mutex was poisoned (a thread panicked while holding it). \
@@ -356,7 +362,7 @@ impl Client {
         });
 
         if let Err(e) = target.register_gc_root(&project_id, &self.lab.content_hash) {
-            tracing::info!("Warning: Failed to register GC root: {}", e);
+            tracing::warn!("Failed to register GC root: {}. The next `repx gc` may delete this experiment's results.", e);
         }
         send(ClientEvent::SyncingFinished);
 
@@ -478,14 +484,14 @@ impl Client {
                     slurm_map_guard.get(&job_id).cloned()
                 };
 
-                if let Some((slurm_target_name, slurm_id)) = slurm_info {
-                    if slurm_target_name == target_name {
+                if let Some(entry) = slurm_info {
+                    if entry.target_name == target_name {
                         target
                             .base_path()
                             .join(dirs::OUTPUTS)
                             .join(&job_id.0)
                             .join(dirs::REPX)
-                            .join(format!("slurm-{}.out", slurm_id))
+                            .join(format!("slurm-{}.out", entry.slurm_id))
                     } else {
                         target
                             .base_path()
@@ -514,15 +520,15 @@ impl Client {
             slurm_map_guard.get(&job_id).cloned()
         };
 
-        if let Some((target_name, slurm_id)) = slurm_info {
-            let target = self.targets.get(&target_name).ok_or_else(|| {
+        if let Some(entry) = slurm_info {
+            let target = self.targets.get(&entry.target_name).ok_or_else(|| {
                 ClientError::Config(ConfigError::InvalidState(format!(
                     "Target '{}' from slurm_map not found in configuration.",
-                    target_name
+                    entry.target_name
                 )))
             })?;
 
-            target.scancel(slurm_id)?;
+            target.scancel(entry.slurm_id)?;
 
             let manifest_path = target
                 .base_path()

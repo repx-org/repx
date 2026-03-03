@@ -1,3 +1,5 @@
+#![allow(clippy::expect_used)]
+
 use repx_client::client::Client;
 use repx_core::config::{Config, Target};
 

@@ -191,7 +191,7 @@ impl fmt::Display for JobId {
     }
 }
 
-const SHORT_HASH_LEN: usize = 7;
+const SHORT_HASH_LEN: usize = 12;
 
 impl JobId {
     pub fn short_id(&self) -> String {

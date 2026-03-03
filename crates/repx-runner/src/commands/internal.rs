@@ -4,6 +4,7 @@ use repx_core::{errors::ConfigError, model::JobId};
 use std::collections::{HashMap, HashSet};
 use std::process::Command;
 
+#[allow(clippy::expect_used)]
 pub fn handle_internal_orchestrate(args: InternalOrchestrateArgs) -> Result<(), CliError> {
     let plan_content = std::fs::read_to_string(&args.plan_file).map_err(|e| {
         CliError::Config(ConfigError::PathIo {

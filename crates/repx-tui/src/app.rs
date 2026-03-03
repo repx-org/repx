@@ -766,7 +766,7 @@ impl App {
     }
 
     pub fn open_global_logs(&mut self) {
-        let xdg_dirs = xdg::BaseDirectories::with_prefix("repx");
+        let xdg_dirs = repx_core::xdg_dirs();
         if let Some(cache_home) = xdg_dirs.get_cache_home() {
             let repx_log = cache_home.join("repx.log");
             let tui_log = cache_home.join("repx-tui.log");

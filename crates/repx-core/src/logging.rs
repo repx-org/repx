@@ -84,6 +84,7 @@ impl FormatTime for LocalTimeFormatter {
     }
 }
 
+#[allow(clippy::expect_used)]
 fn rotate_logs(log_dir: &Path, prefix: &str, config: &LoggingConfig) -> Result<(), ConfigError> {
     if !log_dir.exists() {
         fs::create_dir_all(log_dir)?;
@@ -285,7 +286,7 @@ fn init_logger(
     prefix: &str,
     symlink_name: &str,
 ) -> Result<(), ConfigError> {
-    let xdg_dirs = xdg::BaseDirectories::with_prefix("repx");
+    let xdg_dirs = crate::xdg_dirs();
     let cache_home = xdg_dirs.get_cache_home().ok_or_else(|| {
         ConfigError::Io(std::io::Error::new(
             std::io::ErrorKind::NotFound,

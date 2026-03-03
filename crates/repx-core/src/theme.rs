@@ -2,7 +2,6 @@ use crate::config::{self, Config};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fs;
-use xdg::BaseDirectories;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ElementStyle {
@@ -303,7 +302,7 @@ pub fn load_theme(config: &Config) -> Result<Theme, crate::errors::ConfigError> 
         _ => default_theme(),
     };
 
-    let xdg_dirs = BaseDirectories::with_prefix("repx");
+    let xdg_dirs = crate::xdg_dirs();
     if let Some(theme_path) = xdg_dirs.find_config_file("theme.toml") {
         let user_theme_str = fs::read_to_string(theme_path)?;
         let user_theme_value: toml::Value = toml::from_str(&user_theme_str)?;
