@@ -128,7 +128,7 @@ pub struct App {
 impl App {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        client: Client,
+        client: Arc<Client>,
         theme: Theme,
         status_rx: Receiver<TargetPollUpdate>,
         log_cmd_tx: Sender<LogPollerCommand>,
@@ -232,7 +232,7 @@ impl App {
 
         let tick_rate = client.config().tui_tick_rate();
         let mut app = Self {
-            client: Arc::new(client),
+            client,
             theme,
             lab,
             jobs_state: JobsState::new(),

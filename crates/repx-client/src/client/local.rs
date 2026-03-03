@@ -72,9 +72,10 @@ pub(crate) fn build_steps_json(
         .collect();
 
     if step_entries.is_empty() {
-        return Err(ClientError::Config(ConfigError::InvalidState(
-            "Scatter-gather job has no step executables (expected step-<name> keys)".into(),
-        )));
+        return Err(ClientError::Config(ConfigError::InconsistentMetadata {
+            detail: "Scatter-gather job has no step executables (expected step-<name> keys)"
+                .to_string(),
+        }));
     }
 
     let mut steps = serde_json::Map::new();
@@ -148,20 +149,22 @@ pub(crate) fn build_steps_json(
         .collect();
 
     if sink_candidates.len() != 1 {
-        return Err(ClientError::Config(ConfigError::InvalidState(format!(
-            "Expected exactly one sink step but found {}: {:?}",
-            sink_candidates.len(),
-            sink_candidates
-        ))));
+        return Err(ClientError::Config(ConfigError::InconsistentMetadata {
+            detail: format!(
+                "Expected exactly one sink step but found {}: {:?}",
+                sink_candidates.len(),
+                sink_candidates
+            ),
+        }));
     }
     let sink_step = sink_candidates[0].clone();
 
     let sink_key = format!("step-{}", sink_step);
     let sink_exe = job.executables.get(&sink_key).ok_or_else(|| {
-        ClientError::Config(ConfigError::InvalidState(format!(
-            "Sink step executable '{}' not found in job",
-            sink_key
-        )))
+        ClientError::Config(ConfigError::MissingExecutable {
+            job_id: sink_key.clone(),
+            executable: "step".to_string(),
+        })
     })?;
     let last_step_outputs_json = serde_json::to_string(&sink_exe.outputs).map_err(|e| {
         ClientError::Config(ConfigError::SerializationError(format!(
@@ -311,16 +314,16 @@ fn build_sg_common_args(
 ) -> std::result::Result<Vec<String>, ClientError> {
     let artifacts_base = target.artifacts_base_path();
     let scatter_exe = job.executables.get("scatter").ok_or_else(|| {
-        ClientError::Config(ConfigError::InvalidState(format!(
-            "Scatter-gather job '{}' missing required 'scatter' executable",
-            job_id
-        )))
+        ClientError::Config(ConfigError::MissingExecutable {
+            job_id: job_id.0.clone(),
+            executable: "scatter".to_string(),
+        })
     })?;
     let gather_exe = job.executables.get("gather").ok_or_else(|| {
-        ClientError::Config(ConfigError::InvalidState(format!(
-            "Scatter-gather job '{}' missing required 'gather' executable",
-            job_id
-        )))
+        ClientError::Config(ConfigError::MissingExecutable {
+            job_id: job_id.0.clone(),
+            executable: "gather".to_string(),
+        })
     })?;
     let job_package_path = artifacts_base.join(format!("jobs/{}", job_id));
     let scatter_exe_path = artifacts_base.join(&scatter_exe.path);
@@ -387,10 +390,10 @@ fn build_simple_job_args(
     image_tag: Option<&str>,
 ) -> std::result::Result<Vec<String>, ClientError> {
     let main_exe = job.executables.get("main").ok_or_else(|| {
-        ClientError::Config(ConfigError::InvalidState(format!(
-            "Job '{}' missing required 'main' executable",
-            job_id
-        )))
+        ClientError::Config(ConfigError::MissingExecutable {
+            job_id: job_id.0.clone(),
+            executable: "main".to_string(),
+        })
     })?;
     let executable_path = target.artifacts_base_path().join(&main_exe.path);
 
@@ -574,9 +577,9 @@ fn expand_scatter_gather<'a>(
     let sink_step = sinks
         .first()
         .ok_or_else(|| {
-            ClientError::Config(ConfigError::InvalidState(
-                "No sink step found in scatter-gather step DAG".into(),
-            ))
+            ClientError::Config(ConfigError::InconsistentMetadata {
+                detail: "No sink step found in scatter-gather step DAG".to_string(),
+            })
         })?
         .to_string();
 
@@ -721,10 +724,10 @@ pub fn submit_local_batch_run(
             .get("main")
             .or_else(|| job.executables.get("scatter"))
             .ok_or_else(|| {
-                ClientError::Config(ConfigError::InvalidState(format!(
-                    "Job '{}' missing required executable 'main' or 'scatter'",
-                    job_id
-                )))
+                ClientError::Config(ConfigError::MissingExecutable {
+                    job_id: job_id.0.clone(),
+                    executable: "main or scatter".to_string(),
+                })
             })?;
         let job_deps: Vec<WorkUnitId> = entrypoint_exe
             .inputs
@@ -981,9 +984,9 @@ pub fn submit_local_batch_run(
                 if !failed_units.is_empty() {
                     break;
                 }
-                return Err(ClientError::Config(ConfigError::General(
-                    "Cycle detected in dependency graph or missing dependency.".to_string(),
-                )));
+                return Err(ClientError::Config(ConfigError::CycleDetected {
+                    context: "dependency graph or missing dependency".to_string(),
+                }));
             }
 
             let mut spawned = 0;

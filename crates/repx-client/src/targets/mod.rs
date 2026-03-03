@@ -62,11 +62,13 @@ pub(crate) fn find_local_runner_binary() -> Result<PathBuf> {
             return Ok(cli_exe_path);
         }
 
-        return Err(ClientError::Config(ConfigError::InvalidState(format!(
-            "Could not find repx runner binary. Searched for:\n  {}\n  {}",
-            runner_exe_path.display(),
-            cli_exe_path.display()
-        ))));
+        return Err(ClientError::Config(ConfigError::InvalidConfig {
+            detail: format!(
+                "Could not find repx runner binary. Searched for:\n  {}\n  {}",
+                runner_exe_path.display(),
+                cli_exe_path.display()
+            ),
+        }));
     }
     Ok(runner_exe_path)
 }

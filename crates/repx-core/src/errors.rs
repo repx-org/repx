@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
-pub enum ConfigError {
+pub enum CoreError {
     #[error("I/O Error: {0}")]
     Io(#[from] std::io::Error),
 
@@ -26,8 +26,32 @@ pub enum ConfigError {
     #[error("Error walking directory: {0}")]
     WalkDir(#[from] walkdir::Error),
 
-    #[error("Invalid configuration: {0}")]
-    General(String),
+    #[error("Serialization error: {0}")]
+    SerializationError(String),
+
+    #[error("Invalid configuration: {detail}")]
+    InvalidConfig { detail: String },
+
+    #[error("A 'local' target must be defined in config.toml.\nTip: You can define a 'data-only' local target by setting a base_path:\n\n[targets.local]\nbase_path = \"~/.local/share/repx\"")]
+    MissingLocalTarget,
+
+    #[error("Target '{name}' not found in configuration.")]
+    TargetNotConfigured { name: String },
+
+    #[error("No submission target configured. Set 'submission_target' in your config or use the --target flag.")]
+    NoSubmissionTarget,
+
+    #[error("Container execution with '{runtime}' requires an --image-tag.")]
+    ImageTagRequired { runtime: String },
+
+    #[error("Unsupported {kind}: '{value}'.")]
+    UnsupportedValue { kind: String, value: String },
+
+    #[error("Missing required argument '{argument}': {context}")]
+    MissingArgument { argument: String, context: String },
+
+    #[error("No result store is configured. Please add one to your config file or use the --stores flag.")]
+    StoreNotConfigured,
 
     #[error("Command failed: {0}")]
     CommandFailed(String),
@@ -35,20 +59,29 @@ pub enum ConfigError {
     #[error("Target setup failed: {0}")]
     TargetSetupFailed(String),
 
-    #[error("Invalid state: {0}")]
-    InvalidState(String),
-
-    #[error("Serialization error: {0}")]
-    SerializationError(String),
-
-    #[error("No result store is configured. Please add one to your config file or use the --stores flag.")]
-    StoreNotConfigured,
-
     #[error("Lab not found at path '{0}'.\nPlease specify a valid lab directory with --lab, or run this command in a directory containing the default lab path ('./result').")]
     LabNotFound(PathBuf),
 
     #[error("Could not find required lab metadata file(s) in '{0}'. Expected 'lab_manifest.json' and 'revision/metadata.json'. Is this a valid lab directory?")]
     MetadataNotFound(PathBuf),
+
+    #[error("Job '{job_id}' missing required executable '{executable}'.")]
+    MissingExecutable { job_id: String, executable: String },
+
+    #[error("Inconsistent metadata: {detail}")]
+    InconsistentMetadata { detail: String },
+
+    #[error("No lab manifest found for hash '{hash}'.")]
+    ManifestNotFound { hash: String },
+
+    #[error("Output not ready at '{path}'. Job may not have been executed yet.")]
+    OutputNotReady { path: PathBuf },
+
+    #[error("Cycle detected in {context}.")]
+    CycleDetected { context: String },
+
+    #[error("Step error: {detail}")]
+    StepError { detail: String },
 
     #[error("Lab integrity check failed: {0}")]
     IntegrityError(String),
@@ -70,7 +103,15 @@ pub enum ConfigError {
 
     #[error("Symlink '{link}' points outside the lab root (target: '{target}').")]
     SymlinkEscape { link: PathBuf, target: PathBuf },
+
+    #[error("No pinned GC root named '{name}'.")]
+    GcRootNotFound { name: String },
+
+    #[error("Host tool error: {detail}")]
+    HostToolNotFound { detail: String },
 }
+
+pub type ConfigError = CoreError;
 
 #[derive(Error, Debug)]
 pub enum DomainError {

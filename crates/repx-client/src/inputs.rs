@@ -18,19 +18,21 @@ pub fn generate_and_write_inputs_json(
     let mut inputs_map = serde_json::Map::new();
 
     let exe = job.executables.get(executable_name).ok_or_else(|| {
-        ClientError::Config(ConfigError::InvalidState(format!(
-            "Job '{}' missing required executable '{}'",
-            job_id, executable_name
-        )))
+        ClientError::Config(ConfigError::MissingExecutable {
+            job_id: job_id.0.clone(),
+            executable: executable_name.to_string(),
+        })
     })?;
 
     for mapping in &exe.inputs {
         if let (Some(dep_job_id), Some(source_output)) = (&mapping.job_id, &mapping.source_output) {
             let dep_job = lab.jobs.get(dep_job_id).ok_or_else(|| {
-                ClientError::Config(ConfigError::InvalidState(format!(
-                    "Dependency job '{}' not found in lab for job '{}'",
-                    dep_job_id, job_id
-                )))
+                ClientError::Config(ConfigError::InconsistentMetadata {
+                    detail: format!(
+                        "Dependency job '{}' not found in lab for job '{}'",
+                        dep_job_id, job_id
+                    ),
+                })
             })?;
 
             let dep_exe = if dep_job.stage_type == repx_core::model::StageType::ScatterGather {
@@ -39,24 +41,28 @@ pub fn generate_and_write_inputs_json(
                 dep_job.executables.get("main")
             }
             .ok_or_else(|| {
-                ClientError::Config(ConfigError::InvalidState(format!(
-                    "Could not find output executable for dependency job '{}'",
-                    dep_job_id
-                )))
+                ClientError::Config(ConfigError::MissingExecutable {
+                    job_id: dep_job_id.0.clone(),
+                    executable: "main/gather".to_string(),
+                })
             })?;
 
             let value_template_val = dep_exe.outputs.get(source_output).ok_or_else(|| {
-                ClientError::Config(ConfigError::InvalidState(format!(
-                            "Inconsistent metadata: job '{}' requires output '{}' from dependency '{}', but this output is not defined in the dependency's metadata.",
-                            job_id, source_output, dep_job_id
-                        )))
+                ClientError::Config(ConfigError::InconsistentMetadata {
+                    detail: format!(
+                        "Job '{}' requires output '{}' from dependency '{}', but this output is not defined in the dependency's metadata.",
+                        job_id, source_output, dep_job_id
+                    ),
+                })
             })?;
 
             let value_template = value_template_val.as_str().ok_or_else(|| {
-                ClientError::Config(ConfigError::InvalidState(format!(
-                        "Inconsistent metadata: job '{}' requires output '{}' from dependency '{}', but this output is not a string path template.",
+                ClientError::Config(ConfigError::InconsistentMetadata {
+                    detail: format!(
+                        "Job '{}' requires output '{}' from dependency '{}', but this output is not a string path template.",
                         job_id, source_output, dep_job_id
-                    )))
+                    ),
+                })
             })?;
 
             let dep_output_dir = target

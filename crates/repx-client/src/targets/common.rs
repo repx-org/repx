@@ -250,10 +250,12 @@ pub fn get_image_manifest(image_path: &Path, tar_tool: &Path) -> Result<Vec<Stri
         .lines()
         .find(|line| line.trim() == "manifest.json" || line.trim().ends_with("/manifest.json"))
         .ok_or_else(|| {
-            ClientError::Config(ConfigError::InvalidState(format!(
-                "manifest.json not found in {}: manifest.json missing from tar listing",
-                image_path.display()
-            )))
+            ClientError::Config(ConfigError::InconsistentMetadata {
+                detail: format!(
+                    "manifest.json not found in {}: manifest.json missing from tar listing",
+                    image_path.display()
+                ),
+            })
         })?;
 
     let mut tar_extract_cmd = Command::new(tar_tool);
@@ -277,10 +279,9 @@ pub fn get_image_manifest(image_path: &Path, tar_tool: &Path) -> Result<Vec<Stri
         .map_err(|e| ClientError::Config(ConfigError::Json(e)))?;
 
     if manifest.is_empty() {
-        return Err(ClientError::Config(ConfigError::InvalidState(format!(
-            "Empty manifest in {}",
-            image_path.display()
-        ))));
+        return Err(ClientError::Config(ConfigError::InconsistentMetadata {
+            detail: format!("Empty manifest in {}", image_path.display()),
+        }));
     }
 
     Ok(manifest[0].layers.clone())

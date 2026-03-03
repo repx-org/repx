@@ -37,9 +37,9 @@ pub fn handle_internal_orchestrate(args: InternalOrchestrateArgs) -> Result<(), 
         current_wave.sort();
 
         if current_wave.is_empty() {
-            return Err(CliError::Config(ConfigError::General(
-                "Cycle detected in job dependency graph.".to_string(),
-            )));
+            return Err(CliError::Config(ConfigError::CycleDetected {
+                context: "job dependency graph".to_string(),
+            }));
         }
 
         eprintln!(

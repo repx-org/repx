@@ -38,10 +38,10 @@ impl OrchestrationPlan {
             .get("main")
             .or_else(|| job_def.executables.get("scatter"))
             .ok_or_else(|| {
-                ClientError::Config(ConfigError::InvalidState(format!(
-                    "Job '{}' missing required executable 'main' or 'scatter'",
-                    job_id
-                )))
+                ClientError::Config(ConfigError::MissingExecutable {
+                    job_id: job_id.0.clone(),
+                    executable: "main or scatter".to_string(),
+                })
             })?;
 
         let dependencies = entrypoint_exe

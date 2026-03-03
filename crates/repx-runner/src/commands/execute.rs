@@ -32,9 +32,9 @@ async fn async_handle_execute(args: InternalExecuteArgs) -> Result<(), CliError>
         .parent()
         .and_then(|p| p.parent())
         .ok_or_else(|| {
-            CliError::Config(ConfigError::General(
-                "Could not determine job package path from executable path".into(),
-            ))
+            CliError::Config(ConfigError::InvalidConfig {
+                detail: "Could not determine job package path from executable path".to_string(),
+            })
         })?
         .to_path_buf();
     let inputs_json_path = repx_dir.join("inputs.json");

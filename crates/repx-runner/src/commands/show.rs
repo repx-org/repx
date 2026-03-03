@@ -34,10 +34,9 @@ fn handle_show_job(
     let job_id = resolver::resolve_target_job_id(&lab, &target_input)?;
 
     let job = lab.jobs.get(job_id).ok_or_else(|| {
-        CliError::Config(ConfigError::General(format!(
-            "Job '{}' not found in lab",
-            job_id
-        )))
+        CliError::Config(ConfigError::InvalidConfig {
+            detail: format!("Job '{}' not found in lab", job_id),
+        })
     })?;
 
     let run_name = lab
@@ -205,18 +204,12 @@ fn get_store_path(
 ) -> Result<std::path::PathBuf, CliError> {
     let target_name = target_override
         .or(config.submission_target.as_deref())
-        .ok_or_else(|| {
-            CliError::Config(ConfigError::General(
-                "No submission target configured. Use --target or set 'submission_target' in config."
-                    .to_string(),
-            ))
-        })?;
+        .ok_or(CliError::Config(ConfigError::NoSubmissionTarget))?;
 
     let target = config.targets.get(target_name).ok_or_else(|| {
-        CliError::Config(ConfigError::General(format!(
-            "Target '{}' not found in config",
-            target_name
-        )))
+        CliError::Config(ConfigError::TargetNotConfigured {
+            name: target_name.to_string(),
+        })
     })?;
 
     Ok(target.base_path.clone())
@@ -319,10 +312,9 @@ fn handle_show_output(
     let out_dir = output_dir.join(dirs::OUT);
 
     if !out_dir.exists() {
-        return Err(CliError::Config(ConfigError::InvalidState(format!(
-            "Output directory does not exist: {}\nJob may not have been executed yet.",
-            out_dir.display()
-        ))));
+        return Err(CliError::Config(ConfigError::OutputNotReady {
+            path: out_dir.clone(),
+        }));
     }
 
     match args.path {
@@ -333,10 +325,9 @@ fn handle_show_output(
                 eprintln!();
                 eprintln!("Available files in {}:", out_dir.display());
                 list_directory_recursive(&out_dir, &out_dir, 2)?;
-                return Err(CliError::Config(ConfigError::General(format!(
-                    "File '{}' not found in job output",
-                    path
-                ))));
+                return Err(CliError::Config(ConfigError::InvalidConfig {
+                    detail: format!("File '{}' not found in job output", path),
+                }));
             }
 
             if file_path.is_dir() {

@@ -34,9 +34,10 @@ pub fn handle_run(
     let (tx, rx) = mpsc::channel();
     let client = context.client.clone();
     let run_specs = if args.run_specs.is_empty() {
-        return Err(CliError::Config(ConfigError::General(
-            "No run or job specified to run.".to_string(),
-        )));
+        return Err(CliError::Config(ConfigError::MissingArgument {
+            argument: "run_specs".to_string(),
+            context: "No run or job specified to run".to_string(),
+        }));
     } else {
         args.run_specs
     };

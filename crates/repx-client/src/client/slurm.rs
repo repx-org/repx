@@ -71,11 +71,9 @@ pub fn submit_slurm_batch_run(
     send(ClientEvent::GeneratingSlurmScripts {
         num_jobs: jobs_to_submit.len(),
     });
-    let local_target = client.get_target(targets::LOCAL).ok_or_else(|| {
-        ClientError::Config(ConfigError::General(
-            "A 'local' target must be defined in config.toml to store client state.".to_string(),
-        ))
-    })?;
+    let local_target = client
+        .get_target(targets::LOCAL)
+        .ok_or(ClientError::Config(ConfigError::MissingLocalTarget))?;
     let client_temp_dir = local_target.base_path().join("repx").join("temp");
     let local_batch_dir = client_temp_dir.join("slurm_batch");
     if local_batch_dir.exists() {
@@ -129,9 +127,10 @@ pub fn submit_slurm_batch_run(
         }
         if target.config().mount_host_paths {
             if !target.config().mount_paths.is_empty() {
-                return Err(ClientError::Config(ConfigError::General(
-                    "Cannot specify both 'mount_host_paths = true' and 'mount_paths'.".into(),
-                )));
+                return Err(ClientError::Config(ConfigError::InvalidConfig {
+                    detail: "Cannot specify both 'mount_host_paths = true' and 'mount_paths'."
+                        .to_string(),
+                }));
             }
             repx_args.push_str(" --mount-host-paths");
         } else {
@@ -143,14 +142,16 @@ pub fn submit_slurm_batch_run(
             == repx_core::model::StageType::ScatterGather
         {
             let scatter_exe = job.executables.get("scatter").ok_or_else(|| {
-                ClientError::Config(ConfigError::InvalidState(
-                    "Scatter-gather job missing 'scatter' executable".into(),
-                ))
+                ClientError::Config(ConfigError::MissingExecutable {
+                    job_id: job_id.0.clone(),
+                    executable: "scatter".to_string(),
+                })
             })?;
             let gather_exe = job.executables.get("gather").ok_or_else(|| {
-                ClientError::Config(ConfigError::InvalidState(
-                    "Scatter-gather job missing 'gather' executable".into(),
-                ))
+                ClientError::Config(ConfigError::MissingExecutable {
+                    job_id: job_id.0.clone(),
+                    executable: "gather".to_string(),
+                })
             })?;
 
             let artifacts_base = target.artifacts_base_path();
@@ -179,10 +180,12 @@ pub fn submit_slurm_batch_run(
                     })
                     .collect();
                 sink_candidates.first().cloned().cloned().ok_or_else(|| {
-                    ClientError::Config(ConfigError::InvalidState(format!(
-                        "Scatter-gather job '{}' has no sink step in its step DAG",
-                        job_id
-                    )))
+                    ClientError::Config(ConfigError::InconsistentMetadata {
+                        detail: format!(
+                            "Scatter-gather job '{}' has no sink step in its step DAG",
+                            job_id
+                        ),
+                    })
                 })?
             };
             let sink_step_hints = job
@@ -234,10 +237,10 @@ pub fn submit_slurm_batch_run(
             (command, main_directives)
         } else {
             let main_exe = job.executables.get("main").ok_or_else(|| {
-                ClientError::Config(ConfigError::InvalidState(format!(
-                    "Job '{}' missing required executable 'main'",
-                    job_id
-                )))
+                ClientError::Config(ConfigError::MissingExecutable {
+                    job_id: job_id.0.clone(),
+                    executable: "main".to_string(),
+                })
             })?;
             let executable_path_on_target = target.artifacts_base_path().join(&main_exe.path);
 

@@ -217,11 +217,13 @@ pub fn load_config() -> Result<Config, ConfigError> {
         }
 
         if target.address.is_none() && !target.base_path.is_absolute() {
-            return Err(ConfigError::General(format!(
-                "Target '{}': `base_path` for local targets must be an absolute path or start with '~'. Got: '{}'",
-                name,
-                path_str
-            )));
+            return Err(ConfigError::InvalidConfig {
+                detail: format!(
+                    "Target '{}': `base_path` for local targets must be an absolute path or start with '~'. Got: '{}'",
+                    name,
+                    path_str
+                ),
+            });
         }
     }
     Ok(config)

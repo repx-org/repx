@@ -155,10 +155,9 @@ pub fn load_from_path(initial_path: &Path) -> Result<Lab, ConfigError> {
                 (parent.to_path_buf(), None)
             }
         } else {
-            return Err(ConfigError::General(format!(
-                "Path '{}' has no parent directory",
-                initial_path.display()
-            )));
+            return Err(ConfigError::InvalidConfig {
+                detail: format!("Path '{}' has no parent directory", initial_path.display()),
+            });
         }
     } else {
         (initial_path.to_path_buf(), None)
