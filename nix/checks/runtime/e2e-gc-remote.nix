@@ -59,9 +59,6 @@ pkgs.testers.runNixOSTest {
   };
 
   testScript = ''
-    import json
-    import os
-
     start_all()
 
     client.succeed("mkdir -p /root/.ssh")
@@ -84,7 +81,7 @@ pkgs.testers.runNixOSTest {
 
     exec(open("${./helpers/get-subset-jobs.py}").read())
 
-    subset_jobs = get_subset_jobs(LAB_PATH)
+    subset_jobs = get_subset_jobs(LAB_PATH)  # type: ignore[name-defined]
     if not subset_jobs:
         raise Exception("Failed to find subset of jobs.")
 

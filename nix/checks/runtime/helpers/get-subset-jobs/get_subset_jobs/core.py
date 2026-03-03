@@ -1,13 +1,4 @@
-"""
-Shared helper for NixOS tests: find a small subset of jobs from a lab manifest
-to avoid running the full job suite (800+ jobs) during integration tests.
-
-Usage in NixOS test scripts:
-  1. Set LAB_PATH before exec'ing this snippet.
-  2. Optionally set PREFER_JOB_NAME (default: "workload-generator") and
-     PREFER_RESOURCE_HINTS (default: False).
-  3. After exec, `subset_jobs` will contain a list of job IDs to run.
-"""
+"""Core logic for finding a representative subset of jobs."""
 
 import json
 import os
