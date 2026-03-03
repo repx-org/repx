@@ -853,9 +853,7 @@ pub fn submit_local_batch_run(
                                     });
                                 }
                             }
-                            let failed_job_id = work_units
-                                .get(&unit_id)
-                                .map(|u| u.job_id.clone());
+                            let failed_job_id = work_units.get(&unit_id).map(|u| u.job_id.clone());
                             for (candidate_id, candidate) in &work_units {
                                 if units_left.contains(candidate_id)
                                     && candidate.deps.contains(&unit_id)
@@ -956,10 +954,9 @@ pub fn submit_local_batch_run(
         if any_finished {
             let failed_count = failed_units.len();
             let running_count = active_handles.len();
-            let blocked_count = total_work_units
-                .saturating_sub(
-                    units_left.len() + running_count + succeeded_work_units + failed_count,
-                );
+            let blocked_count = total_work_units.saturating_sub(
+                units_left.len() + running_count + succeeded_work_units + failed_count,
+            );
             let pending_count = units_left.len();
 
             send(ClientEvent::LocalProgress {
