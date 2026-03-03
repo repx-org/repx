@@ -1,3 +1,5 @@
+import Image from "@site/src/components/Image";
+
 # Dependencies
 
 Dependencies in RepX are primarily data-driven. When one stage consumes the output of another, a dependency is established. RepX handles two types of dependencies: **Stage Dependencies** (within a pipeline) and **Run Dependencies** (between separate runs).
@@ -20,7 +22,7 @@ The runtime ensures `producer` completes successfully before `consumer` starts.
 You can also define dependencies between entire Runs. This is useful for separating long-running simulations from quick analysis steps.
 
 <div align="center">
-  <img src="/images/simple-topology.svg" alt="Run Dependencies" />
+  <Image src="/images/simple-topology.svg" alt="Run Dependencies" />
 </div>
 
 ```nix

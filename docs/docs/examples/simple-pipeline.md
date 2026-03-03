@@ -1,3 +1,5 @@
+import Image from "@site/src/components/Image";
+
 # Simple Pipeline Example
 
 This example demonstrates a basic linear pipeline producing data and calculating a checksum. It also shows how to integrate `repx-py` for analysis.
@@ -9,7 +11,7 @@ Location: `examples/simple`
 The experiment is defined in `flake.nix`, which imports the lab definition from `nix/lab.nix`.
 
 <div align="center">
-  <img src="/images/simple-topology.svg" alt="Simple Pipeline Topology" />
+  <Image src="/images/simple-topology.svg" alt="Simple Pipeline Topology" />
 </div>
 
 ```nix
@@ -52,7 +54,7 @@ The lab defines two runs:
     You can inspect the generated topology using the TUI or the `viz` command.
     
     <div align="center">
-      <img src="/images/simple-tui.svg" alt="Simple Pipeline TUI" />
+      <Image src="/images/simple-tui.svg" alt="Simple Pipeline TUI" />
     </div>
 
 3.  **Run the Simulation:**

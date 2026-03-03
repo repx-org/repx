@@ -1,3 +1,5 @@
+import Image from "@site/src/components/Image";
+
 # Visualization
 
 Visualizing the experiment topology is crucial for verifying dependencies and understanding the data flow in complex pipelines before execution.
@@ -12,7 +14,7 @@ repx viz --lab ./result
 ```
 
 <div align="center">
-  <img src="/images/simple-topology.svg" alt="Experiment Topology" />
+  <Image src="/images/simple-topology.svg" alt="Experiment Topology" />
 </div>
 
 ### Options

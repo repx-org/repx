@@ -1,3 +1,5 @@
+import Image from "@site/src/components/Image";
+
 # Parameter Sweep Example
 
 This example demonstrates how to define a parameter sweep and run multiple parallel jobs using the `param-sweep` example in the repository.
@@ -48,7 +50,7 @@ _: {
 ## Topology Visualization
 
 <div align="center">
-  <img src="/images/parameter-sweep-topology.svg" alt="Parameter Sweep Topology" />
+  <Image src="/images/parameter-sweep-topology.svg" alt="Parameter Sweep Topology" />
 </div>
 
 The topology shows that the `sweep-run` splits into multiple independent parallel jobs (one for each `slope` value), which are then all collected by the downstream `plot-run`.
