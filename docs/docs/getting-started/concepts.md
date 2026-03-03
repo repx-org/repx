@@ -1,3 +1,5 @@
+import Image from "@site/src/components/Image";
+
 # Core Concepts
 
 RepX provides reproducible experiment execution on High-Performance Computing infrastructure. The framework separates experiment definition from execution, enabling portable workflows across heterogeneous compute environments.
@@ -73,7 +75,7 @@ repx viz --format svg
 ```
 
 <div align="center">
-  <img src="/images/simple-topology.svg" alt="Experiment Topology" />
+  <Image src="/images/simple-topology.svg" alt="Experiment Topology" />
 </div>
 
 ### 4. Execute

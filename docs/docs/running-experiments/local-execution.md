@@ -1,3 +1,5 @@
+import Image from "@site/src/components/Image";
+
 # Local Execution
 
 Local execution runs experiments on the host machine using direct process spawning or containerized environments.
@@ -65,7 +67,7 @@ Job outputs are organized under the configured `base_path`:
 | `FAIL` | Job terminated with non-zero exit code |
 
 <div align="center">
-  <img src="/images/simple-tui.svg" alt="Execution TUI" />
+  <Image src="/images/simple-tui.svg" alt="Execution TUI" />
 </div>
 
 ## Incremental Execution
