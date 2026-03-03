@@ -16,10 +16,9 @@ pub mod trace;
 
 pub(crate) fn create_tokio_runtime() -> Result<tokio::runtime::Runtime, CliError> {
     tokio::runtime::Runtime::new().map_err(|e| {
-        CliError::Config(ConfigError::General(format!(
-            "Failed to create async runtime: {}",
-            e
-        )))
+        CliError::Config(ConfigError::InvalidConfig {
+            detail: format!("Failed to create async runtime: {}", e),
+        })
     })
 }
 
@@ -37,29 +36,29 @@ pub(crate) fn parse_runtime(
         "native" => Ok(Runtime::Native),
         "podman" => Ok(Runtime::Podman {
             image_tag: image_tag.ok_or_else(|| {
-                CliError::Config(ConfigError::General(
-                    "Container execution with 'podman' requires an --image-tag.".to_string(),
-                ))
+                CliError::Config(ConfigError::ImageTagRequired {
+                    runtime: "podman".to_string(),
+                })
             })?,
         }),
         "docker" => Ok(Runtime::Docker {
             image_tag: image_tag.ok_or_else(|| {
-                CliError::Config(ConfigError::General(
-                    "Container execution with 'docker' requires an --image-tag.".to_string(),
-                ))
+                CliError::Config(ConfigError::ImageTagRequired {
+                    runtime: "docker".to_string(),
+                })
             })?,
         }),
         "bwrap" => Ok(Runtime::Bwrap {
             image_tag: image_tag.ok_or_else(|| {
-                CliError::Config(ConfigError::General(
-                    "Container execution with 'bwrap' requires an --image-tag.".to_string(),
-                ))
+                CliError::Config(ConfigError::ImageTagRequired {
+                    runtime: "bwrap".to_string(),
+                })
             })?,
         }),
-        other => Err(CliError::Config(ConfigError::General(format!(
-            "Unsupported runtime: {}",
-            other
-        )))),
+        other => Err(CliError::Config(ConfigError::UnsupportedValue {
+            kind: "runtime".to_string(),
+            value: other.to_string(),
+        })),
     }
 }
 

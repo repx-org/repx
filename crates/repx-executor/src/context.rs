@@ -28,10 +28,12 @@ impl<'a> RuntimeContext<'a> {
 
     pub fn get_host_tool_path(&self, tool_name: &str) -> Result<PathBuf> {
         let host_tools = self.request.host_tools_bin_dir.as_ref().ok_or_else(|| {
-            ExecutorError::Config(repx_core::errors::ConfigError::InvalidState(format!(
-                "Host tools directory not configured. Cannot resolve '{}'.",
-                tool_name
-            )))
+            ExecutorError::Config(repx_core::errors::ConfigError::HostToolNotFound {
+                detail: format!(
+                    "Host tools directory not configured. Cannot resolve '{}'.",
+                    tool_name
+                ),
+            })
         })?;
 
         let tool_path = host_tools.join(tool_name);
@@ -40,10 +42,12 @@ impl<'a> RuntimeContext<'a> {
         }
 
         Err(ExecutorError::Config(
-            repx_core::errors::ConfigError::InvalidState(format!(
-                "Required host tool '{}' not found in host-tools bin directory ({:?}).",
-                tool_name, host_tools
-            )),
+            repx_core::errors::ConfigError::HostToolNotFound {
+                detail: format!(
+                    "Required host tool '{}' not found in host-tools bin directory ({:?}).",
+                    tool_name, host_tools
+                ),
+            },
         ))
     }
 
@@ -62,10 +66,12 @@ impl<'a> RuntimeContext<'a> {
         }
 
         Err(ExecutorError::Config(
-            repx_core::errors::ConfigError::InvalidState(format!(
-                "Tool '{}' not found in host-tools or allowed system binaries.",
-                tool_name
-            )),
+            repx_core::errors::ConfigError::HostToolNotFound {
+                detail: format!(
+                    "Tool '{}' not found in host-tools or allowed system binaries.",
+                    tool_name
+                ),
+            },
         ))
     }
 

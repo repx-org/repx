@@ -70,14 +70,17 @@ pub fn run(args: TuiArgs) -> Result<(), TuiError> {
     let config = config::load_config()?;
     let theme = theme::load_theme(&config)?;
     let resources = config::load_resources(None)?;
-    let client = Client::new(config.clone(), lab_path).map_err(|e| TuiError::ExecutionFailed {
-        message: "TUI failed to initialize client".to_string(),
-        log_path: None,
-        log_summary: e.to_string(),
-    })?;
+    let client =
+        Arc::new(
+            Client::new(config.clone(), lab_path).map_err(|e| TuiError::ExecutionFailed {
+                message: "TUI failed to initialize client".to_string(),
+                log_path: None,
+                log_summary: e.to_string(),
+            })?,
+        );
 
     let (status_tx, status_rx) = mpsc::channel();
-    let status_client_clone = client.clone();
+    let status_client_clone = Arc::clone(&client);
     let should_quit = Arc::new(AtomicBool::new(false));
     let should_quit_clone_for_status = should_quit.clone();
 
@@ -125,7 +128,7 @@ pub fn run(args: TuiArgs) -> Result<(), TuiError> {
 
     let (log_cmd_tx, log_cmd_rx) = mpsc::channel::<LogPollerCommand>();
     let (log_result_tx, log_result_rx) = mpsc::channel();
-    let log_client_clone = client.clone();
+    let log_client_clone = Arc::clone(&client);
     let should_quit_clone_for_logs = should_quit.clone();
     let active_target_clone_for_logs = active_target.clone();
 

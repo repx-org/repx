@@ -493,10 +493,9 @@ impl GcOps for LocalTarget {
             .join(name);
 
         if !link_path.exists() && link_path.symlink_metadata().is_err() {
-            return Err(ClientError::Config(ConfigError::General(format!(
-                "No pinned GC root named '{}'",
-                name
-            ))));
+            return Err(ClientError::Config(ConfigError::GcRootNotFound {
+                name: name.to_string(),
+            }));
         }
 
         fs_err::remove_file(&link_path).map_err(|e| ClientError::Config(ConfigError::Io(e)))?;
@@ -664,10 +663,9 @@ impl LocalTarget {
             return Ok(fallback);
         }
 
-        Err(ClientError::Config(ConfigError::InvalidState(format!(
-            "No lab manifest found for hash '{}'",
-            lab_hash
-        ))))
+        Err(ClientError::Config(ConfigError::ManifestNotFound {
+            hash: lab_hash.to_string(),
+        }))
     }
 
     fn cleanup_old_gc_roots(&self, gcroots_dir: &Path, keep: usize) -> Result<()> {

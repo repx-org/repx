@@ -77,10 +77,9 @@ fn list_jobs(
         let target_name = target.unwrap_or(targets::LOCAL).to_string();
 
         let target_config = config.targets.get(&target_name).ok_or_else(|| {
-            CliError::Config(ConfigError::General(format!(
-                "Target '{}' not found in config",
-                target_name
-            )))
+            CliError::Config(ConfigError::TargetNotConfigured {
+                name: target_name.clone(),
+            })
         })?;
 
         let store = if args.output_paths {
@@ -91,10 +90,9 @@ fn list_jobs(
 
         let statuses = if !args.status.is_empty() {
             let client = Client::new(config.clone(), lab_path.to_path_buf()).map_err(|e| {
-                CliError::Config(ConfigError::General(format!(
-                    "Failed to initialize client: {}",
-                    e
-                )))
+                CliError::Config(ConfigError::InvalidConfig {
+                    detail: format!("Failed to initialize client: {}", e),
+                })
             })?;
             let job_statuses =
                 client_status::get_statuses_for_active_target(&client, &target_name, None)
@@ -192,8 +190,11 @@ fn list_jobs(
         }
     }
 
-    let run_id = RunId::from_str(run_id_str)
-        .map_err(|e| CliError::Config(ConfigError::General(e.to_string())))?;
+    let run_id = RunId::from_str(run_id_str).map_err(|e| {
+        CliError::Config(ConfigError::InvalidConfig {
+            detail: e.to_string(),
+        })
+    })?;
 
     let matched_run = if let Some(run) = lab.runs.get(&run_id) {
         Some((&run_id, run))

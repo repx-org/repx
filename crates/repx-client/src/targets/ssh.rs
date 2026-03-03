@@ -216,10 +216,9 @@ impl SshTarget {
             return Ok(fallback);
         }
 
-        Err(ClientError::Config(ConfigError::InvalidState(format!(
-            "No lab manifest found for hash '{}'",
-            lab_hash
-        ))))
+        Err(ClientError::Config(ConfigError::ManifestNotFound {
+            hash: lab_hash.to_string(),
+        }))
     }
 
     fn sync_directory_impl(
@@ -592,10 +591,12 @@ impl ArtifactSync for SshTarget {
             .file_name()
             .and_then(|s| s.to_str())
             .ok_or_else(|| {
-                ClientError::Config(ConfigError::General(format!(
-                    "Image path '{}' has no valid filename",
-                    image_path.display()
-                )))
+                ClientError::Config(ConfigError::InvalidConfig {
+                    detail: format!(
+                        "Image path '{}' has no valid filename",
+                        image_path.display()
+                    ),
+                })
             })?;
         let image_hash_name = super::common::parse_image_hash(image_filename)?;
         let remote_image_dir = remote_images.join(&image_hash_name);
@@ -701,9 +702,9 @@ impl FileOps for SshTarget {
             .map_err(|e| ClientError::Config(ConfigError::Io(e)))?;
 
         let mut stdin = child.stdin.take().ok_or_else(|| {
-            ClientError::Config(ConfigError::General(
-                "Failed to capture stdin pipe for remote write command".to_string(),
-            ))
+            ClientError::Config(ConfigError::InvalidConfig {
+                detail: "Failed to capture stdin pipe for remote write command".to_string(),
+            })
         })?;
         let content_bytes = content.as_bytes().to_vec();
         std::thread::spawn(move || {
@@ -892,10 +893,9 @@ impl GcOps for SshTarget {
             shell_quote(&link_path.to_string_lossy())
         );
         if self.run_command("sh", &["-c", &check_script]).is_err() {
-            return Err(ClientError::Config(ConfigError::General(format!(
-                "No pinned GC root named '{}'",
-                name
-            ))));
+            return Err(ClientError::Config(ConfigError::GcRootNotFound {
+                name: name.to_string(),
+            }));
         }
 
         let rm_script = format!("rm -f {}", shell_quote(&link_path.to_string_lossy()));

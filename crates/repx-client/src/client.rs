@@ -143,29 +143,21 @@ pub struct SubmitOptions {
 }
 #[derive(Clone)]
 pub struct Client {
-    pub(crate) config: Arc<Config>,
-    pub(crate) lab_path: Arc<PathBuf>,
-    pub(crate) lab: Arc<Lab>,
-    pub(crate) targets: Arc<HashMap<String, Arc<dyn Target>>>,
+    pub(crate) config: Config,
+    pub(crate) lab_path: PathBuf,
+    pub(crate) lab: Lab,
+    pub(crate) targets: HashMap<String, Arc<dyn Target>>,
     pub(crate) slurm_map: SlurmIdMap,
 }
 
 impl Client {
     pub fn new(config: Config, lab_path: PathBuf) -> Result<Self> {
         let lab = lab::load_from_path(&lab_path)?;
-        let lab_arc = Arc::new(lab);
 
         let local_base_path = if let Some(local_target) = config.targets.get(targets::LOCAL) {
             local_target.base_path.clone()
         } else {
-            return Err(ClientError::Config(ConfigError::General(
-                 "A 'local' target must be defined in config.toml to store client state and temporary files.\n\
-                  Tip: You can define a 'data-only' local target by setting a base_path without any execution types:\n\
-                  \n\
-                  [targets.local]\n\
-                  base_path = \"~/.local/share/repx\"\n\
-                  # No executables needed if only submitting to remote targets\n".to_string()
-             )));
+            return Err(ClientError::Config(ConfigError::MissingLocalTarget));
         };
 
         let client_state_dir = local_base_path.join("repx").join("state");
@@ -181,22 +173,24 @@ impl Client {
                 Arc::new(LocalTarget {
                     name: name.clone(),
                     config: target_config.clone(),
-                    local_tools_path: lab_arc.host_tools_path.clone(),
+                    local_tools_path: lab.host_tools_path.clone(),
                 })
             } else if let Some(address) = &target_config.address {
                 Arc::new(SshTarget {
                     name: name.clone(),
                     address: address.clone(),
                     config: target_config.clone(),
-                    local_tools_path: lab_arc.host_tools_path.clone(),
+                    local_tools_path: lab.host_tools_path.clone(),
                     local_temp_path: client_temp_dir.clone(),
-                    host_tools_dir_name: lab_arc.host_tools_dir_name.clone(),
+                    host_tools_dir_name: lab.host_tools_dir_name.clone(),
                 })
             } else {
-                return Err(ClientError::Config(ConfigError::General(format!(
-                    "Target '{}' is not 'local' and has no 'address' specified.",
-                    name
-                ))));
+                return Err(ClientError::Config(ConfigError::InvalidConfig {
+                    detail: format!(
+                        "Target '{}' is not 'local' and has no 'address' specified.",
+                        name
+                    ),
+                }));
             };
             targets.insert(name.clone(), target);
         }
@@ -234,10 +228,10 @@ impl Client {
         };
 
         Ok(Self {
-            config: Arc::new(config),
-            lab_path: Arc::new(lab_path),
-            lab: lab_arc,
-            targets: Arc::new(targets),
+            config,
+            lab_path,
+            lab,
+            targets,
             slurm_map: Arc::new(Mutex::new(slurm_map_data)),
         })
     }
@@ -262,19 +256,14 @@ impl Client {
         let local_base_path = if let Some(local_target) = self.config.targets.get(targets::LOCAL) {
             local_target.base_path.clone()
         } else {
-            return Err(ClientError::Config(ConfigError::General(
-                "A 'local' target must be defined in config.toml to save client state.\n\
-                 Tip: Add a [targets.local] section with a base_path."
-                    .to_string(),
-            )));
+            return Err(ClientError::Config(ConfigError::MissingLocalTarget));
         };
 
         let client_state_dir = local_base_path.join("repx").join("state");
         fs_err::create_dir_all(&client_state_dir)
             .map_err(|e| ClientError::Config(ConfigError::Io(e)))?;
 
-        let lab_path_abs =
-            fs_err::canonicalize(&*self.lab_path).unwrap_or(self.lab_path.to_path_buf());
+        let lab_path_abs = fs_err::canonicalize(&self.lab_path).unwrap_or(self.lab_path.clone());
         let lab_hash = {
             let mut hasher = Sha256::new();
             hasher.update(lab_path_abs.to_string_lossy().as_bytes());
@@ -386,11 +375,10 @@ impl Client {
             send(ClientEvent::SyncingArtifacts {
                 total: images_to_sync.len() as u64,
             });
-            let local_target = self.targets.get(targets::LOCAL).ok_or_else(|| {
-                ClientError::Config(ConfigError::General(
-                    "Local target ('local') must be defined in the configuration.".to_string(),
-                ))
-            })?;
+            let local_target = self
+                .targets
+                .get(targets::LOCAL)
+                .ok_or(ClientError::Config(ConfigError::MissingLocalTarget))?;
             submission::sync_images(
                 &self.lab_path,
                 target,
@@ -522,10 +510,9 @@ impl Client {
 
         if let Some(entry) = slurm_info {
             let target = self.targets.get(&entry.target_name).ok_or_else(|| {
-                ClientError::Config(ConfigError::InvalidState(format!(
-                    "Target '{}' from slurm_map not found in configuration.",
-                    entry.target_name
-                )))
+                ClientError::Config(ConfigError::TargetNotConfigured {
+                    name: entry.target_name.clone(),
+                })
             })?;
 
             target.scancel(entry.slurm_id)?;

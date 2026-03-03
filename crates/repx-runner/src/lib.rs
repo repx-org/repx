@@ -85,24 +85,21 @@ pub fn run(cli: Cli) -> Result<(), CliError> {
 
             let target_name = match cli.target.as_ref().or(config.submission_target.as_ref()) {
                 Some(name) => name.clone(),
-                None => {
-                    return Err(CliError::Config(ConfigError::General(
-                        "No submission target specified. Set 'submission_target' in your config or use the --target flag.".to_string(),
-                    )))
-                }
+                None => return Err(CliError::Config(ConfigError::NoSubmissionTarget)),
             };
 
             let target_config = config.targets.get(&target_name).ok_or_else(|| {
-                CliError::Config(ConfigError::General(format!(
-                    "Target '{}' not found in configuration.",
-                    target_name
-                )))
+                CliError::Config(ConfigError::TargetNotConfigured {
+                    name: target_name.clone(),
+                })
             })?;
 
             let scheduler: SchedulerType = if let Some(s) = &cli.scheduler {
                 s.parse()
                     .map_err(|e: repx_core::model::ParseSchedulerTypeError| {
-                        CliError::Config(ConfigError::General(e.to_string()))
+                        CliError::Config(ConfigError::InvalidConfig {
+                            detail: e.to_string(),
+                        })
                     })?
             } else {
                 target_config
