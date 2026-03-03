@@ -51,7 +51,7 @@ enum Commands {
     Runner(Box<repx_runner::cli::Commands>),
 
     #[command(about = "Open the TUI dashboard")]
-    Tui,
+    Tui(TuiCmdArgs),
 
     #[command(about = "Visualize the experiment topology")]
     Viz(VizArgs),
@@ -85,6 +85,18 @@ struct DebugRunArgs {
 struct CompletionsArgs {
     #[arg(long, help = "Shell to generate completions for")]
     shell: Shell,
+}
+
+#[derive(Args)]
+struct TuiCmdArgs {
+    #[arg(long)]
+    screenshot: Option<PathBuf>,
+
+    #[arg(long, default_value = "120")]
+    screenshot_width: u16,
+
+    #[arg(long, default_value = "36")]
+    screenshot_height: u16,
 }
 
 fn print_help_all() {
@@ -180,8 +192,13 @@ fn main() {
                 std::process::exit(1);
             }
         }
-        Commands::Tui => {
-            let tui_args = repx_tui::TuiArgs { lab: cli.lab };
+        Commands::Tui(tui_cmd) => {
+            let tui_args = repx_tui::TuiArgs {
+                lab: cli.lab,
+                screenshot: tui_cmd.screenshot,
+                screenshot_width: tui_cmd.screenshot_width,
+                screenshot_height: tui_cmd.screenshot_height,
+            };
             if let Err(e) = repx_tui::run(tui_args) {
                 eprintln!("{}", format!("[ERROR] {}", e).red());
                 std::process::exit(1);

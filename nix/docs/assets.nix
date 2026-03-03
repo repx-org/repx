@@ -6,85 +6,53 @@
 }:
 
 let
-  test = pkgs.testers.runNixOSTest {
-    name = "repx-doc-assets-generation";
+  termframe = pkgs.callPackage ../termframe.nix { };
+  nerdFont = pkgs.nerd-fonts.jetbrains-mono;
+  fontDir = "${nerdFont}/share/fonts/truetype/NerdFonts/JetBrainsMono";
 
-    nodes.machine =
-      { pkgs, ... }:
-      {
-        imports = [ ];
-
-        environment.systemPackages = [
-          repx
-          pkgs.vhs
-          pkgs.chromium
-          pkgs.fontconfig
-          pkgs.glibcLocales
-          pkgs.graphviz
-        ];
-
-        users.users.docs = {
-          isNormalUser = true;
-          uid = 1000;
-          extraGroups = [ "wheel" ];
-        };
-
-        fonts.packages = [
-          pkgs.nerd-fonts.jetbrains-mono
-        ];
-
-        fonts.fontconfig.enable = true;
-      };
-
-    testScript = ''
-      import os
-
-      out_dir = os.environ.get('out')
-
-      start_all()
-
-      machine.succeed("mkdir -p /tmp/assets")
-      machine.succeed("chown docs:users /tmp/assets")
-
-      print("Checking environment...")
-      machine.succeed("su - docs -c 'which dot'")
-      machine.succeed("su - docs -c 'which repx'")
-
-      print("Generating SVGs...")
-      machine.succeed("su - docs -c 'repx viz --lab ${simple-lab} --output /tmp/assets/simple-topology --format svg'")
-      machine.succeed("su - docs -c 'repx viz --lab ${sweep-lab} --output /tmp/assets/parameter-sweep-topology --format svg'")
-
-      print("Preparing VHS tape...")
-      tape_content = """
-      Output "/tmp/assets/simple-tui.gif"
-      Set FontFamily "JetBrainsMono Nerd Font"
-      Set FontSize 16
-      Set Width 1200
-      Set Height 800
-      Set Padding 10
-      Set Theme "Dracula"
-
-      Hide
-      Type "repx tui --lab ${simple-lab}"
-      Enter
-      Sleep 10s
-      Show
-
-      Sleep 2s
-      Screenshot "/tmp/assets/simple-tui.png"
-      """
-
-      machine.succeed(f"su - docs -c 'cat <<EOF > /tmp/assets/script.tape\n{tape_content}\nEOF'")
-
-      print("Running VHS inside VM...")
-      machine.succeed("su - docs -c 'export XDG_CACHE_HOME=/tmp/assets/.cache; vhs /tmp/assets/script.tape'")
-
-      print("Extracting assets...")
-      machine.copy_from_vm("/tmp/assets/simple-topology.svg", f"{out_dir}/simple-topology.svg")
-      machine.copy_from_vm("/tmp/assets/parameter-sweep-topology.svg", f"{out_dir}/parameter-sweep-topology.svg")
-      machine.copy_from_vm("/tmp/assets/simple-tui.gif", f"{out_dir}/simple-tui.gif")
-      machine.copy_from_vm("/tmp/assets/simple-tui.png", f"{out_dir}/simple-tui.png")
-    '';
-  };
+  termframeConfig = pkgs.writeText "termframe-config.toml" ''
+    [[fonts]]
+    family = "JetBrainsMono Nerd Font"
+    files = [
+      "${fontDir}/JetBrainsMonoNerdFont-Regular.ttf",
+      "${fontDir}/JetBrainsMonoNerdFont-Bold.ttf",
+      "${fontDir}/JetBrainsMonoNerdFont-Italic.ttf",
+      "${fontDir}/JetBrainsMonoNerdFont-BoldItalic.ttf",
+    ]
+  '';
 in
-test
+pkgs.runCommand "repx-doc-assets"
+  {
+    nativeBuildInputs = [
+      repx
+      pkgs.graphviz
+      termframe
+    ];
+  }
+  ''
+    mkdir -p $out
+
+    export HOME=$(mktemp -d)
+
+    echo "Generating topology SVGs..."
+    repx viz --lab ${simple-lab} --output $out/simple-topology --format svg
+    repx viz --lab ${sweep-lab} --output $out/parameter-sweep-topology --format svg
+
+    echo "Generating TUI screenshot..."
+    repx tui --lab ${simple-lab} --screenshot /tmp/tui-ansi.txt
+    cat /tmp/tui-ansi.txt | termframe \
+      --config - \
+      --config ${termframeConfig} \
+      --theme dracula \
+      --font-family "JetBrainsMono Nerd Font" \
+      --font-size 11 \
+      --line-height 1.2 \
+      --width 120 \
+      --height 36 \
+      --mode dark \
+      --embed-fonts \
+      --subset-fonts \
+      --window \
+      --window-shadow \
+      --output $out/simple-tui.svg
+  ''

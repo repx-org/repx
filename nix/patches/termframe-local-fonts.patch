@@ -1,0 +1,46 @@
+diff --git a/src/font.rs b/src/font.rs
+index 4c3d961..ea01baf 100644
+--- a/src/font.rs
++++ b/src/font.rs
+@@ -156,14 +156,6 @@ impl Location {
+             Err(_) => Self::File(PathBuf::from(s.as_ref())),
+         }
+     }
+-
+-    /// Get the URL if the location is a URL.
+-    pub fn url(&self) -> Option<&Url> {
+-        match self {
+-            Self::Url(url) => Some(url),
+-            Self::File(_) => None,
+-        }
+-    }
+ }
+ 
+ impl std::fmt::Display for Location {
+diff --git a/src/main.rs b/src/main.rs
+index 41b5fa5..7256848 100644
+--- a/src/main.rs
++++ b/src/main.rs
+@@ -283,8 +283,8 @@ impl App {
+         let mut fonts = Vec::new();
+ 
+         for (family, file) in &files {
+-            let font = file.font().unwrap();
+-            let url = file.location().url().unwrap().to_string();
++            let font = file.font()?;
++            let url = file.location().to_string();
+             fonts.push((url, family, font));
+         }
+ 
+diff --git a/src/render/svg.rs b/src/render/svg.rs
+index af924d9..50d9f00 100644
+--- a/src/render/svg.rs
++++ b/src/render/svg.rs
+@@ -265,6 +265,7 @@ impl SvgRenderer {
+                             }
+                         } else {
+                             unresolved.insert(ch);
++                            text_length_needed = true;
+                         }
+                     }
+ 
