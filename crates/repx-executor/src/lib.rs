@@ -6,7 +6,9 @@ mod util;
 pub use context::RuntimeContext;
 pub use error::{ExecutorError, Result};
 pub use runtime::{BwrapRuntime, ContainerRuntime, NativeRuntime, Runtime};
-pub use util::{extract_image_hash, is_binary_allowed, ALLOWED_SYSTEM_BINARIES};
+pub use util::{
+    extract_image_hash, is_binary_allowed, validate_image_identifier, ALLOWED_SYSTEM_BINARIES,
+};
 
 use repx_core::{constants::logs, model::JobId};
 use std::path::{Path, PathBuf};

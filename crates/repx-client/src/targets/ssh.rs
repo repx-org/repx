@@ -597,8 +597,8 @@ impl ArtifactSync for SshTarget {
                     image_path.display()
                 )))
             })?;
-        let image_hash_name = super::common::parse_image_hash(image_filename);
-        let remote_image_dir = remote_images.join(image_hash_name);
+        let image_hash_name = super::common::parse_image_hash(image_filename)?;
+        let remote_image_dir = remote_images.join(&image_hash_name);
 
         let manifest_content = serde_json::to_string(&vec![super::common::ManifestEntry {
             layers: layers.clone(),
@@ -637,7 +637,7 @@ impl ArtifactSync for SshTarget {
             .and(
                 RemoteCommand::new("ln")
                     .arg("-sfn")
-                    .arg(image_hash_name)
+                    .arg(&image_hash_name)
                     .arg(image_tag),
             );
         self.run_command("sh", &["-c", &ln_cmd.to_shell_string()])?;
