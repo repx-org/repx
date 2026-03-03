@@ -1,7 +1,7 @@
 # RepX TUI Reference
 
 <div align="center">
-  <img src="/images/simple-tui.png" alt="RepX TUI" />
+  <img src="/images/simple-tui.svg" alt="RepX TUI" />
 </div>
 
 The `repx-tui` provides an interactive dashboard to monitor jobs, logs, and artifacts.

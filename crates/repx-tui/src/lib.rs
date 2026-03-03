@@ -2,6 +2,7 @@ pub mod app;
 pub mod error;
 pub mod event;
 pub mod model;
+pub mod screenshot;
 pub mod style;
 pub mod tree_view;
 pub mod ui;
@@ -43,9 +44,22 @@ use std::{
 pub struct TuiArgs {
     #[arg(short, long, global = true, default_value = "./result")]
     pub lab: PathBuf,
+
+    #[arg(long)]
+    pub screenshot: Option<PathBuf>,
+
+    #[arg(long, default_value = "120")]
+    pub screenshot_width: u16,
+
+    #[arg(long, default_value = "36")]
+    pub screenshot_height: u16,
 }
 
 pub fn run(args: TuiArgs) -> Result<(), TuiError> {
+    if let Some(ref output_path) = args.screenshot {
+        return run_screenshot(&args, output_path.clone());
+    }
+
     let original_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |panic_info| {
         let _ = disable_raw_mode();
@@ -368,4 +382,123 @@ fn restore_terminal(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> io::Re
         DisableMouseCapture
     )?;
     terminal.show_cursor()
+}
+
+fn run_screenshot(args: &TuiArgs, output_path: PathBuf) -> Result<(), TuiError> {
+    use ratatui::backend::TestBackend;
+
+    eprintln!("Rendering headless screenshot...");
+
+    repx_core::logging::set_log_level_from_env();
+    let logging_config = config::load_config().map(|c| c.logging).unwrap_or_default();
+    if let Err(e) = repx_core::logging::init_tui_logger(&logging_config) {
+        eprintln!("[WARN] Failed to initialize logger: {}", e);
+    }
+
+    let lab_path = fs::canonicalize(&args.lab).map_err(|e| TuiError::PathIo {
+        path: args.lab.clone(),
+        source: e,
+    })?;
+    let config = config::load_config()?;
+    let theme = theme::load_theme(&config)?;
+    let resources = config::load_resources(None)?;
+    let client =
+        Arc::new(
+            Client::new(config.clone(), lab_path).map_err(|e| TuiError::ExecutionFailed {
+                message: "TUI failed to initialize client".to_string(),
+                log_path: None,
+                log_summary: e.to_string(),
+            })?,
+        );
+
+    let (status_tx, status_rx) = mpsc::channel();
+    let (log_cmd_tx, _log_cmd_rx) = mpsc::channel::<app::LogPollerCommand>();
+    let (log_result_tx, log_result_rx) = mpsc::channel();
+    let (_submission_tx_unused, submission_rx) = mpsc::channel::<app::SubmissionResult>();
+    let (submission_tx, _submission_rx_unused) = mpsc::channel::<app::SubmissionResult>();
+    let (_system_log_tx, system_log_rx) = mpsc::channel::<String>();
+
+    let initial_active_target = client
+        .config()
+        .submission_target
+        .clone()
+        .unwrap_or_else(|| targets::LOCAL.to_string());
+
+    let initial_target_config = client.config().targets.get(&initial_active_target);
+    let initial_active_scheduler = initial_target_config
+        .and_then(|t| t.default_scheduler.map(|s| s.to_string()))
+        .or_else(|| client.config().default_scheduler.map(|s| s.to_string()))
+        .unwrap_or_else(|| targets::LOCAL.to_string());
+
+    let active_target = Arc::new(Mutex::new(initial_active_target.clone()));
+    let active_scheduler = Arc::new(Mutex::new(initial_active_scheduler));
+
+    let scheduler_type: Option<repx_core::model::SchedulerType> = client
+        .config()
+        .default_scheduler
+        .map(|s| s.to_string())
+        .and_then(|s| s.parse().ok());
+    if let Ok(statuses) =
+        client.get_statuses_for_active_target(&initial_active_target, scheduler_type)
+    {
+        let _ = status_tx.send(Ok((initial_active_target.clone(), statuses)));
+    }
+
+    let mut app = App::new(
+        client,
+        theme,
+        status_rx,
+        log_cmd_tx,
+        log_result_rx,
+        submission_tx,
+        submission_rx,
+        system_log_rx,
+        resources,
+        initial_active_target,
+        active_target,
+        active_scheduler,
+    )
+    .map_err(|e| TuiError::ExecutionFailed {
+        message: "TUI app initialization failed".to_string(),
+        log_path: None,
+        log_summary: e.to_string(),
+    })?;
+
+    app.check_for_updates();
+    app.on_tick();
+
+    let width = args.screenshot_width;
+    let height = args.screenshot_height;
+    let backend = TestBackend::new(width, height);
+    let mut terminal =
+        Terminal::new(backend).map_err(|_| TuiError::Io(io::Error::other("TestBackend init")))?;
+
+    terminal
+        .draw(|f| ui::draw(f, &mut app))
+        .map_err(|_| TuiError::Io(io::Error::other("TestBackend draw")))?;
+
+    let buf = terminal.backend().buffer().clone();
+
+    let ansi = screenshot::buffer_to_ansi(&buf);
+
+    if let Some(parent) = output_path.parent() {
+        if !parent.as_os_str().is_empty() {
+            fs::create_dir_all(parent).map_err(|e| TuiError::PathIo {
+                path: parent.to_path_buf(),
+                source: e,
+            })?;
+        }
+    }
+    fs::write(&output_path, &ansi).map_err(|e| TuiError::PathIo {
+        path: output_path.clone(),
+        source: e,
+    })?;
+
+    eprintln!("Screenshot saved to: {}", output_path.display());
+    drop(status_tx);
+    drop(log_result_tx);
+    drop(_submission_tx_unused);
+    drop(_system_log_tx);
+
+    Ok(())
 }

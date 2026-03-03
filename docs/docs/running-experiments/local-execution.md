@@ -65,7 +65,7 @@ Job outputs are organized under the configured `base_path`:
 | `FAIL` | Job terminated with non-zero exit code |
 
 <div align="center">
-  <img src="/images/simple-tui.png" alt="Execution TUI" />
+  <img src="/images/simple-tui.svg" alt="Execution TUI" />
 </div>
 
 ## Incremental Execution

@@ -52,7 +52,7 @@ The lab defines two runs:
     You can inspect the generated topology using the TUI or the `viz` command.
     
     <div align="center">
-      <img src="/images/simple-tui.png" alt="Simple Pipeline TUI" />
+      <img src="/images/simple-tui.svg" alt="Simple Pipeline TUI" />
     </div>
 
 3.  **Run the Simulation:**
