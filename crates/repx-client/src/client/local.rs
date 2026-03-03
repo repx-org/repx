@@ -665,6 +665,7 @@ pub fn submit_local_batch_run(
 ) -> Result<String> {
     let total_jobs = jobs_in_batch.len();
     send(ClientEvent::SubmittingJobs { total: total_jobs });
+    let mut succeeded_work_units: usize = 0;
 
     let all_deps: HashSet<JobId> = jobs_in_batch
         .values()
@@ -814,6 +815,8 @@ pub fn submit_local_batch_run(
         }
     }
 
+    let mut total_work_units = units_left.len();
+
     let mut resource_tracker = ResourceTracker::new();
     let mut active_handles: Vec<(
         WorkUnitId,
@@ -843,11 +846,33 @@ pub fn submit_local_batch_run(
                         let stderr = String::from_utf8_lossy(&output.stderr).to_string();
                         if options.continue_on_failure {
                             failed_units.push((unit_id.clone(), stderr));
+                            for (jid, comp_uid) in &completion_map {
+                                if comp_uid == &unit_id && jobs_in_batch.contains_key(jid) {
+                                    send(ClientEvent::JobFailed {
+                                        job_id: jid.clone(),
+                                    });
+                                }
+                            }
+                            let failed_job_id = work_units
+                                .get(&unit_id)
+                                .map(|u| u.job_id.clone());
                             for (candidate_id, candidate) in &work_units {
                                 if units_left.contains(candidate_id)
                                     && candidate.deps.contains(&unit_id)
                                 {
                                     blocked_units.insert(candidate_id.clone());
+                                    if let Some(ref blocked_by_jid) = failed_job_id {
+                                        for (jid, comp_uid) in &completion_map {
+                                            if comp_uid == candidate_id
+                                                && jobs_in_batch.contains_key(jid)
+                                            {
+                                                send(ClientEvent::JobBlocked {
+                                                    job_id: jid.clone(),
+                                                    blocked_by: blocked_by_jid.clone(),
+                                                });
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         } else {
@@ -858,6 +883,7 @@ pub fn submit_local_batch_run(
                         }
                     } else {
                         completed.insert(unit_id.clone());
+                        succeeded_work_units += 1;
 
                         let unit = work_units.get(&unit_id);
                         if let Some(u) = unit {
@@ -880,10 +906,12 @@ pub fn submit_local_batch_run(
                                     image_tag,
                                     &options.resources,
                                 )?;
+                                let num_expanded = expanded.len();
                                 for (new_id, new_unit) in expanded {
                                     units_left.insert(new_id.clone());
                                     work_units.insert(new_id, new_unit);
                                 }
+                                total_work_units += num_expanded;
                             }
                         }
 
@@ -898,7 +926,14 @@ pub fn submit_local_batch_run(
                 }
                 Err(e) => {
                     if options.continue_on_failure {
-                        failed_units.push((unit_id, format!("Process panicked: {:?}", e)));
+                        failed_units.push((unit_id.clone(), format!("Process panicked: {:?}", e)));
+                        for (jid, comp_uid) in &completion_map {
+                            if comp_uid == &unit_id && jobs_in_batch.contains_key(jid) {
+                                send(ClientEvent::JobFailed {
+                                    job_id: jid.clone(),
+                                });
+                            }
+                        }
                     } else {
                         return Err(ClientError::Config(ConfigError::CommandFailed(format!(
                             "Process panicked: {:?}",
@@ -919,45 +954,21 @@ pub fn submit_local_batch_run(
         blocked_units.clear();
 
         if any_finished {
-            let succeeded_count = completed_job_ids
-                .iter()
-                .chain(
-                    completion_map
-                        .iter()
-                        .filter(|(_, uid)| completed.contains(uid))
-                        .map(|(jid, _)| jid),
-                )
-                .filter(|id| jobs_in_batch.contains_key(id))
-                .collect::<HashSet<_>>()
-                .len();
             let failed_count = failed_units.len();
             let running_count = active_handles.len();
-            let failed_ids_set: HashSet<&WorkUnitId> =
-                failed_units.iter().map(|(id, _)| id).collect();
-            let blocked_count = work_units
-                .iter()
-                .filter(|(uid, unit)| {
-                    units_left.contains(uid) && unit.deps.iter().any(|d| failed_ids_set.contains(d))
-                })
-                .filter_map(|(_, unit)| {
-                    completion_map
-                        .iter()
-                        .find(|(_, cuid)| **cuid == WorkUnitId::from_job(&unit.job_id))
-                        .map(|(jid, _)| jid)
-                })
-                .filter(|id| jobs_in_batch.contains_key(id))
-                .collect::<HashSet<_>>()
-                .len();
-            let pending_count = total_jobs
-                .saturating_sub(succeeded_count + failed_count + running_count + blocked_count);
+            let blocked_count = total_work_units
+                .saturating_sub(
+                    units_left.len() + running_count + succeeded_work_units + failed_count,
+                );
+            let pending_count = units_left.len();
 
             send(ClientEvent::LocalProgress {
                 running: running_count,
-                succeeded: succeeded_count,
+                succeeded: succeeded_work_units,
                 failed: failed_count,
                 blocked: blocked_count,
                 pending: pending_count,
-                total: total_jobs,
+                total: total_work_units,
             });
         }
 
@@ -1020,7 +1031,7 @@ pub fn submit_local_batch_run(
                 send(ClientEvent::JobStarted {
                     job_id: unit.job_id.clone(),
                     pid,
-                    total: total_jobs,
+                    total: total_work_units,
                     current: submitted_count,
                 });
 
@@ -1044,8 +1055,8 @@ pub fn submit_local_batch_run(
     }
 
     Ok(format!(
-        "Successfully executed {} jobs locally.",
-        total_jobs
+        "Successfully executed {} work unit(s) locally.",
+        succeeded_work_units
     ))
 }
 
