@@ -336,6 +336,6 @@ pub fn save_config(config: &Config) -> Result<(), ConfigError> {
     let config_path = xdg_dirs.place_config_file(CONFIG_FILE_NAME)?;
 
     let toml_string = toml::to_string_pretty(config).map_err(std::io::Error::other)?;
-    fs::write(config_path, toml_string)?;
+    crate::fs_utils::write_atomic(&config_path, toml_string.as_bytes())?;
     Ok(())
 }
