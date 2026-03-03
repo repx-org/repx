@@ -1,4 +1,4 @@
-use super::{Client, ClientEvent, SubmitOptions};
+use super::{Client, ClientEvent, SubmitOptions, WorkUnitPhase};
 use crate::error::{ClientError, Result};
 use crate::resources;
 use crate::targets::Target;
@@ -271,6 +271,27 @@ impl WorkUnitId {
             &self.0[..40]
         } else {
             &self.0
+        }
+    }
+
+    fn phase(&self) -> Option<WorkUnitPhase> {
+        if self.0.ends_with("::scatter") {
+            Some(WorkUnitPhase::Scatter)
+        } else if self.0.ends_with("::gather") {
+            Some(WorkUnitPhase::Gather)
+        } else if let Some(suffix) = self.0.split_once("::b") {
+            let rest = suffix.1;
+            if let Some((branch_str, step_part)) = rest.split_once("::s-") {
+                if let Ok(branch) = branch_str.parse::<usize>() {
+                    return Some(WorkUnitPhase::Step {
+                        branch,
+                        step: step_part.to_string(),
+                    });
+                }
+            }
+            None
+        } else {
+            None
         }
     }
 }
@@ -842,17 +863,33 @@ pub fn submit_local_batch_run(
             match handle.join() {
                 Ok(output_res) => {
                     let output = output_res.map_err(|e| ClientError::Config(ConfigError::Io(e)))?;
+                    let phase = unit_id.phase();
+
                     if !output.status.success() {
                         let stderr = String::from_utf8_lossy(&output.stderr).to_string();
                         if options.continue_on_failure {
                             failed_units.push((unit_id.clone(), stderr));
-                            for (jid, comp_uid) in &completion_map {
-                                if comp_uid == &unit_id && jobs_in_batch.contains_key(jid) {
-                                    send(ClientEvent::JobFailed {
-                                        job_id: jid.clone(),
-                                    });
+
+                            let reported_via_completion_map =
+                                completion_map.iter().any(|(jid, comp_uid)| {
+                                    comp_uid == &unit_id && jobs_in_batch.contains_key(jid)
+                                });
+                            if reported_via_completion_map {
+                                for (jid, comp_uid) in &completion_map {
+                                    if comp_uid == &unit_id && jobs_in_batch.contains_key(jid) {
+                                        send(ClientEvent::JobFailed {
+                                            job_id: jid.clone(),
+                                            phase: phase.clone(),
+                                        });
+                                    }
                                 }
+                            } else if let Some(u) = work_units.get(&unit_id) {
+                                send(ClientEvent::JobFailed {
+                                    job_id: u.job_id.clone(),
+                                    phase: phase.clone(),
+                                });
                             }
+
                             let failed_job_id = work_units.get(&unit_id).map(|u| u.job_id.clone());
                             for (candidate_id, candidate) in &work_units {
                                 if units_left.contains(candidate_id)
@@ -860,15 +897,30 @@ pub fn submit_local_batch_run(
                                 {
                                     blocked_units.insert(candidate_id.clone());
                                     if let Some(ref blocked_by_jid) = failed_job_id {
-                                        for (jid, comp_uid) in &completion_map {
-                                            if comp_uid == candidate_id
-                                                && jobs_in_batch.contains_key(jid)
-                                            {
-                                                send(ClientEvent::JobBlocked {
-                                                    job_id: jid.clone(),
-                                                    blocked_by: blocked_by_jid.clone(),
-                                                });
+                                        let blocked_phase = candidate_id.phase();
+                                        let reported_via_completion_map =
+                                            completion_map.iter().any(|(jid, comp_uid)| {
+                                                comp_uid == candidate_id
+                                                    && jobs_in_batch.contains_key(jid)
+                                            });
+                                        if reported_via_completion_map {
+                                            for (jid, comp_uid) in &completion_map {
+                                                if comp_uid == candidate_id
+                                                    && jobs_in_batch.contains_key(jid)
+                                                {
+                                                    send(ClientEvent::JobBlocked {
+                                                        job_id: jid.clone(),
+                                                        blocked_by: blocked_by_jid.clone(),
+                                                        phase: blocked_phase.clone(),
+                                                    });
+                                                }
                                             }
+                                        } else {
+                                            send(ClientEvent::JobBlocked {
+                                                job_id: candidate.job_id.clone(),
+                                                blocked_by: blocked_by_jid.clone(),
+                                                phase: blocked_phase.clone(),
+                                            });
                                         }
                                     }
                                 }
@@ -913,24 +965,45 @@ pub fn submit_local_batch_run(
                             }
                         }
 
-                        for (jid, comp_uid) in &completion_map {
-                            if comp_uid == &unit_id && jobs_in_batch.contains_key(jid) {
-                                send(ClientEvent::JobSucceeded {
-                                    job_id: jid.clone(),
-                                });
+                        let reported_via_completion_map =
+                            completion_map.iter().any(|(jid, comp_uid)| {
+                                comp_uid == &unit_id && jobs_in_batch.contains_key(jid)
+                            });
+                        if reported_via_completion_map {
+                            for (jid, comp_uid) in &completion_map {
+                                if comp_uid == &unit_id && jobs_in_batch.contains_key(jid) {
+                                    send(ClientEvent::JobSucceeded {
+                                        job_id: jid.clone(),
+                                        phase: phase.clone(),
+                                    });
+                                }
                             }
                         }
                     }
                 }
                 Err(e) => {
                     if options.continue_on_failure {
+                        let phase = unit_id.phase();
                         failed_units.push((unit_id.clone(), format!("Process panicked: {:?}", e)));
-                        for (jid, comp_uid) in &completion_map {
-                            if comp_uid == &unit_id && jobs_in_batch.contains_key(jid) {
-                                send(ClientEvent::JobFailed {
-                                    job_id: jid.clone(),
-                                });
+
+                        let reported_via_completion_map =
+                            completion_map.iter().any(|(jid, comp_uid)| {
+                                comp_uid == &unit_id && jobs_in_batch.contains_key(jid)
+                            });
+                        if reported_via_completion_map {
+                            for (jid, comp_uid) in &completion_map {
+                                if comp_uid == &unit_id && jobs_in_batch.contains_key(jid) {
+                                    send(ClientEvent::JobFailed {
+                                        job_id: jid.clone(),
+                                        phase: phase.clone(),
+                                    });
+                                }
                             }
+                        } else if let Some(u) = work_units.get(&unit_id) {
+                            send(ClientEvent::JobFailed {
+                                job_id: u.job_id.clone(),
+                                phase: phase.clone(),
+                            });
                         }
                     } else {
                         return Err(ClientError::Config(ConfigError::CommandFailed(format!(
@@ -1030,6 +1103,7 @@ pub fn submit_local_batch_run(
                     pid,
                     total: total_work_units,
                     current: submitted_count,
+                    phase: uid.phase(),
                 });
 
                 let handle = thread::spawn(move || child.wait_with_output());

@@ -1,6 +1,6 @@
 use colored::Colorize;
 use indicatif::{ProgressBar, ProgressStyle};
-use repx_client::{ClientEvent, SubmitOptions};
+use repx_client::{ClientEvent, SubmitOptions, WorkUnitPhase};
 use repx_core::{
     config::{Config, Resources},
     errors::ConfigError,
@@ -14,6 +14,13 @@ use std::thread;
 use std::time::Duration;
 
 use crate::{cli::RunArgs, commands::AppContext, error::CliError};
+
+fn format_phase_suffix(phase: &Option<WorkUnitPhase>) -> String {
+    match phase {
+        Some(p) => format!(" [{}]", p).dimmed().to_string(),
+        None => String::new(),
+    }
+}
 
 #[allow(clippy::expect_used)]
 pub fn handle_run(
@@ -138,24 +145,49 @@ pub fn handle_run(
                 pid,
                 total,
                 current,
+                phase,
             } => {
+                let phase_suffix = format_phase_suffix(&phase);
                 println!(
-                    "  {} [{}/{}] {} (PID {})",
+                    "  {} [{}/{}] {}{} (PID {})",
                     ">>".cyan(),
                     current,
                     total,
                     job_id.to_string().dimmed(),
+                    phase_suffix,
                     pid,
                 );
             }
-            ClientEvent::JobSucceeded { job_id } => {
-                println!("  {} {}", "OK".green().bold(), job_id.to_string().dimmed(),);
+            ClientEvent::JobSucceeded { job_id, phase } => {
+                let phase_suffix = format_phase_suffix(&phase);
+                println!(
+                    "  {} {}{}",
+                    "OK".green().bold(),
+                    job_id.to_string().dimmed(),
+                    phase_suffix,
+                );
             }
-            ClientEvent::JobFailed { job_id } => {
-                println!("  {} {}", "FAIL".red().bold(), job_id.to_string().dimmed(),);
+            ClientEvent::JobFailed { job_id, phase } => {
+                let phase_suffix = format_phase_suffix(&phase);
+                println!(
+                    "  {} {}{}",
+                    "FAIL".red().bold(),
+                    job_id.to_string().dimmed(),
+                    phase_suffix,
+                );
             }
-            ClientEvent::JobBlocked { job_id, blocked_by } => {
-                tracing::debug!("Job {} blocked by failed dependency {}", job_id, blocked_by);
+            ClientEvent::JobBlocked {
+                job_id,
+                blocked_by,
+                phase,
+            } => {
+                let phase_suffix = format_phase_suffix(&phase);
+                tracing::debug!(
+                    "Job {}{} blocked by failed dependency {}",
+                    job_id,
+                    phase_suffix,
+                    blocked_by,
+                );
             }
             ClientEvent::LocalProgress {
                 running,
