@@ -1927,7 +1927,7 @@ checksum = "dc897dd8d9e8bd1ed8cdad82b5966c3e0ecae09fb1907d58efaa013543185d0a"
 
 [[package]]
 name = "repx-cli"
-version = "0.3.1"
+version = "0.4.0"
 dependencies = [
  "clap",
  "clap_complete",
@@ -1941,7 +1941,7 @@ dependencies = [
 
 [[package]]
 name = "repx-client"
-version = "0.3.1"
+version = "0.4.0"
 dependencies = [
  "chrono",
  "comfy-table",
@@ -1963,7 +1963,7 @@ dependencies = [
 
 [[package]]
 name = "repx-core"
-version = "0.3.1"
+version = "0.4.0"
 dependencies = [
  "chrono",
  "rayon",
@@ -1982,7 +1982,7 @@ dependencies = [
 
 [[package]]
 name = "repx-executor"
-version = "0.3.1"
+version = "0.4.0"
 dependencies = [
  "chrono",
  "nix 0.29.0",
@@ -1998,7 +1998,7 @@ dependencies = [
 
 [[package]]
 name = "repx-runner"
-version = "0.3.1"
+version = "0.4.0"
 dependencies = [
  "assert_cmd",
  "clap",
@@ -2024,7 +2024,7 @@ dependencies = [
 
 [[package]]
 name = "repx-test-utils"
-version = "0.3.1"
+version = "0.4.0"
 dependencies = [
  "serde_json",
  "tempfile",
@@ -2032,7 +2032,7 @@ dependencies = [
 
 [[package]]
 name = "repx-tui"
-version = "0.3.1"
+version = "0.4.0"
 dependencies = [
  "arboard",
  "chrono",
@@ -2050,7 +2050,7 @@ dependencies = [
 
 [[package]]
 name = "repx-viz"
-version = "0.3.1"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "repx-core",

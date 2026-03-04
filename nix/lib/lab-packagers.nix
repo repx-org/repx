@@ -4,7 +4,7 @@
   lab_version,
 }:
 let
-  repxVersion = "0.3.1";
+  repxVersion = "0.4.0";
 
   rsyncStatic =
     (pkgs.pkgsStatic.rsync.override {
