@@ -763,7 +763,7 @@ impl LocalTarget {
         let artifacts_dir = self.artifacts_base_path();
         let outputs_dir = self.base_path().join(dirs::OUTPUTS);
 
-        if let Ok(lab) = repx_core::lab::load_from_path(&canonical) {
+        if let Ok(lab) = repx_core::lab::load_from_path_unchecked(&canonical) {
             for ref_file in &lab.referenced_files {
                 let art_path = artifacts_dir.join(ref_file);
                 total += dir_size_or_file(&art_path);
