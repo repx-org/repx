@@ -510,7 +510,7 @@ fn test_gc_list_shows_auto_and_pinned() {
         .expect("registering gc root must succeed");
 
     let roots = target
-        .list_gc_roots()
+        .list_gc_roots(false)
         .expect("listing gc roots must succeed");
     assert!(!roots.is_empty(), "Should have at least 2 roots");
 
@@ -531,7 +531,7 @@ fn test_gc_list_empty() {
     let (_client, target) = make_client_and_target(base_path, &harness.lab_path);
 
     let roots = target
-        .list_gc_roots()
+        .list_gc_roots(false)
         .expect("listing gc roots must succeed");
     assert!(roots.is_empty(), "Should have no roots on fresh setup");
 }
@@ -638,5 +638,298 @@ fn test_pin_overwrite_existing() {
     assert_eq!(
         count, 1,
         "Should have exactly one pinned root after overwrite"
+    );
+}
+
+#[test]
+fn test_gc_dry_run_preserves_all() {
+    let harness = TestHarness::new();
+    let base_path = &harness.cache_dir;
+    let artifacts_dir = base_path.join("artifacts");
+    let outputs_dir = base_path.join("outputs");
+    let gcroots_dir = base_path.join("gcroots");
+
+    fs::create_dir_all(&artifacts_dir).expect("creating artifacts dir must succeed");
+    fs::create_dir_all(&outputs_dir).expect("creating outputs dir must succeed");
+    fs::create_dir_all(&gcroots_dir).expect("creating gcroots dir must succeed");
+
+    let dead_artifact = artifacts_dir.join("dead-hash-dry");
+    fs::create_dir_all(&dead_artifact).expect("creating dead artifact dir must succeed");
+    fs::write(dead_artifact.join("file.txt"), "data").expect("writing file must succeed");
+
+    let dead_output = outputs_dir.join("job-orphan-dry");
+    fs::create_dir_all(&dead_output).expect("creating dead output dir must succeed");
+    fs::write(dead_output.join("result.txt"), "result").expect("writing file must succeed");
+
+    let mut cmd = harness.cmd();
+    cmd.arg("internal-gc")
+        .arg("--base-path")
+        .arg(base_path)
+        .arg("--dry-run");
+
+    let output = cmd.output().expect("executing internal-gc must succeed");
+    assert!(output.status.success());
+
+    assert!(
+        dead_artifact.exists(),
+        "Dry-run must NOT delete dead artifacts"
+    );
+    assert!(dead_output.exists(), "Dry-run must NOT delete dead outputs");
+}
+
+#[test]
+fn test_gc_dry_run_prints_summary() {
+    let harness = TestHarness::new();
+    let base_path = &harness.cache_dir;
+    let artifacts_dir = base_path.join("artifacts");
+    let outputs_dir = base_path.join("outputs");
+    let gcroots_dir = base_path.join("gcroots");
+
+    fs::create_dir_all(&artifacts_dir).expect("creating artifacts dir must succeed");
+    fs::create_dir_all(&outputs_dir).expect("creating outputs dir must succeed");
+    fs::create_dir_all(&gcroots_dir).expect("creating gcroots dir must succeed");
+
+    let dead_artifact = artifacts_dir.join("dead-dry-summary");
+    fs::create_dir_all(&dead_artifact).expect("creating dead artifact dir must succeed");
+    fs::write(dead_artifact.join("data.bin"), "some data").expect("writing file must succeed");
+
+    let dead_output = outputs_dir.join("job-dry-summary");
+    fs::create_dir_all(&dead_output).expect("creating dead output dir must succeed");
+
+    let mut cmd = harness.cmd();
+    cmd.arg("internal-gc")
+        .arg("--base-path")
+        .arg(base_path)
+        .arg("--dry-run");
+
+    let output = cmd.output().expect("executing internal-gc must succeed");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    assert!(output.status.success());
+    assert!(
+        stdout.contains("Would delete"),
+        "Dry-run stdout should contain 'Would delete'. Got: {}",
+        stdout
+    );
+    assert!(
+        stdout.contains("Would free"),
+        "Dry-run stdout should contain 'Would free'. Got: {}",
+        stdout
+    );
+}
+
+#[test]
+fn test_gc_prints_freed_summary() {
+    let harness = TestHarness::new();
+    let base_path = &harness.cache_dir;
+    let artifacts_dir = base_path.join("artifacts");
+    let outputs_dir = base_path.join("outputs");
+    let gcroots_dir = base_path.join("gcroots");
+
+    fs::create_dir_all(&artifacts_dir).expect("creating artifacts dir must succeed");
+    fs::create_dir_all(&outputs_dir).expect("creating outputs dir must succeed");
+    fs::create_dir_all(&gcroots_dir).expect("creating gcroots dir must succeed");
+
+    let dead_artifact = artifacts_dir.join("dead-freed-summary");
+    fs::create_dir_all(&dead_artifact).expect("creating dead artifact dir must succeed");
+    fs::write(dead_artifact.join("big_file"), "x".repeat(1024)).expect("writing file must succeed");
+
+    let mut cmd = harness.cmd();
+    cmd.arg("internal-gc").arg("--base-path").arg(base_path);
+
+    let output = cmd.output().expect("executing internal-gc must succeed");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    assert!(output.status.success());
+    assert!(
+        stdout.contains("Deleted") && stdout.contains("Freed"),
+        "Normal GC stdout should contain 'Deleted' and 'Freed'. Got: {}",
+        stdout
+    );
+}
+
+#[test]
+fn test_gc_nothing_to_collect_message() {
+    let harness = TestHarness::new();
+    let base_path = &harness.cache_dir;
+    let gcroots_dir = base_path.join("gcroots");
+
+    fs::create_dir_all(&gcroots_dir).expect("creating gcroots dir must succeed");
+
+    let fresh_base = harness.cache_dir.join("fresh-gc-base");
+    fs::create_dir_all(fresh_base.join("gcroots")).expect("creating fresh gcroots must succeed");
+
+    let mut cmd = harness.cmd();
+    cmd.arg("internal-gc").arg("--base-path").arg(&fresh_base);
+
+    let output = cmd.output().expect("executing internal-gc must succeed");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    assert!(output.status.success());
+    assert!(
+        stdout.contains("Nothing to collect"),
+        "When nothing to GC, should print 'Nothing to collect'. Got: {}",
+        stdout
+    );
+}
+
+#[test]
+fn test_gc_remove_auto_roots() {
+    use repx_client::Client;
+    use repx_core::config::{Config, Target as TargetConfig};
+    use std::collections::BTreeMap;
+    use std::thread;
+    use std::time::Duration;
+
+    let harness = TestHarness::new();
+    let base_path = &harness.cache_dir;
+    let lab_hash = harness.lab_content_hash();
+
+    let artifacts_dir = base_path.join("artifacts");
+    fs::create_dir_all(&artifacts_dir).expect("creating artifacts dir must succeed");
+    fs::create_dir_all(artifacts_dir.join(&lab_hash)).expect("creating lab hash dir must succeed");
+
+    let target_config = TargetConfig {
+        base_path: base_path.to_path_buf(),
+        address: None,
+        node_local_path: None,
+        default_scheduler: None,
+        default_execution_type: None,
+        mount_host_paths: false,
+        local: None,
+        slurm: None,
+        mount_paths: vec![],
+    };
+    let config = Config {
+        targets: BTreeMap::from([("local".to_string(), target_config)]),
+        ..Default::default()
+    };
+
+    let client =
+        Client::new(config, harness.lab_path.clone()).expect("creating client must succeed");
+    let target = client
+        .get_target("local")
+        .expect("getting local target must succeed");
+
+    for _ in 0..3 {
+        target
+            .register_gc_root("proj-rm-auto", &lab_hash)
+            .expect("registering gc root must succeed");
+        thread::sleep(Duration::from_millis(1100));
+    }
+
+    target
+        .pin_gc_root(&lab_hash, "keep-this")
+        .expect("pinning gc root must succeed");
+
+    let before = target
+        .list_gc_roots(false)
+        .expect("listing gc roots must succeed");
+    let auto_before = before
+        .iter()
+        .filter(|r| matches!(r.kind, repx_client::targets::GcRootKind::Auto))
+        .count();
+    assert!(auto_before >= 3, "Should have at least 3 auto roots");
+
+    let removed = target
+        .remove_auto_roots()
+        .expect("removing auto roots must succeed");
+    assert!(removed >= 3, "Should have removed at least 3 auto roots");
+
+    let after = target
+        .list_gc_roots(false)
+        .expect("listing gc roots must succeed");
+    let auto_after = after
+        .iter()
+        .filter(|r| matches!(r.kind, repx_client::targets::GcRootKind::Auto))
+        .count();
+    assert_eq!(auto_after, 0, "Should have 0 auto roots after remove");
+
+    let pinned_after = after
+        .iter()
+        .filter(|r| matches!(r.kind, repx_client::targets::GcRootKind::Pinned))
+        .count();
+    assert_eq!(
+        pinned_after, 1,
+        "Pinned root should survive remove_auto_roots"
+    );
+}
+
+#[test]
+fn test_gc_list_with_sizes() {
+    let harness = TestHarness::new();
+    let base_path = &harness.cache_dir;
+
+    let lab_hash = harness.lab_content_hash();
+    let (_client, target) = make_client_and_target(base_path, &harness.lab_path);
+
+    target
+        .pin_gc_root(&lab_hash, "sized-pin")
+        .expect("pinning gc root must succeed");
+
+    let roots_no_sizes = target
+        .list_gc_roots(false)
+        .expect("listing gc roots must succeed");
+    assert!(!roots_no_sizes.is_empty());
+    for root in &roots_no_sizes {
+        assert!(
+            root.size_bytes.is_none(),
+            "Without --sizes, size_bytes should be None"
+        );
+    }
+
+    let roots_with_sizes = target
+        .list_gc_roots(true)
+        .expect("listing gc roots must succeed");
+    assert!(!roots_with_sizes.is_empty());
+    for root in &roots_with_sizes {
+        assert!(
+            root.size_bytes.is_some(),
+            "With --sizes, size_bytes should be Some"
+        );
+    }
+}
+
+#[test]
+fn test_gc_pinned_only_then_collect() {
+    let harness = TestHarness::new();
+    let base_path = &harness.cache_dir;
+
+    harness.stage_lab();
+
+    let lab_hash = harness.lab_content_hash();
+    let (_client, target) = make_client_and_target(base_path, &harness.lab_path);
+
+    target
+        .register_gc_root("proj-pinned-only", &lab_hash)
+        .expect("registering gc root must succeed");
+
+    target
+        .pin_gc_root(&lab_hash, "pinned-survivor")
+        .expect("pinning gc root must succeed");
+
+    let dead = base_path.join("artifacts/dead-pinned-only");
+    fs::create_dir_all(&dead).expect("creating dead artifact dir must succeed");
+    fs::write(dead.join("f"), "data").expect("writing file must succeed");
+
+    let removed = target
+        .remove_auto_roots()
+        .expect("removing auto roots must succeed");
+    assert!(removed >= 1, "Should have removed auto roots");
+
+    harness
+        .cmd()
+        .arg("internal-gc")
+        .arg("--base-path")
+        .arg(base_path)
+        .assert()
+        .success();
+
+    assert!(!dead.exists(), "Dead artifact should be collected");
+
+    let pinned_link = base_path.join("gcroots/pinned/pinned-survivor");
+    assert!(
+        pinned_link.symlink_metadata().is_ok(),
+        "Pinned symlink should survive"
     );
 }

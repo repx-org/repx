@@ -193,18 +193,55 @@ pub struct GcArgs {
         help = "The target (must be defined in config.toml)"
     )]
     pub target: Option<String>,
+
+    #[arg(
+        long,
+        global = true,
+        help = "Preview what would be deleted without actually deleting anything"
+    )]
+    pub dry_run: bool,
+
+    #[arg(long, short = 'y', global = true, help = "Skip confirmation prompt")]
+    pub yes: bool,
+
+    #[arg(
+        long,
+        help = "Remove all auto roots before collecting, keeping only explicitly pinned labs"
+    )]
+    pub pinned_only: bool,
 }
 
 #[derive(Subcommand)]
 pub enum GcCommand {
     #[command(about = "List all GC roots (auto and pinned)")]
-    List,
+    List(GcListArgs),
+
+    #[command(about = "Check if the current lab is pinned")]
+    Status,
 
     #[command(about = "Pin a lab to prevent it from being garbage collected")]
     Pin(GcPinArgs),
 
     #[command(about = "Remove a pinned GC root")]
     Unpin(GcUnpinArgs),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum GcKindFilter {
+    Auto,
+    Pinned,
+}
+
+#[derive(Args)]
+pub struct GcListArgs {
+    #[arg(long, help = "Compute and display disk usage for each root")]
+    pub sizes: bool,
+
+    #[arg(long, value_enum, help = "Filter roots by kind")]
+    pub kind: Option<GcKindFilter>,
+
+    #[arg(long, help = "Filter auto roots by project ID (substring match)")]
+    pub project: Option<String>,
 }
 
 #[derive(Args)]
@@ -252,6 +289,9 @@ pub struct TraceParamsArgs {
 pub struct InternalGcArgs {
     #[arg(long)]
     pub base_path: PathBuf,
+
+    #[arg(long, help = "Preview what would be deleted without actually deleting")]
+    pub dry_run: bool,
 }
 
 #[derive(Args)]

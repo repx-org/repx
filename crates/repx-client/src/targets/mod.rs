@@ -234,6 +234,7 @@ pub struct GcRootEntry {
     pub kind: GcRootKind,
     pub target_path: String,
     pub project_id: Option<String>,
+    pub size_bytes: Option<u64>,
 }
 
 impl std::fmt::Display for GcRootKind {
@@ -248,13 +249,15 @@ impl std::fmt::Display for GcRootKind {
 pub trait GcOps: TargetInfo {
     fn register_gc_root(&self, project_id: &str, lab_hash: &str) -> Result<()>;
 
-    fn garbage_collect(&self) -> Result<String>;
+    fn garbage_collect(&self, dry_run: bool) -> Result<String>;
 
     fn pin_gc_root(&self, lab_hash: &str, name: &str) -> Result<()>;
 
     fn unpin_gc_root(&self, name: &str) -> Result<()>;
 
-    fn list_gc_roots(&self) -> Result<Vec<GcRootEntry>>;
+    fn list_gc_roots(&self, compute_sizes: bool) -> Result<Vec<GcRootEntry>>;
+
+    fn remove_auto_roots(&self) -> Result<u64>;
 }
 
 pub trait Target:
