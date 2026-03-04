@@ -21,6 +21,7 @@ tokio = { workspace = true, features = ["rt-multi-thread"] }
 num_cpus = { workspace = true }
 thiserror = { workspace = true }
 ctrlc = { workspace = true }
+walkdir = { workspace = true }
 
 
 [dev-dependencies]

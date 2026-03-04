@@ -1104,7 +1104,7 @@ impl App {
             Some(t) => t,
             None => return false,
         };
-        match target.list_gc_roots() {
+        match target.list_gc_roots(false) {
             Ok(roots) => roots.iter().any(|r| {
                 matches!(r.kind, repx_client::targets::GcRootKind::Pinned)
                     && r.target_path.contains(&self.lab.content_hash)

@@ -14,6 +14,21 @@ use std::{
 };
 use walkdir::WalkDir;
 
+fn dir_size_or_file(path: &Path) -> u64 {
+    if !path.exists() {
+        return 0;
+    }
+    if path.is_file() {
+        return std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
+    }
+    WalkDir::new(path)
+        .into_iter()
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_type().is_file())
+        .map(|e| e.metadata().map(|m| m.len()).unwrap_or(0))
+        .sum()
+}
+
 pub struct LocalTarget {
     pub(crate) name: String,
     pub(crate) config: config::Target,
@@ -502,7 +517,7 @@ impl GcOps for LocalTarget {
         Ok(())
     }
 
-    fn list_gc_roots(&self) -> Result<Vec<super::GcRootEntry>> {
+    fn list_gc_roots(&self, compute_sizes: bool) -> Result<Vec<super::GcRootEntry>> {
         let gcroots_dir = self.base_path().join(repx_core::constants::dirs::GCROOTS);
         let mut entries = Vec::new();
 
@@ -515,11 +530,17 @@ impl GcOps for LocalTarget {
                 let target_path = std::fs::read_link(entry.path())
                     .map(|p| p.to_string_lossy().to_string())
                     .unwrap_or_else(|_| "???".to_string());
+                let size_bytes = if compute_sizes {
+                    self.compute_root_size(&entry.path())
+                } else {
+                    None
+                };
                 entries.push(super::GcRootEntry {
                     name: entry.file_name().to_string_lossy().to_string(),
                     kind: super::GcRootKind::Pinned,
                     target_path,
                     project_id: None,
+                    size_bytes,
                 });
             }
         }
@@ -543,11 +564,17 @@ impl GcOps for LocalTarget {
                     let target_path = std::fs::read_link(link_entry.path())
                         .map(|p| p.to_string_lossy().to_string())
                         .unwrap_or_else(|_| "???".to_string());
+                    let size_bytes = if compute_sizes {
+                        self.compute_root_size(&link_entry.path())
+                    } else {
+                        None
+                    };
                     entries.push(super::GcRootEntry {
                         name: link_entry.file_name().to_string_lossy().to_string(),
                         kind: super::GcRootKind::Auto,
                         target_path,
                         project_id: Some(project_id.clone()),
+                        size_bytes,
                     });
                 }
             }
@@ -557,13 +584,19 @@ impl GcOps for LocalTarget {
         Ok(entries)
     }
 
-    fn garbage_collect(&self) -> Result<String> {
+    fn garbage_collect(&self, dry_run: bool) -> Result<String> {
         let repx_bin = self.deploy_repx_binary()?;
 
-        let output = Command::new(&repx_bin)
-            .arg("internal-gc")
+        let mut cmd = Command::new(&repx_bin);
+        cmd.arg("internal-gc")
             .arg("--base-path")
-            .arg(self.base_path())
+            .arg(self.base_path());
+
+        if dry_run {
+            cmd.arg("--dry-run");
+        }
+
+        let output = cmd
             .output()
             .map_err(|e| ClientError::Config(ConfigError::Io(e)))?;
 
@@ -575,6 +608,45 @@ impl GcOps for LocalTarget {
         }
 
         Ok(String::from_utf8_lossy(&output.stdout).to_string())
+    }
+
+    fn remove_auto_roots(&self) -> Result<u64> {
+        let auto_dir = self
+            .base_path()
+            .join(repx_core::constants::dirs::GCROOTS)
+            .join("auto");
+
+        if !auto_dir.exists() {
+            return Ok(0);
+        }
+
+        let mut removed = 0u64;
+        for project_entry in
+            fs_err::read_dir(&auto_dir).map_err(|e| ClientError::Config(ConfigError::Io(e)))?
+        {
+            let project_entry =
+                project_entry.map_err(|e| ClientError::Config(ConfigError::Io(e)))?;
+            if !project_entry.path().is_dir() {
+                continue;
+            }
+            for link_entry in fs_err::read_dir(project_entry.path())
+                .map_err(|e| ClientError::Config(ConfigError::Io(e)))?
+            {
+                let link_entry = link_entry.map_err(|e| ClientError::Config(ConfigError::Io(e)))?;
+                if let Err(e) = fs_err::remove_file(link_entry.path()) {
+                    tracing::debug!(
+                        "Failed to remove auto GC root '{}': {}",
+                        link_entry.path().display(),
+                        e
+                    );
+                } else {
+                    removed += 1;
+                }
+            }
+            let _ = std::fs::remove_dir(project_entry.path());
+        }
+
+        Ok(removed)
     }
 }
 
@@ -666,6 +738,38 @@ impl LocalTarget {
         Err(ClientError::Config(ConfigError::ManifestNotFound {
             hash: lab_hash.to_string(),
         }))
+    }
+
+    fn compute_root_size(&self, link_path: &Path) -> Option<u64> {
+        let target = std::fs::read_link(link_path).ok()?;
+        let abs_target = if target.is_absolute() {
+            target
+        } else {
+            link_path.parent()?.join(target)
+        };
+        let canonical = std::fs::canonicalize(&abs_target).ok()?;
+
+        let mut total: u64 = 0;
+
+        if let Ok(meta) = std::fs::metadata(&canonical) {
+            total += meta.len();
+        }
+
+        let artifacts_dir = self.artifacts_base_path();
+        let outputs_dir = self.base_path().join(dirs::OUTPUTS);
+
+        if let Ok(lab) = repx_core::lab::load_from_path(&canonical) {
+            for ref_file in &lab.referenced_files {
+                let art_path = artifacts_dir.join(ref_file);
+                total += dir_size_or_file(&art_path);
+            }
+            for job_id in lab.jobs.keys() {
+                let job_out = outputs_dir.join(&job_id.0);
+                total += dir_size_or_file(&job_out);
+            }
+        }
+
+        Some(total)
     }
 
     fn cleanup_old_gc_roots(&self, gcroots_dir: &Path, keep: usize) -> Result<()> {

@@ -1,4 +1,6 @@
-use crate::cli::{GcArgs, GcCommand, GcPinArgs, GcUnpinArgs, InternalGcArgs};
+use crate::cli::{
+    GcArgs, GcCommand, GcKindFilter, GcListArgs, GcPinArgs, GcUnpinArgs, InternalGcArgs,
+};
 use crate::commands::AppContext;
 use crate::error::CliError;
 use repx_core::{config::Config, constants::dirs, errors::DomainError, lab};
@@ -11,9 +13,22 @@ pub fn handle_gc_dispatch(
     context: &AppContext,
     config: &Config,
 ) -> Result<(), CliError> {
+    let dry_run = args.dry_run;
+    let yes = args.yes;
+    let pinned_only = args.pinned_only;
     match args.command {
-        None => handle_gc_collect(args.target.as_deref(), context, config),
-        Some(GcCommand::List) => handle_gc_list(args.target.as_deref(), context),
+        None => handle_gc_collect(
+            args.target.as_deref(),
+            context,
+            config,
+            dry_run,
+            yes,
+            pinned_only,
+        ),
+        Some(GcCommand::List(list_args)) => {
+            handle_gc_list(list_args, args.target.as_deref(), context)
+        }
+        Some(GcCommand::Status) => handle_gc_status(args.target.as_deref(), context),
         Some(GcCommand::Pin(pin_args)) => handle_gc_pin(pin_args, args.target.as_deref(), context),
         Some(GcCommand::Unpin(unpin_args)) => {
             handle_gc_unpin(unpin_args, args.target.as_deref(), context)
@@ -26,14 +41,57 @@ fn handle_gc_collect(
     target_arg: Option<&str>,
     context: &AppContext,
     _config: &Config,
+    dry_run: bool,
+    yes: bool,
+    pinned_only: bool,
 ) -> Result<(), CliError> {
     let target_name = target_arg.unwrap_or(context.submission_target);
-    tracing::info!("Garbage collecting target '{}'...", target_name);
 
     let target = context
         .client
         .get_target(target_name)
         .ok_or_else(|| CliError::Domain(DomainError::TargetNotFound(target_name.to_string())))?;
+
+    if !yes && !dry_run {
+        let action = if pinned_only {
+            format!(
+                "This will remove all auto GC roots and garbage collect on target '{}', keeping only pinned labs.",
+                target_name
+            )
+        } else {
+            format!(
+                "This will garbage collect unreferenced data on target '{}'.",
+                target_name
+            )
+        };
+        eprint!("{} Continue? [y/N] ", action);
+        let mut input = String::new();
+        if std::io::stdin().read_line(&mut input).is_err()
+            || !input.trim().eq_ignore_ascii_case("y")
+        {
+            println!("Aborted.");
+            return Ok(());
+        }
+    }
+
+    if pinned_only {
+        let removed = target
+            .remove_auto_roots()
+            .map_err(|e| CliError::ExecutionFailed {
+                message: "Failed to remove auto GC roots".to_string(),
+                log_path: None,
+                log_summary: e.to_string(),
+            })?;
+        if removed > 0 {
+            println!("Removed {} auto GC root(s).", removed);
+        }
+    }
+
+    if dry_run {
+        tracing::info!("[dry-run] Garbage collecting target '{}'...", target_name);
+    } else {
+        tracing::info!("Garbage collecting target '{}'...", target_name);
+    }
 
     if let Err(e) = target.deploy_repx_binary() {
         tracing::warn!(
@@ -42,8 +100,13 @@ fn handle_gc_collect(
         );
     }
 
-    match target.garbage_collect() {
-        Ok(msg) => println!("{}", msg),
+    match target.garbage_collect(dry_run) {
+        Ok(msg) => {
+            let msg = msg.trim();
+            if !msg.is_empty() {
+                println!("{}", msg);
+            }
+        }
         Err(e) => {
             return Err(CliError::ExecutionFailed {
                 message: "Failed to run GC on target".to_string(),
@@ -56,7 +119,41 @@ fn handle_gc_collect(
     Ok(())
 }
 
-fn handle_gc_list(target_arg: Option<&str>, context: &AppContext) -> Result<(), CliError> {
+fn extract_lab_hash(entry: &repx_client::targets::GcRootEntry) -> String {
+    match entry.kind {
+        repx_client::targets::GcRootKind::Auto => {
+            if entry.name.len() > 20 && entry.name.chars().nth(19) == Some('_') {
+                entry.name[20..].to_string()
+            } else {
+                let parts: Vec<&str> = entry.name.splitn(4, '_').collect();
+                if parts.len() == 4 {
+                    parts[3].to_string()
+                } else {
+                    "???".to_string()
+                }
+            }
+        }
+        repx_client::targets::GcRootKind::Pinned => {
+            if let Some(filename) = entry
+                .target_path
+                .rsplit('/')
+                .next()
+                .or_else(|| entry.target_path.rsplit('\\').next())
+            {
+                if let Some(hash) = filename.strip_suffix("-lab-metadata.json") {
+                    return hash.to_string();
+                }
+            }
+            entry.name.clone()
+        }
+    }
+}
+
+fn handle_gc_list(
+    args: GcListArgs,
+    target_arg: Option<&str>,
+    context: &AppContext,
+) -> Result<(), CliError> {
     let target_name = target_arg.unwrap_or(context.submission_target);
 
     let target = context
@@ -64,22 +161,168 @@ fn handle_gc_list(target_arg: Option<&str>, context: &AppContext) -> Result<(), 
         .get_target(target_name)
         .ok_or_else(|| CliError::Domain(DomainError::TargetNotFound(target_name.to_string())))?;
 
-    let roots = target
-        .list_gc_roots()
+    let all_roots = target
+        .list_gc_roots(args.sizes)
         .map_err(|e| CliError::ExecutionFailed {
             message: "Failed to list GC roots".to_string(),
             log_path: None,
             log_summary: e.to_string(),
         })?;
 
+    let roots: Vec<_> = all_roots
+        .into_iter()
+        .filter(|root| {
+            if let Some(kind_filter) = &args.kind {
+                let matches = match kind_filter {
+                    GcKindFilter::Auto => {
+                        matches!(root.kind, repx_client::targets::GcRootKind::Auto)
+                    }
+                    GcKindFilter::Pinned => {
+                        matches!(root.kind, repx_client::targets::GcRootKind::Pinned)
+                    }
+                };
+                if !matches {
+                    return false;
+                }
+            }
+            if let Some(project_filter) = &args.project {
+                match &root.project_id {
+                    Some(pid) => {
+                        if !pid.contains(project_filter.as_str()) {
+                            return false;
+                        }
+                    }
+                    None => return false,
+                }
+            }
+            true
+        })
+        .collect();
+
     if roots.is_empty() {
         println!("No GC roots found on target '{}'.", target_name);
         return Ok(());
     }
 
-    println!("{:<8} {:<45} TARGET", "KIND", "NAME");
-    for root in &roots {
-        println!("{:<8} {:<45} {}", root.kind, root.name, root.target_path);
+    if args.sizes {
+        println!(
+            "{:<8} {:<20} {:<16} {:<10} PROJECT",
+            "KIND", "NAME", "HASH", "SIZE"
+        );
+        let mut total_size: u64 = 0;
+        for root in &roots {
+            let hash = extract_lab_hash(root);
+            let hash_display = truncate_hash(&hash, 14);
+            let size_str = root
+                .size_bytes
+                .map(|s| {
+                    total_size += s;
+                    format_bytes(s)
+                })
+                .unwrap_or_else(|| "-".to_string());
+            let project = root
+                .project_id
+                .as_deref()
+                .map(|p| truncate_str(p, 16))
+                .unwrap_or_else(|| "-".to_string());
+            let name_display = truncate_str(&root.name, 18);
+            println!(
+                "{:<8} {:<20} {:<16} {:<10} {}",
+                root.kind, name_display, hash_display, size_str, project
+            );
+        }
+        println!();
+        println!(
+            "{} root(s), total: {}",
+            roots.len(),
+            format_bytes(total_size)
+        );
+    } else {
+        println!("{:<8} {:<20} {:<16} PROJECT", "KIND", "NAME", "HASH");
+        for root in &roots {
+            let hash = extract_lab_hash(root);
+            let hash_display = truncate_hash(&hash, 14);
+            let project = root
+                .project_id
+                .as_deref()
+                .map(|p| truncate_str(p, 16))
+                .unwrap_or_else(|| "-".to_string());
+            let name_display = truncate_str(&root.name, 18);
+            println!(
+                "{:<8} {:<20} {:<16} {}",
+                root.kind, name_display, hash_display, project
+            );
+        }
+        println!();
+        println!("{} root(s). Use --sizes to see disk usage.", roots.len());
+    }
+
+    Ok(())
+}
+
+fn handle_gc_status(target_arg: Option<&str>, context: &AppContext) -> Result<(), CliError> {
+    let target_name = target_arg.unwrap_or(context.submission_target);
+
+    let target = context
+        .client
+        .get_target(target_name)
+        .ok_or_else(|| CliError::Domain(DomainError::TargetNotFound(target_name.to_string())))?;
+
+    let current_lab =
+        lab::load_from_path(context.lab_path).map_err(|e| CliError::ExecutionFailed {
+            message: "Failed to load lab metadata".to_string(),
+            log_path: None,
+            log_summary: e.to_string(),
+        })?;
+    let lab_hash = &current_lab.content_hash;
+    let hash_short = truncate_hash(lab_hash, 12);
+
+    let roots = target
+        .list_gc_roots(false)
+        .map_err(|e| CliError::ExecutionFailed {
+            message: "Failed to list GC roots".to_string(),
+            log_path: None,
+            log_summary: e.to_string(),
+        })?;
+
+    let pinned_matches: Vec<_> = roots
+        .iter()
+        .filter(|r| {
+            matches!(r.kind, repx_client::targets::GcRootKind::Pinned)
+                && r.target_path.contains(lab_hash.as_str())
+        })
+        .collect();
+
+    let auto_matches: Vec<_> = roots
+        .iter()
+        .filter(|r| {
+            matches!(r.kind, repx_client::targets::GcRootKind::Auto)
+                && r.name.contains(lab_hash.as_str())
+        })
+        .collect();
+
+    if !pinned_matches.is_empty() {
+        let names: Vec<_> = pinned_matches.iter().map(|r| r.name.as_str()).collect();
+        println!(
+            "Lab {} is pinned as '{}' on target '{}'.",
+            hash_short,
+            names.join("', '"),
+            target_name
+        );
+    } else {
+        println!(
+            "Lab {} is not pinned on target '{}'.",
+            hash_short, target_name
+        );
+    }
+
+    if !auto_matches.is_empty() {
+        println!(
+            "Lab {} has {} auto root(s) on target '{}'.",
+            hash_short,
+            auto_matches.len(),
+            target_name
+        );
     }
 
     Ok(())
@@ -154,6 +397,7 @@ fn handle_gc_unpin(
 
 pub async fn async_handle_internal_gc(args: InternalGcArgs) -> Result<(), CliError> {
     let base_path = args.base_path;
+    let dry_run = args.dry_run;
     let gcroots_dir = base_path.join(dirs::GCROOTS);
     let artifacts_dir = base_path.join(dirs::ARTIFACTS);
     let outputs_dir = base_path.join(dirs::OUTPUTS);
@@ -244,6 +488,10 @@ pub async fn async_handle_internal_gc(args: InternalGcArgs) -> Result<(), CliErr
         live_jobs.len()
     );
 
+    let mut deleted_artifacts: u64 = 0;
+    let mut deleted_outputs: u64 = 0;
+    let mut freed_bytes: u64 = 0;
+
     if artifacts_dir.exists() {
         let collection_dirs = [
             "host-tools",
@@ -272,30 +520,52 @@ pub async fn async_handle_internal_gc(args: InternalGcArgs) -> Result<(), CliErr
                         let sub = sub?;
                         let sub_rel = name_path.join(sub.file_name());
                         if !live_artifacts.contains(&sub_rel) {
-                            tracing::info!("Deleting unused artifact: {:?}", sub_rel);
-                            if sub.path().is_dir() {
-                                if let Err(e) = fs::remove_dir_all(sub.path()) {
-                                    tracing::warn!(
-                                        "Failed to delete directory {:?}: {}",
-                                        sub.path(),
-                                        e
-                                    );
+                            let size = path_size(&sub.path());
+                            if dry_run {
+                                tracing::info!(
+                                    "[dry-run] Would delete artifact: {:?} ({})",
+                                    sub_rel,
+                                    format_bytes(size)
+                                );
+                            } else {
+                                tracing::info!("Deleting unused artifact: {:?}", sub_rel);
+                                if sub.path().is_dir() {
+                                    if let Err(e) = fs::remove_dir_all(sub.path()) {
+                                        tracing::warn!(
+                                            "Failed to delete directory {:?}: {}",
+                                            sub.path(),
+                                            e
+                                        );
+                                    }
+                                } else if let Err(e) = fs::remove_file(sub.path()) {
+                                    tracing::warn!("Failed to delete file {:?}: {}", sub.path(), e);
                                 }
-                            } else if let Err(e) = fs::remove_file(sub.path()) {
-                                tracing::warn!("Failed to delete file {:?}: {}", sub.path(), e);
                             }
+                            deleted_artifacts += 1;
+                            freed_bytes += size;
                         }
                     }
                 }
             } else if !live_artifacts.contains(&name_path) {
-                tracing::info!("Deleting unused artifact: {:?}", name);
-                if entry.path().is_dir() {
-                    if let Err(e) = fs::remove_dir_all(entry.path()) {
-                        tracing::warn!("Failed to delete directory {:?}: {}", entry.path(), e);
+                let size = path_size(&entry.path());
+                if dry_run {
+                    tracing::info!(
+                        "[dry-run] Would delete artifact: {:?} ({})",
+                        name,
+                        format_bytes(size)
+                    );
+                } else {
+                    tracing::info!("Deleting unused artifact: {:?}", name);
+                    if entry.path().is_dir() {
+                        if let Err(e) = fs::remove_dir_all(entry.path()) {
+                            tracing::warn!("Failed to delete directory {:?}: {}", entry.path(), e);
+                        }
+                    } else if let Err(e) = fs::remove_file(entry.path()) {
+                        tracing::warn!("Failed to delete file {:?}: {}", entry.path(), e);
                     }
-                } else if let Err(e) = fs::remove_file(entry.path()) {
-                    tracing::warn!("Failed to delete file {:?}: {}", entry.path(), e);
                 }
+                deleted_artifacts += 1;
+                freed_bytes += size;
             }
         }
     }
@@ -307,13 +577,89 @@ pub async fn async_handle_internal_gc(args: InternalGcArgs) -> Result<(), CliErr
             let name_str = name.to_string_lossy();
 
             if !live_jobs.contains(name_str.as_ref()) {
-                tracing::info!("Deleting unused output: {:?}", name);
-                if let Err(e) = fs::remove_dir_all(entry.path()) {
-                    tracing::warn!("Failed to delete output {:?}: {}", entry.path(), e);
+                let size = path_size(&entry.path());
+                if dry_run {
+                    tracing::info!(
+                        "[dry-run] Would delete output: {:?} ({})",
+                        name,
+                        format_bytes(size)
+                    );
+                } else {
+                    tracing::info!("Deleting unused output: {:?}", name);
+                    if let Err(e) = fs::remove_dir_all(entry.path()) {
+                        tracing::warn!("Failed to delete output {:?}: {}", entry.path(), e);
+                    }
                 }
+                deleted_outputs += 1;
+                freed_bytes += size;
             }
         }
     }
 
+    if dry_run {
+        if deleted_artifacts == 0 && deleted_outputs == 0 {
+            println!("Nothing to collect.");
+        } else {
+            println!(
+                "Would delete {} artifact(s) and {} job output(s). Would free {}.",
+                deleted_artifacts,
+                deleted_outputs,
+                format_bytes(freed_bytes)
+            );
+        }
+    } else if deleted_artifacts == 0 && deleted_outputs == 0 {
+        println!("Nothing to collect.");
+    } else {
+        println!(
+            "Deleted {} artifact(s) and {} job output(s). Freed {}.",
+            deleted_artifacts,
+            deleted_outputs,
+            format_bytes(freed_bytes)
+        );
+    }
+
     Ok(())
+}
+
+fn path_size(path: &std::path::Path) -> u64 {
+    if !path.exists() {
+        return 0;
+    }
+    if path.is_file() || path.is_symlink() {
+        return fs::metadata(path).map(|m| m.len()).unwrap_or(0);
+    }
+    walkdir::WalkDir::new(path)
+        .into_iter()
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_type().is_file())
+        .map(|e| e.metadata().map(|m| m.len()).unwrap_or(0))
+        .sum()
+}
+
+fn format_bytes(bytes: u64) -> String {
+    if bytes >= 1_073_741_824 {
+        format!("{:.1} GB", bytes as f64 / 1_073_741_824.0)
+    } else if bytes >= 1_048_576 {
+        format!("{:.1} MB", bytes as f64 / 1_048_576.0)
+    } else if bytes >= 1024 {
+        format!("{:.1} KB", bytes as f64 / 1024.0)
+    } else {
+        format!("{} B", bytes)
+    }
+}
+
+fn truncate_hash(hash: &str, max_len: usize) -> String {
+    if hash.len() <= max_len {
+        hash.to_string()
+    } else {
+        format!("{}..", &hash[..max_len - 2])
+    }
+}
+
+fn truncate_str(s: &str, max_len: usize) -> String {
+    if s.len() <= max_len {
+        s.to_string()
+    } else {
+        format!("{}..", &s[..max_len - 2])
+    }
 }

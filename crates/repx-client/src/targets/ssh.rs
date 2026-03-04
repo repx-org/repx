@@ -903,18 +903,33 @@ impl GcOps for SshTarget {
         Ok(())
     }
 
-    fn list_gc_roots(&self) -> Result<Vec<super::GcRootEntry>> {
+    fn list_gc_roots(&self, compute_sizes: bool) -> Result<Vec<super::GcRootEntry>> {
         let gcroots_dir = self.base_path().join(dirs::GCROOTS);
         let mut entries = Vec::new();
 
         let pinned_dir = gcroots_dir.join("pinned");
+
+        let size_cmd = if compute_sizes {
+            r#"
+                    real=$(readlink -f "$f" 2>/dev/null)
+                    if [ -n "$real" ] && [ -e "$real" ]; then
+                        sz=$(du -sb "$real" 2>/dev/null | cut -f1)
+                    else
+                        sz=""
+                    fi"#
+        } else {
+            r#"
+                    sz="""#
+        };
+
         let script = format!(
             r#"
             if [ -d {0} ]; then
                 for f in {0}/*; do
                     [ -e "$f" ] || [ -L "$f" ] || continue
                     target=$(readlink "$f" 2>/dev/null || echo "???")
-                    echo "pinned|$(basename "$f")|$target|"
+                    {2}
+                    echo "pinned|$(basename "$f")|$target||$sz"
                 done
             fi
             if [ -d {1} ]; then
@@ -924,13 +939,15 @@ impl GcOps for SshTarget {
                     for f in "$proj"*; do
                         [ -e "$f" ] || [ -L "$f" ] || continue
                         target=$(readlink "$f" 2>/dev/null || echo "???")
-                        echo "auto|$(basename "$f")|$target|$proj_id"
+                        {2}
+                        echo "auto|$(basename "$f")|$target|$proj_id|$sz"
                     done
                 done
             fi
             "#,
             shell_quote(&pinned_dir.to_string_lossy()),
             shell_quote(&gcroots_dir.join("auto").to_string_lossy()),
+            size_cmd,
         );
 
         let output = self.run_command("sh", &["-c", &script])?;
@@ -939,7 +956,7 @@ impl GcOps for SshTarget {
             if line.is_empty() {
                 continue;
             }
-            let parts: Vec<&str> = line.splitn(4, '|').collect();
+            let parts: Vec<&str> = line.splitn(5, '|').collect();
             if parts.len() < 3 {
                 continue;
             }
@@ -947,15 +964,22 @@ impl GcOps for SshTarget {
                 "pinned" => super::GcRootKind::Pinned,
                 _ => super::GcRootKind::Auto,
             };
+            let project_id = if parts.len() > 3 && !parts[3].is_empty() {
+                Some(parts[3].to_string())
+            } else {
+                None
+            };
+            let size_bytes = if parts.len() > 4 && !parts[4].is_empty() {
+                parts[4].parse::<u64>().ok()
+            } else {
+                None
+            };
             entries.push(super::GcRootEntry {
                 name: parts[1].to_string(),
                 kind,
                 target_path: parts[2].to_string(),
-                project_id: if parts.len() > 3 && !parts[3].is_empty() {
-                    Some(parts[3].to_string())
-                } else {
-                    None
-                },
+                project_id,
+                size_bytes,
             });
         }
 
@@ -963,13 +987,38 @@ impl GcOps for SshTarget {
         Ok(entries)
     }
 
-    fn garbage_collect(&self) -> Result<String> {
+    fn garbage_collect(&self, dry_run: bool) -> Result<String> {
         let repx_bin = self.deploy_repx_binary()?;
-        let cmd = RemoteCommand::new(&repx_bin.to_string_lossy())
+        let mut cmd = RemoteCommand::new(&repx_bin.to_string_lossy())
             .arg("internal-gc")
             .arg("--base-path")
             .arg(&self.base_path().to_string_lossy());
 
+        if dry_run {
+            cmd = cmd.arg("--dry-run");
+        }
+
         self.run_command("sh", &["-c", &cmd.to_shell_string()])
+    }
+
+    fn remove_auto_roots(&self) -> Result<u64> {
+        let auto_dir = self.base_path().join(dirs::GCROOTS).join("auto");
+
+        let script = format!(
+            r#"
+            if [ -d {0} ]; then
+                count=$(find {0} -type l 2>/dev/null | wc -l)
+                rm -rf {0}
+                echo "$count"
+            else
+                echo "0"
+            fi
+            "#,
+            shell_quote(&auto_dir.to_string_lossy()),
+        );
+
+        let output = self.run_command("sh", &["-c", &script])?;
+        let removed = output.trim().parse::<u64>().unwrap_or(0);
+        Ok(removed)
     }
 }

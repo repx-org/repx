@@ -256,23 +256,42 @@ repx log abc123
 
 ### repx gc
 
-Run garbage collection or manage GC roots. When called with no subcommand, removes stale artifacts from the output store.
+Run garbage collection or manage GC roots. When called with no subcommand, removes stale artifacts from the output store. Prompts for confirmation before deleting and prints a summary of freed space afterwards.
 
 ```
-repx gc [--target <NAME>]
+repx gc [--target <NAME>] [--dry-run] [--yes] [--pinned-only]
 ```
 
 | Option | Description |
 |--------|-------------|
 | `--target <NAME>` | Target to operate on (global, applies to all subcommands) |
+| `--dry-run` | Preview what would be deleted without actually deleting anything |
+| `--yes`, `-y` | Skip the confirmation prompt |
+| `--pinned-only` | Remove all auto GC roots before collecting, keeping only explicitly pinned labs |
 
 #### repx gc list
 
-List all GC roots (auto and pinned) on a target.
+List all GC roots (auto and pinned) on a target. Shows kind, name, lab hash, and project ID for each root.
 
 ```
-repx gc list [--target <NAME>]
+repx gc list [--target <NAME>] [--sizes] [--kind <KIND>] [--project <ID>]
 ```
+
+| Option | Description |
+|--------|-------------|
+| `--sizes` | Compute and display disk usage for each root |
+| `--kind <KIND>` | Filter roots by kind (`auto` or `pinned`) |
+| `--project <ID>` | Filter auto roots by project ID (substring match) |
+
+#### repx gc status
+
+Check if the current lab is pinned on a target.
+
+```
+repx gc status [--target <NAME>]
+```
+
+Reports whether the lab is pinned (and the pin name), plus how many auto roots reference it.
 
 #### repx gc pin
 

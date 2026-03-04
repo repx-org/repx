@@ -57,7 +57,32 @@ When you run `repx gc`, the system:
 repx gc [--target <name>]
 ```
 
-Scans roots and deletes unreferenced artifacts and outputs on the specified target.
+Scans roots and deletes unreferenced artifacts and outputs on the specified target. You will be prompted for confirmation before anything is deleted. After collection, a summary is printed showing how many artifacts and outputs were deleted and how much disk space was freed.
+
+| Option | Description |
+|--------|-------------|
+| `--dry-run` | Preview what would be deleted without actually deleting anything. Shows the same summary as a real run. |
+| `--yes` / `-y` | Skip the confirmation prompt. |
+| `--pinned-only` | Remove all auto GC roots before collecting, so only explicitly pinned labs survive. Everything not pinned becomes unreferenced and is deleted. |
+
+```bash
+# Preview what would be freed
+repx gc --dry-run
+
+# Skip confirmation
+repx gc --yes
+
+# Nuke everything except pinned labs
+repx gc --pinned-only
+```
+
+### Check Pin Status
+
+```bash
+repx gc status [--target <name>]
+```
+
+Quickly check if the current lab is pinned on a target. Reports the pin name if found, and how many auto roots exist.
 
 ### List GC Roots
 
@@ -65,7 +90,37 @@ Scans roots and deletes unreferenced artifacts and outputs on the specified targ
 repx gc list [--target <name>]
 ```
 
-Shows all auto and pinned roots with their names and symlink targets.
+Shows all auto and pinned roots with their kind, name, lab content hash, and project ID.
+
+| Option | Description |
+|--------|-------------|
+| `--sizes` | Compute and display disk usage for each root, with a total at the bottom. |
+| `--kind auto\|pinned` | Filter roots by kind. |
+| `--project <ID>` | Filter auto roots by project ID (substring match). |
+
+```bash
+# Quick overview
+repx gc list
+
+# With disk usage
+repx gc list --sizes
+
+# Only show pinned roots
+repx gc list --kind pinned
+
+# Only show auto roots for a specific project
+repx gc list --kind auto --project 8f3a
+```
+
+Example output:
+
+```
+KIND     NAME                 HASH             PROJECT
+auto     2025-03-04_12-30..   a1b2c3d4e5f6..   8f3a..
+pinned   my-experiment        9e8d7c6b5a4f..   -
+
+2 root(s). Use --sizes to see disk usage.
+```
 
 ### Pin a Lab
 
@@ -99,6 +154,8 @@ When the lab is pinned, a green **[Pinned]** indicator appears in the overview p
 ## Tips
 
 - Pin important experiment results before running GC to ensure they're preserved
-- Use `repx gc list` to audit what's protected before running `repx gc`
+- Use `repx gc list --sizes` to see exactly how much disk space each root is using
+- Use `repx gc --dry-run` to preview what would be deleted before committing
+- Use `repx gc --pinned-only` when you want a clean slate -- only explicitly pinned labs are kept
 - Auto roots rotate per-project, so switching between experiments on the same project will eventually expire older roots
 - GC is safe to run at any time -- it only deletes artifacts not reachable from any root
