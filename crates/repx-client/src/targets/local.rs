@@ -584,11 +584,16 @@ impl GcOps for LocalTarget {
         Ok(entries)
     }
 
-    fn garbage_collect(&self, dry_run: bool) -> Result<String> {
+    fn garbage_collect(
+        &self,
+        dry_run: bool,
+        verbose: repx_core::logging::Verbosity,
+    ) -> Result<String> {
         let repx_bin = self.deploy_repx_binary()?;
 
         let mut cmd = Command::new(&repx_bin);
-        cmd.arg("internal-gc")
+        cmd.args(verbose.as_args())
+            .arg("internal-gc")
             .arg("--base-path")
             .arg(self.base_path());
 

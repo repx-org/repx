@@ -990,6 +990,7 @@ impl App {
                 num_jobs,
                 event_sender: None,
                 continue_on_failure: false,
+                verbose: repx_core::logging::Verbosity::default(),
             };
 
             match client_clone.submit_batch_run(

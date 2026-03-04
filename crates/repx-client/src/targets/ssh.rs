@@ -987,9 +987,14 @@ impl GcOps for SshTarget {
         Ok(entries)
     }
 
-    fn garbage_collect(&self, dry_run: bool) -> Result<String> {
+    fn garbage_collect(
+        &self,
+        dry_run: bool,
+        verbose: repx_core::logging::Verbosity,
+    ) -> Result<String> {
         let repx_bin = self.deploy_repx_binary()?;
         let mut cmd = RemoteCommand::new(&repx_bin.to_string_lossy())
+            .args(verbose.as_args())
             .arg("internal-gc")
             .arg("--base-path")
             .arg(&self.base_path().to_string_lossy());

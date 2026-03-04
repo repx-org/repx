@@ -39,14 +39,16 @@ pub(crate) async fn submit_slurm_gather_job(
     orch: &ScatterGatherOrchestrator,
     args: &InternalScatterGatherArgs,
     last_step_slurm_ids: &[String],
+    verbose: repx_core::logging::Verbosity,
 ) -> Result<(), CliError> {
     let current_exe = std::env::current_exe()?;
     let current_exe_str = current_exe.to_string_lossy();
 
     let steps_json_escaped = args.steps_json.replace('\'', "'\\''");
 
-    let mut gather_cmd_parts = vec![
-        current_exe_str.to_string(),
+    let mut gather_cmd_parts = vec![current_exe_str.to_string()];
+    gather_cmd_parts.extend(verbose.as_args());
+    gather_cmd_parts.extend_from_slice(&[
         "internal-scatter-gather".to_string(),
         "--phase".to_string(),
         "gather".to_string(),
@@ -72,7 +74,7 @@ pub(crate) async fn submit_slurm_gather_job(
         format!("'{}'", steps_json_escaped),
         "--last-step-outputs-json".to_string(),
         format!("'{}'", args.last_step_outputs_json),
-    ];
+    ]);
 
     if args.mount_host_paths {
         gather_cmd_parts.push("--mount-host-paths".to_string());

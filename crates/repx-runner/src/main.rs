@@ -10,6 +10,10 @@ fn main() {
 
     let cli = Cli::parse();
 
+    if cli.verbose > 0 {
+        logging::set_log_level(logging::LogLevel::from(cli.verbose + 1));
+    }
+
     let is_internal = matches!(
         cli.command,
         Commands::InternalOrchestrate(_)
@@ -29,7 +33,7 @@ fn main() {
                 format!("[ERROR] Failed to initialize session logger: {}", e).red()
             );
         }
-    } else if debug_requested {
+    } else if debug_requested || cli.verbose > 0 {
         logging::init_stderr_logger();
     }
 

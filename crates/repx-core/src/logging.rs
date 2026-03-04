@@ -362,6 +362,45 @@ pub fn log_and_print_command(command: &Command) {
     tracing::debug!("[CMD] {}", command_str);
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Verbosity(u8);
+
+impl Verbosity {
+    pub fn from_count(count: u8) -> Self {
+        Self(count)
+    }
+
+    pub fn count(self) -> u8 {
+        self.0
+    }
+
+    pub fn is_verbose(self) -> bool {
+        self.0 > 0
+    }
+
+    pub fn as_args(self) -> Vec<String> {
+        if self.0 == 0 {
+            Vec::new()
+        } else {
+            vec![format!("-{}", "v".repeat(self.0 as usize))]
+        }
+    }
+
+    pub fn as_flag_str(self) -> String {
+        if self.0 == 0 {
+            String::new()
+        } else {
+            format!("-{} ", "v".repeat(self.0 as usize))
+        }
+    }
+}
+
+impl From<u8> for Verbosity {
+    fn from(count: u8) -> Self {
+        Self(count)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::rotate_logs;
