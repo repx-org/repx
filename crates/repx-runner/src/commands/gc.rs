@@ -285,20 +285,18 @@ fn handle_gc_status(target_arg: Option<&str>, context: &AppContext) -> Result<()
             log_summary: e.to_string(),
         })?;
 
+    let references_lab = |r: &repx_client::targets::GcRootEntry| -> bool {
+        r.name.contains(lab_hash.as_str()) || r.target_path.contains(lab_hash.as_str())
+    };
+
     let pinned_matches: Vec<_> = roots
         .iter()
-        .filter(|r| {
-            matches!(r.kind, repx_client::targets::GcRootKind::Pinned)
-                && r.target_path.contains(lab_hash.as_str())
-        })
+        .filter(|r| matches!(r.kind, repx_client::targets::GcRootKind::Pinned) && references_lab(r))
         .collect();
 
     let auto_matches: Vec<_> = roots
         .iter()
-        .filter(|r| {
-            matches!(r.kind, repx_client::targets::GcRootKind::Auto)
-                && r.name.contains(lab_hash.as_str())
-        })
+        .filter(|r| matches!(r.kind, repx_client::targets::GcRootKind::Auto) && references_lab(r))
         .collect();
 
     if !pinned_matches.is_empty() {
