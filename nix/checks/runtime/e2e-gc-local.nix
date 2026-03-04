@@ -83,7 +83,7 @@ pkgs.testers.runNixOSTest {
         machine.succeed(f"echo 'dead data' > {base_path}/artifacts/dead-artifact-xyz/file.txt")
         machine.succeed(f"test -d {base_path}/artifacts/dead-artifact-xyz")
 
-        machine.succeed("repx gc --lab ${referenceLab}")
+        machine.succeed("repx gc --yes --lab ${referenceLab}")
 
         machine.succeed(f"test -L {base_path}/gcroots/pinned/my-experiment")
 

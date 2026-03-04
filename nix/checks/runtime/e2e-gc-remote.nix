@@ -149,7 +149,7 @@ pkgs.testers.runNixOSTest {
         server.succeed(f"su - repxuser -c 'mkdir -p {base_path}/artifacts/dead-remote-artifact'")
         server.succeed(f"su - repxuser -c \"echo dead > {base_path}/artifacts/dead-remote-artifact/f.txt\"")
 
-        client.succeed("repx gc --target remote --lab ${referenceLab}")
+        client.succeed("repx gc --yes --target remote --lab ${referenceLab}")
 
         server.succeed(f"test -L {base_path}/gcroots/pinned/remote-pin")
 
