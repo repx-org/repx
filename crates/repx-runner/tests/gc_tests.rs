@@ -8,6 +8,72 @@ use std::fs;
 use std::os::unix::fs::symlink;
 use std::path::Path;
 
+fn create_synthetic_lab(
+    artifacts_dir: &Path,
+    lab_hash: &str,
+    job_ids: &[&str],
+) -> std::path::PathBuf {
+    let lab_dir = artifacts_dir.join("lab");
+    let revision_dir = artifacts_dir.join("revision");
+    let jobs_dir = artifacts_dir.join("jobs");
+    let host_tools_dir = artifacts_dir
+        .join("host-tools")
+        .join("fake-tools")
+        .join("bin");
+
+    fs::create_dir_all(&lab_dir).expect("create lab dir");
+    fs::create_dir_all(&revision_dir).expect("create revision dir");
+    fs::create_dir_all(&jobs_dir).expect("create jobs dir");
+    fs::create_dir_all(&host_tools_dir).expect("create host-tools dir");
+
+    for id in job_ids {
+        fs::create_dir_all(jobs_dir.join(id)).expect("create job dir");
+    }
+
+    let jobs_json: serde_json::Value = job_ids
+        .iter()
+        .map(|id| {
+            (
+                id.to_string(),
+                serde_json::json!({
+                    "name": id,
+                    "params": {},
+                    "stage_type": "simple",
+                    "executables": {}
+                }),
+            )
+        })
+        .collect::<serde_json::Map<String, serde_json::Value>>()
+        .into();
+
+    let run_metadata = serde_json::json!({
+        "name": "test-run",
+        "jobs": jobs_json
+    });
+    let run_path = format!("revision/{}-metadata-test-run.json", lab_hash);
+    fs::write(artifacts_dir.join(&run_path), run_metadata.to_string()).expect("write run metadata");
+
+    let root_metadata = serde_json::json!({
+        "runs": [run_path],
+        "gitHash": "0000000000000000000000000000000000000000",
+        "repx_version": env!("CARGO_PKG_VERSION")
+    });
+    let root_path = format!("revision/{}-metadata-top.json", lab_hash);
+    fs::write(artifacts_dir.join(&root_path), root_metadata.to_string())
+        .expect("write root metadata");
+
+    let manifest = serde_json::json!({
+        "labId": lab_hash,
+        "lab_version": env!("CARGO_PKG_VERSION"),
+        "metadata": root_path,
+        "files": []
+    });
+    let manifest_path = lab_dir.join(format!("{}-lab-metadata.json", lab_hash));
+    fs::write(&manifest_path, manifest.to_string()).expect("write lab manifest");
+
+    manifest_path
+}
+
 #[test]
 fn test_gc_removes_dead_artifacts_and_outputs() {
     let harness = TestHarness::new();
@@ -931,5 +997,400 @@ fn test_gc_pinned_only_then_collect() {
     assert!(
         pinned_link.symlink_metadata().is_ok(),
         "Pinned symlink should survive"
+    );
+}
+
+#[test]
+fn test_gc_preserves_live_jobs_and_lab_entries() {
+    let harness = TestHarness::new();
+    let base_path = &harness.cache_dir;
+    let artifacts_dir = base_path.join("artifacts");
+    let outputs_dir = base_path.join("outputs");
+    let gcroots_pinned = base_path.join("gcroots/pinned");
+
+    let manifest = create_synthetic_lab(&artifacts_dir, "labhash-A", &["job-alpha", "job-beta"]);
+
+    fs::create_dir_all(&gcroots_pinned).expect("create pinned dir");
+    #[cfg(unix)]
+    symlink(&manifest, gcroots_pinned.join("pin-A")).expect("symlink pinned root");
+
+    fs::create_dir_all(outputs_dir.join("job-alpha")).expect("create output alpha");
+    fs::write(outputs_dir.join("job-alpha/result.txt"), "ok").expect("write alpha output");
+    fs::create_dir_all(outputs_dir.join("job-beta")).expect("create output beta");
+
+    fs::create_dir_all(artifacts_dir.join("jobs/job-dead")).expect("create dead job dir");
+    fs::create_dir_all(outputs_dir.join("job-dead")).expect("create dead output dir");
+
+    fs::write(
+        artifacts_dir.join("lab/deadbeef-lab-metadata.json"),
+        "corrupt",
+    )
+    .expect("write dead manifest");
+
+    harness
+        .cmd()
+        .arg("internal-gc")
+        .arg("--base-path")
+        .arg(base_path)
+        .assert()
+        .success();
+
+    assert!(
+        artifacts_dir.join("jobs/job-alpha").exists(),
+        "Live job-alpha dir in artifacts/jobs/ must be preserved"
+    );
+    assert!(
+        artifacts_dir.join("jobs/job-beta").exists(),
+        "Live job-beta dir in artifacts/jobs/ must be preserved"
+    );
+    assert!(manifest.exists(), "Live lab manifest must be preserved");
+    assert!(
+        outputs_dir.join("job-alpha/result.txt").exists(),
+        "Live job output must be preserved"
+    );
+
+    assert!(
+        !artifacts_dir.join("jobs/job-dead").exists(),
+        "Dead job dir in artifacts/jobs/ must be collected"
+    );
+    assert!(
+        !outputs_dir.join("job-dead").exists(),
+        "Dead job output must be collected"
+    );
+    assert!(
+        !artifacts_dir
+            .join("lab/deadbeef-lab-metadata.json")
+            .exists(),
+        "Dead lab manifest must be collected"
+    );
+}
+
+#[test]
+fn test_gc_shared_artifact_survives_via_remaining_root() {
+    let harness = TestHarness::new();
+    let base_path = &harness.cache_dir;
+    let artifacts_dir = base_path.join("artifacts");
+    let outputs_dir = base_path.join("outputs");
+    let gcroots_pinned = base_path.join("gcroots/pinned");
+    let gcroots_auto = base_path.join("gcroots/auto/test-proj");
+
+    let manifest_a = create_synthetic_lab(
+        &artifacts_dir,
+        "labhash-shared-A",
+        &["job-shared", "job-only-A"],
+    );
+
+    let lab_dir = artifacts_dir.join("lab");
+    let jobs_dir = artifacts_dir.join("jobs");
+
+    fs::create_dir_all(jobs_dir.join("job-only-B")).expect("create job-only-B dir");
+
+    let run_b = serde_json::json!({
+        "name": "test-run-b",
+        "jobs": {
+            "job-shared": {"name": "job-shared", "params": {}, "stage_type": "simple", "executables": {}},
+            "job-only-B": {"name": "job-only-B", "params": {}, "stage_type": "simple", "executables": {}}
+        }
+    });
+    let run_b_path = "revision/labhash-shared-B-metadata-test-run-b.json";
+    fs::write(artifacts_dir.join(run_b_path), run_b.to_string()).expect("write run B metadata");
+
+    let root_b = serde_json::json!({
+        "runs": [run_b_path],
+        "gitHash": "0000000000000000000000000000000000000000",
+        "repx_version": env!("CARGO_PKG_VERSION")
+    });
+    let root_b_path = "revision/labhash-shared-B-metadata-top.json";
+    fs::write(artifacts_dir.join(root_b_path), root_b.to_string()).expect("write root B metadata");
+
+    let manifest_b_content = serde_json::json!({
+        "labId": "labhash-shared-B",
+        "lab_version": env!("CARGO_PKG_VERSION"),
+        "metadata": root_b_path,
+        "files": []
+    });
+    let manifest_b = lab_dir.join("labhash-shared-B-lab-metadata.json");
+    fs::write(&manifest_b, manifest_b_content.to_string()).expect("write manifest B");
+
+    fs::create_dir_all(&gcroots_pinned).expect("create pinned dir");
+    fs::create_dir_all(&gcroots_auto).expect("create auto dir");
+    #[cfg(unix)]
+    {
+        symlink(&manifest_a, gcroots_pinned.join("pin-A")).expect("pin A");
+        symlink(&manifest_b, gcroots_auto.join("auto-B")).expect("auto B");
+    }
+
+    for job in &["job-shared", "job-only-A", "job-only-B"] {
+        fs::create_dir_all(outputs_dir.join(job)).expect("create output");
+        fs::write(outputs_dir.join(job).join("data.txt"), "result").expect("write output");
+    }
+
+    assert!(gcroots_pinned.join("pin-A").symlink_metadata().is_ok());
+    assert!(gcroots_auto.join("auto-B").symlink_metadata().is_ok());
+
+    fs::remove_file(gcroots_auto.join("auto-B")).expect("remove auto-B root");
+
+    harness
+        .cmd()
+        .arg("internal-gc")
+        .arg("--base-path")
+        .arg(base_path)
+        .assert()
+        .success();
+
+    assert!(
+        artifacts_dir.join("jobs/job-shared").exists(),
+        "Shared job dir must survive via the remaining pinned root"
+    );
+    assert!(
+        outputs_dir.join("job-shared/data.txt").exists(),
+        "Shared job output must survive via the remaining pinned root"
+    );
+
+    assert!(
+        artifacts_dir.join("jobs/job-only-A").exists(),
+        "job-only-A must survive (lab A is still pinned)"
+    );
+    assert!(
+        outputs_dir.join("job-only-A/data.txt").exists(),
+        "job-only-A output must survive"
+    );
+
+    assert!(
+        !artifacts_dir.join("jobs/job-only-B").exists(),
+        "job-only-B artifact must be collected (lab B root was removed)"
+    );
+    assert!(
+        !outputs_dir.join("job-only-B").exists(),
+        "job-only-B output must be collected"
+    );
+
+    assert!(
+        manifest_a.exists(),
+        "Lab A manifest must survive (still pinned)"
+    );
+    assert!(
+        !manifest_b.exists(),
+        "Lab B manifest must be collected (no root)"
+    );
+}
+
+#[test]
+fn test_gc_incomplete_lab_does_not_block_other_labs() {
+    let harness = TestHarness::new();
+    let base_path = &harness.cache_dir;
+    let artifacts_dir = base_path.join("artifacts");
+    let outputs_dir = base_path.join("outputs");
+    let gcroots_pinned = base_path.join("gcroots/pinned");
+
+    let manifest_good = create_synthetic_lab(
+        &artifacts_dir,
+        "labhash-good",
+        &["job-good-1", "job-good-2"],
+    );
+
+    let lab_dir = artifacts_dir.join("lab");
+    let jobs_dir = artifacts_dir.join("jobs");
+
+    fs::create_dir_all(jobs_dir.join("job-incomplete-1")).expect("create incomplete job dir");
+
+    let run_inc = serde_json::json!({
+        "name": "test-run-inc",
+        "jobs": {
+            "job-incomplete-1": {
+                "name": "job-incomplete-1",
+                "params": {},
+                "stage_type": "simple",
+                "executables": {}
+            }
+        }
+    });
+    let run_inc_path = "revision/labhash-incomplete-metadata-test-run-inc.json";
+    fs::write(artifacts_dir.join(run_inc_path), run_inc.to_string())
+        .expect("write incomplete run metadata");
+
+    let root_inc = serde_json::json!({
+        "runs": [run_inc_path],
+        "gitHash": "0000000000000000000000000000000000000000",
+        "repx_version": env!("CARGO_PKG_VERSION")
+    });
+    let root_inc_path = "revision/labhash-incomplete-metadata-top.json";
+    fs::write(artifacts_dir.join(root_inc_path), root_inc.to_string())
+        .expect("write incomplete root metadata");
+
+    let manifest_inc_content = serde_json::json!({
+        "labId": "labhash-incomplete",
+        "lab_version": env!("CARGO_PKG_VERSION"),
+        "metadata": root_inc_path,
+        "files": [
+            {
+                "path": "store/nonexistent-nix-hash-binary",
+                "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+            }
+        ]
+    });
+    let manifest_incomplete = lab_dir.join("labhash-incomplete-lab-metadata.json");
+    fs::write(&manifest_incomplete, manifest_inc_content.to_string())
+        .expect("write incomplete manifest");
+
+    fs::create_dir_all(&gcroots_pinned).expect("create pinned dir");
+    #[cfg(unix)]
+    {
+        symlink(&manifest_good, gcroots_pinned.join("pin-good")).expect("pin good");
+        symlink(&manifest_incomplete, gcroots_pinned.join("pin-incomplete"))
+            .expect("pin incomplete");
+    }
+
+    for job in &["job-good-1", "job-good-2", "job-incomplete-1"] {
+        fs::create_dir_all(outputs_dir.join(job)).expect("create output");
+        fs::write(outputs_dir.join(job).join("out.txt"), "data").expect("write output");
+    }
+
+    fs::create_dir_all(artifacts_dir.join("jobs/job-dead-orphan")).expect("create dead job");
+    fs::create_dir_all(outputs_dir.join("job-dead-orphan")).expect("create dead output");
+
+    harness
+        .cmd()
+        .arg("internal-gc")
+        .arg("--base-path")
+        .arg(base_path)
+        .assert()
+        .success();
+
+    assert!(
+        artifacts_dir.join("jobs/job-good-1").exists(),
+        "job-good-1 artifact must survive"
+    );
+    assert!(
+        artifacts_dir.join("jobs/job-good-2").exists(),
+        "job-good-2 artifact must survive"
+    );
+    assert!(
+        outputs_dir.join("job-good-1/out.txt").exists(),
+        "job-good-1 output must survive"
+    );
+    assert!(
+        outputs_dir.join("job-good-2/out.txt").exists(),
+        "job-good-2 output must survive"
+    );
+
+    assert!(
+        artifacts_dir.join("jobs/job-incomplete-1").exists(),
+        "job-incomplete-1 artifact must survive (unchecked load should succeed)"
+    );
+    assert!(
+        outputs_dir.join("job-incomplete-1/out.txt").exists(),
+        "job-incomplete-1 output must survive"
+    );
+
+    assert!(
+        !artifacts_dir.join("jobs/job-dead-orphan").exists(),
+        "Dead orphan job artifact must be collected"
+    );
+    assert!(
+        !outputs_dir.join("job-dead-orphan").exists(),
+        "Dead orphan job output must be collected"
+    );
+}
+
+#[test]
+fn test_gc_preserves_store_entries_for_live_labs() {
+    let harness = TestHarness::new();
+    let base_path = &harness.cache_dir;
+    let artifacts_dir = base_path.join("artifacts");
+    let gcroots_pinned = base_path.join("gcroots/pinned");
+
+    let lab_hash = "labhash-store-test";
+    let live_store_entries = ["abc123-jq-static-bin-jq", "def456-bubblewrap-static-bwrap"];
+    let dead_store_entry = "zzz999-orphan-tool-nobody-wants";
+
+    let lab_dir = artifacts_dir.join("lab");
+    let revision_dir = artifacts_dir.join("revision");
+    let jobs_dir = artifacts_dir.join("jobs");
+    let store_dir = artifacts_dir.join("store");
+    let host_tools_dir = artifacts_dir
+        .join("host-tools")
+        .join("fake-tools")
+        .join("bin");
+
+    fs::create_dir_all(&lab_dir).expect("create lab dir");
+    fs::create_dir_all(&revision_dir).expect("create revision dir");
+    fs::create_dir_all(&jobs_dir).expect("create jobs dir");
+    fs::create_dir_all(&store_dir).expect("create store dir");
+    fs::create_dir_all(&host_tools_dir).expect("create host-tools dir");
+
+    fs::create_dir_all(jobs_dir.join("job-store-user")).expect("create job dir");
+
+    for entry in &live_store_entries {
+        fs::write(store_dir.join(entry), "binary-content").expect("write store entry");
+    }
+
+    fs::write(store_dir.join(dead_store_entry), "dead-content").expect("write dead store entry");
+
+    let files: Vec<serde_json::Value> = live_store_entries
+        .iter()
+        .map(|e| {
+            serde_json::json!({
+                "path": format!("store/{}", e),
+                "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+            })
+        })
+        .collect();
+
+    let run = serde_json::json!({
+        "name": "test-run",
+        "jobs": {
+            "job-store-user": {
+                "name": "job-store-user",
+                "params": {},
+                "stage_type": "simple",
+                "executables": {}
+            }
+        }
+    });
+    let run_path = format!("revision/{}-metadata-test-run.json", lab_hash);
+    fs::write(artifacts_dir.join(&run_path), run.to_string()).expect("write run metadata");
+
+    let root = serde_json::json!({
+        "runs": [&run_path],
+        "gitHash": "0000000000000000000000000000000000000000",
+        "repx_version": env!("CARGO_PKG_VERSION")
+    });
+    let root_path = format!("revision/{}-metadata-top.json", lab_hash);
+    fs::write(artifacts_dir.join(&root_path), root.to_string()).expect("write root metadata");
+
+    let manifest_content = serde_json::json!({
+        "labId": lab_hash,
+        "lab_version": env!("CARGO_PKG_VERSION"),
+        "metadata": &root_path,
+        "files": files
+    });
+    let manifest_path = lab_dir.join(format!("{}-lab-metadata.json", lab_hash));
+    fs::write(&manifest_path, manifest_content.to_string()).expect("write manifest");
+
+    fs::create_dir_all(&gcroots_pinned).expect("create pinned dir");
+    #[cfg(unix)]
+    symlink(&manifest_path, gcroots_pinned.join("pin-store-test")).expect("pin lab");
+
+    harness
+        .cmd()
+        .arg("internal-gc")
+        .arg("--base-path")
+        .arg(base_path)
+        .assert()
+        .success();
+
+    for entry in &live_store_entries {
+        assert!(
+            store_dir.join(entry).exists(),
+            "Live store entry '{}' referenced by pinned lab must survive GC",
+            entry
+        );
+    }
+
+    assert!(
+        !store_dir.join(dead_store_entry).exists(),
+        "Dead store entry '{}' must be collected by GC",
+        dead_store_entry
     );
 }

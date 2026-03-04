@@ -266,6 +266,20 @@ fn load_from_path_inner(initial_path: &Path, verify_integrity: bool) -> Result<L
         referenced_files.push(p.to_path_buf());
     }
 
+    {
+        let mut seen = std::collections::HashSet::new();
+        for entry in &manifest.files {
+            let p = Path::new(&entry.path);
+            let mut components = p.components();
+            if let (Some(a), Some(b)) = (components.next(), components.next()) {
+                let dir_entry = PathBuf::from(a.as_os_str()).join(b.as_os_str());
+                if seen.insert(dir_entry.clone()) {
+                    referenced_files.push(dir_entry);
+                }
+            }
+        }
+    }
+
     let groups = root_meta
         .groups
         .into_iter()
