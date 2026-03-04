@@ -249,7 +249,11 @@ impl std::fmt::Display for GcRootKind {
 pub trait GcOps: TargetInfo {
     fn register_gc_root(&self, project_id: &str, lab_hash: &str) -> Result<()>;
 
-    fn garbage_collect(&self, dry_run: bool) -> Result<String>;
+    fn garbage_collect(
+        &self,
+        dry_run: bool,
+        verbose: repx_core::logging::Verbosity,
+    ) -> Result<String>;
 
     fn pin_gc_root(&self, lab_hash: &str, name: &str) -> Result<()>;
 

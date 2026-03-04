@@ -67,9 +67,12 @@ pub struct StepsMetadata {
     pub sink_step: String,
 }
 
-pub fn handle_scatter_gather(args: InternalScatterGatherArgs) -> Result<(), CliError> {
+pub fn handle_scatter_gather(
+    args: InternalScatterGatherArgs,
+    verbose: repx_core::logging::Verbosity,
+) -> Result<(), CliError> {
     let rt = super::create_tokio_runtime()?;
-    rt.block_on(async_handle_scatter_gather(args))
+    rt.block_on(async_handle_scatter_gather(args, verbose))
 }
 
 pub(crate) struct ScatterGatherOrchestrator {
@@ -503,7 +506,10 @@ async fn handle_phase_gather(
     Ok(())
 }
 
-async fn async_handle_scatter_gather(args: InternalScatterGatherArgs) -> Result<(), CliError> {
+async fn async_handle_scatter_gather(
+    args: InternalScatterGatherArgs,
+    verbose: repx_core::logging::Verbosity,
+) -> Result<(), CliError> {
     tracing::debug!(
         "INTERNAL SCATTER-GATHER (Phase: {}) starting for job '{}'",
         args.phase,
@@ -603,7 +609,7 @@ async fn async_handle_scatter_gather(args: InternalScatterGatherArgs) -> Result<
             manifest_path.display()
         );
 
-        slurm::submit_slurm_gather_job(&orch, &args, &last_step_slurm_ids).await?;
+        slurm::submit_slurm_gather_job(&orch, &args, &last_step_slurm_ids, verbose).await?;
 
         tracing::info!(
             "Orchestrator finished submitting branches and gather job. Exiting to free slot."

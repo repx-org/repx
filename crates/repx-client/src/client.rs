@@ -161,6 +161,7 @@ pub struct SubmitOptions {
     pub num_jobs: Option<usize>,
     pub event_sender: Option<Sender<ClientEvent>>,
     pub continue_on_failure: bool,
+    pub verbose: repx_core::logging::Verbosity,
 }
 #[derive(Clone)]
 pub struct Client {

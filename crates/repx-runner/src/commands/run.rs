@@ -1,11 +1,7 @@
 use colored::Colorize;
 use indicatif::{ProgressBar, ProgressStyle};
 use repx_client::{ClientEvent, SubmitOptions, WorkUnitPhase};
-use repx_core::{
-    config::{Config, Resources},
-    errors::ConfigError,
-    model::SchedulerType,
-};
+use repx_core::{config::Resources, errors::ConfigError, model::SchedulerType};
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     mpsc, Arc,
@@ -26,11 +22,11 @@ fn format_phase_suffix(phase: &Option<WorkUnitPhase>) -> String {
 pub fn handle_run(
     args: RunArgs,
     context: &AppContext<'_>,
-    _config: &Config,
     resources: Option<Resources>,
     target_name: &str,
     scheduler: SchedulerType,
     num_jobs: Option<usize>,
+    verbose: repx_core::logging::Verbosity,
 ) -> Result<(), CliError> {
     println!(
         "- Submitting run request to target '{}' using '{}' scheduler...",
@@ -65,6 +61,7 @@ pub fn handle_run(
             num_jobs,
             event_sender: Some(tx),
             continue_on_failure,
+            verbose,
         };
         client.submit_batch_run(run_specs, &target_name_clone, scheduler, options)
     });

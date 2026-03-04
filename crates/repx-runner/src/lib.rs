@@ -2,11 +2,7 @@ use crate::cli::{Cli, Commands};
 use crate::commands::AppContext;
 use repx_client::Client;
 use repx_core::{
-    config,
-    constants::targets,
-    errors::ConfigError,
-    logging::{self, LogLevel},
-    model::SchedulerType,
+    config, constants::targets, errors::ConfigError, logging::Verbosity, model::SchedulerType,
 };
 
 pub mod cli;
@@ -24,9 +20,6 @@ fn create_client(config: &config::Config, lab_path: &std::path::Path) -> Result<
 }
 
 pub fn run(cli: Cli) -> Result<(), CliError> {
-    if cli.verbose > 0 {
-        logging::set_log_level(LogLevel::from(cli.verbose + 1));
-    }
     tracing::trace!(
         "repx invoked with: {:?}",
         std::env::args().collect::<Vec<_>>()
@@ -38,7 +31,7 @@ pub fn run(cli: Cli) -> Result<(), CliError> {
         }
         Commands::InternalExecute(args) => commands::execute::handle_execute(args),
         Commands::InternalScatterGather(args) => {
-            commands::scatter_gather::handle_scatter_gather(*args)
+            commands::scatter_gather::handle_scatter_gather(*args, Verbosity::from(cli.verbose))
         }
         Commands::InternalGc(args) => {
             let rt = commands::create_tokio_runtime()?;
@@ -75,7 +68,7 @@ pub fn run(cli: Cli) -> Result<(), CliError> {
                 client: &client,
                 submission_target: &submission_target,
             };
-            commands::gc::handle_gc_dispatch(args, &context, &config)
+            commands::gc::handle_gc_dispatch(args, &context, &config, Verbosity::from(cli.verbose))
         }
         Commands::Run(args) => {
             let config = config::load_config()?;
@@ -132,11 +125,11 @@ pub fn run(cli: Cli) -> Result<(), CliError> {
             commands::run::handle_run(
                 args,
                 &context,
-                &config,
                 resources,
                 &target_name,
                 scheduler,
                 num_jobs,
+                Verbosity::from(cli.verbose),
             )
         }
     }

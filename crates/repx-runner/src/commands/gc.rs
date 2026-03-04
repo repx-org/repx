@@ -6,12 +6,14 @@ use crate::error::CliError;
 use repx_core::{config::Config, constants::dirs, errors::DomainError, lab};
 use std::collections::HashSet;
 use std::fs;
+use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 
 pub fn handle_gc_dispatch(
     args: GcArgs,
     context: &AppContext,
     config: &Config,
+    verbose: repx_core::logging::Verbosity,
 ) -> Result<(), CliError> {
     let dry_run = args.dry_run;
     let yes = args.yes;
@@ -24,6 +26,7 @@ pub fn handle_gc_dispatch(
             dry_run,
             yes,
             pinned_only,
+            verbose,
         ),
         Some(GcCommand::List(list_args)) => {
             handle_gc_list(list_args, args.target.as_deref(), context)
@@ -44,6 +47,7 @@ fn handle_gc_collect(
     dry_run: bool,
     yes: bool,
     pinned_only: bool,
+    verbose: repx_core::logging::Verbosity,
 ) -> Result<(), CliError> {
     let target_name = target_arg.unwrap_or(context.submission_target);
 
@@ -100,7 +104,7 @@ fn handle_gc_collect(
         );
     }
 
-    match target.garbage_collect(dry_run) {
+    match target.garbage_collect(dry_run, verbose) {
         Ok(msg) => {
             let msg = msg.trim();
             if !msg.is_empty() {
@@ -434,7 +438,7 @@ pub async fn async_handle_internal_gc(args: InternalGcArgs) -> Result<(), CliErr
                     }
                     let lab_root = canonical.clone();
 
-                    if let Ok(lab) = lab::load_from_path(&lab_root) {
+                    if let Ok(lab) = lab::load_from_path_unchecked(&lab_root) {
                         for job_id in lab.jobs.keys() {
                             live_js.insert(job_id.0.clone());
                         }
@@ -502,8 +506,13 @@ pub async fn async_handle_internal_gc(args: InternalGcArgs) -> Result<(), CliErr
             "store",
         ];
 
-        for entry in fs::read_dir(&artifacts_dir)? {
-            let entry = entry?;
+        let top_entries: Vec<_> = fs::read_dir(&artifacts_dir)?
+            .filter_map(|e| e.ok())
+            .collect();
+
+        let mut dead_top: Vec<&fs::DirEntry> = Vec::new();
+
+        for entry in &top_entries {
             let name = entry.file_name();
             let name_str = name.to_string_lossy();
             let name_path = PathBuf::from(&name);
@@ -514,83 +523,99 @@ pub async fn async_handle_internal_gc(args: InternalGcArgs) -> Result<(), CliErr
 
             if collection_dirs.contains(&name_str.as_ref()) {
                 if entry.path().is_dir() {
-                    for sub in fs::read_dir(entry.path())? {
-                        let sub = sub?;
-                        let sub_rel = name_path.join(sub.file_name());
-                        if !live_artifacts.contains(&sub_rel) {
-                            let size = path_size(&sub.path());
-                            if dry_run {
-                                tracing::info!(
-                                    "[dry-run] Would delete artifact: {:?} ({})",
-                                    sub_rel,
-                                    format_bytes(size)
-                                );
-                            } else {
-                                tracing::info!("Deleting unused artifact: {:?}", sub_rel);
-                                if sub.path().is_dir() {
-                                    if let Err(e) = fs::remove_dir_all(sub.path()) {
-                                        tracing::warn!(
-                                            "Failed to delete directory {:?}: {}",
-                                            sub.path(),
-                                            e
-                                        );
+                    let subs: Vec<_> = fs::read_dir(entry.path())?.filter_map(|e| e.ok()).collect();
+                    let dead_subs: Vec<_> = subs
+                        .iter()
+                        .filter(|sub| {
+                            let sub_rel = name_path.join(sub.file_name());
+                            !live_artifacts.contains(&sub_rel)
+                        })
+                        .collect();
+                    if !dead_subs.is_empty() {
+                        with_writable_dir(&entry.path(), || {
+                            for sub in &dead_subs {
+                                let sub_rel = name_path.join(sub.file_name());
+                                let size = path_size(&sub.path());
+                                if dry_run {
+                                    tracing::info!(
+                                        "[dry-run] Would delete artifact: {:?} ({})",
+                                        sub_rel,
+                                        format_bytes(size)
+                                    );
+                                    deleted_artifacts += 1;
+                                    freed_bytes += size;
+                                } else {
+                                    tracing::info!("Deleting unused artifact: {:?}", sub_rel);
+                                    if force_remove_no_parent(&sub.path()) {
+                                        deleted_artifacts += 1;
+                                        freed_bytes += size;
                                     }
-                                } else if let Err(e) = fs::remove_file(sub.path()) {
-                                    tracing::warn!("Failed to delete file {:?}: {}", sub.path(), e);
                                 }
                             }
+                        });
+                    }
+                }
+            } else if !live_artifacts.contains(&name_path) {
+                dead_top.push(entry);
+            }
+        }
+
+        if !dead_top.is_empty() {
+            with_writable_dir(&artifacts_dir, || {
+                for entry in &dead_top {
+                    let name = entry.file_name();
+                    let size = path_size(&entry.path());
+                    if dry_run {
+                        tracing::info!(
+                            "[dry-run] Would delete artifact: {:?} ({})",
+                            name,
+                            format_bytes(size)
+                        );
+                        deleted_artifacts += 1;
+                        freed_bytes += size;
+                    } else {
+                        tracing::info!("Deleting unused artifact: {:?}", name);
+                        if force_remove_no_parent(&entry.path()) {
                             deleted_artifacts += 1;
                             freed_bytes += size;
                         }
                     }
                 }
-            } else if !live_artifacts.contains(&name_path) {
-                let size = path_size(&entry.path());
-                if dry_run {
-                    tracing::info!(
-                        "[dry-run] Would delete artifact: {:?} ({})",
-                        name,
-                        format_bytes(size)
-                    );
-                } else {
-                    tracing::info!("Deleting unused artifact: {:?}", name);
-                    if entry.path().is_dir() {
-                        if let Err(e) = fs::remove_dir_all(entry.path()) {
-                            tracing::warn!("Failed to delete directory {:?}: {}", entry.path(), e);
-                        }
-                    } else if let Err(e) = fs::remove_file(entry.path()) {
-                        tracing::warn!("Failed to delete file {:?}: {}", entry.path(), e);
-                    }
-                }
-                deleted_artifacts += 1;
-                freed_bytes += size;
-            }
+            });
         }
     }
 
     if outputs_dir.exists() {
-        for entry in fs::read_dir(&outputs_dir)? {
-            let entry = entry?;
-            let name = entry.file_name();
-            let name_str = name.to_string_lossy();
-
-            if !live_jobs.contains(name_str.as_ref()) {
-                let size = path_size(&entry.path());
-                if dry_run {
-                    tracing::info!(
-                        "[dry-run] Would delete output: {:?} ({})",
-                        name,
-                        format_bytes(size)
-                    );
-                } else {
-                    tracing::info!("Deleting unused output: {:?}", name);
-                    if let Err(e) = fs::remove_dir_all(entry.path()) {
-                        tracing::warn!("Failed to delete output {:?}: {}", entry.path(), e);
+        let output_entries: Vec<_> = fs::read_dir(&outputs_dir)?.filter_map(|e| e.ok()).collect();
+        let dead_outputs: Vec<_> = output_entries
+            .iter()
+            .filter(|entry| {
+                let name_str = entry.file_name();
+                !live_jobs.contains(name_str.to_string_lossy().as_ref())
+            })
+            .collect();
+        if !dead_outputs.is_empty() {
+            with_writable_dir(&outputs_dir, || {
+                for entry in &dead_outputs {
+                    let name = entry.file_name();
+                    let size = path_size(&entry.path());
+                    if dry_run {
+                        tracing::info!(
+                            "[dry-run] Would delete output: {:?} ({})",
+                            name,
+                            format_bytes(size)
+                        );
+                        deleted_outputs += 1;
+                        freed_bytes += size;
+                    } else {
+                        tracing::info!("Deleting unused output: {:?}", name);
+                        if force_remove_no_parent(&entry.path()) {
+                            deleted_outputs += 1;
+                            freed_bytes += size;
+                        }
                     }
                 }
-                deleted_outputs += 1;
-                freed_bytes += size;
-            }
+            });
         }
     }
 
@@ -617,6 +642,43 @@ pub async fn async_handle_internal_gc(args: InternalGcArgs) -> Result<(), CliErr
     }
 
     Ok(())
+}
+
+fn force_remove_no_parent(path: &std::path::Path) -> bool {
+    let result = if path.is_dir() {
+        for entry in walkdir::WalkDir::new(path)
+            .into_iter()
+            .filter_map(|e| e.ok())
+        {
+            if entry.file_type().is_dir() {
+                let _ = fs::set_permissions(entry.path(), PermissionsExt::from_mode(0o755));
+            }
+        }
+        fs::remove_dir_all(path)
+    } else {
+        let _ = fs::set_permissions(path, PermissionsExt::from_mode(0o644));
+        fs::remove_file(path)
+    };
+
+    match result {
+        Ok(()) => true,
+        Err(e) => {
+            tracing::warn!("Failed to delete {:?}: {}", path, e);
+            false
+        }
+    }
+}
+
+fn with_writable_dir<F>(dir: &std::path::Path, f: F)
+where
+    F: FnOnce(),
+{
+    let saved = fs::metadata(dir).ok().map(|m| m.permissions());
+    let _ = fs::set_permissions(dir, PermissionsExt::from_mode(0o755));
+    f();
+    if let Some(perms) = saved {
+        let _ = fs::set_permissions(dir, perms);
+    }
 }
 
 fn path_size(path: &std::path::Path) -> u64 {

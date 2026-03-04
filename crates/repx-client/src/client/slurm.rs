@@ -67,7 +67,10 @@ pub fn submit_slurm_batch_run(
     options: &SubmitOptions,
     send: impl Fn(ClientEvent),
 ) -> Result<String> {
-    let remote_repx_command = remote_repx_binary_path.to_string_lossy();
+    let remote_repx_binary = remote_repx_binary_path.to_string_lossy();
+    let verbose_flags = options.verbose.as_flag_str();
+    let remote_repx_command = format!("{} {}", remote_repx_binary, verbose_flags);
+    let remote_repx_command = remote_repx_command.trim_end();
     send(ClientEvent::GeneratingSlurmScripts {
         num_jobs: jobs_to_submit.len(),
     });

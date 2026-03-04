@@ -137,7 +137,15 @@ fn find_manifest_path(lab_path: &Path) -> Option<PathBuf> {
     None
 }
 
+pub fn load_from_path_unchecked(initial_path: &Path) -> Result<Lab, ConfigError> {
+    load_from_path_inner(initial_path, false)
+}
+
 pub fn load_from_path(initial_path: &Path) -> Result<Lab, ConfigError> {
+    load_from_path_inner(initial_path, true)
+}
+
+fn load_from_path_inner(initial_path: &Path, verify_integrity: bool) -> Result<Lab, ConfigError> {
     tracing::debug!(
         "Attempting to load lab from initial path: '{}'",
         initial_path.display()
@@ -190,7 +198,9 @@ pub fn load_from_path(initial_path: &Path) -> Result<Lab, ConfigError> {
     tracing::debug!("Lab Content Hash (ID): {}", content_hash);
     tracing::debug!("Lab Version: {}", lab_version);
 
-    verify_file_integrity(&lab_path, &manifest.files)?;
+    if verify_integrity {
+        verify_file_integrity(&lab_path, &manifest.files)?;
+    }
 
     let root_metadata_path = lab_path.join(&manifest.metadata);
     if !root_metadata_path.is_file() {

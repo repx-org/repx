@@ -332,6 +332,7 @@ fn build_sg_common_args(
     client: &Client,
     execution_type: &str,
     image_tag: Option<&str>,
+    verbose: repx_core::logging::Verbosity,
 ) -> std::result::Result<Vec<String>, ClientError> {
     let artifacts_base = target.artifacts_base_path();
     let scatter_exe = job.executables.get("scatter").ok_or_else(|| {
@@ -352,13 +353,14 @@ fn build_sg_common_args(
 
     let (steps_json, last_step_outputs_json) = build_steps_json(job, &artifacts_base)?;
 
-    let mut args = vec![
+    let mut args = verbose.as_args();
+    args.extend_from_slice(&[
         "internal-scatter-gather".to_string(),
         "--job-id".to_string(),
         job_id.0.clone(),
         "--runtime".to_string(),
         execution_type.to_string(),
-    ];
+    ]);
     if let Some(tag) = image_tag {
         args.push("--image-tag".to_string());
         args.push(tag.to_string());
@@ -409,6 +411,7 @@ fn build_simple_job_args(
     client: &Client,
     execution_type: &str,
     image_tag: Option<&str>,
+    verbose: repx_core::logging::Verbosity,
 ) -> std::result::Result<Vec<String>, ClientError> {
     let main_exe = job.executables.get("main").ok_or_else(|| {
         ClientError::Config(ConfigError::MissingExecutable {
@@ -418,13 +421,14 @@ fn build_simple_job_args(
     })?;
     let executable_path = target.artifacts_base_path().join(&main_exe.path);
 
-    let mut args = vec![
+    let mut args = verbose.as_args();
+    args.extend_from_slice(&[
         "internal-execute".to_string(),
         "--job-id".to_string(),
         job_id.0.clone(),
         "--runtime".to_string(),
         execution_type.to_string(),
-    ];
+    ]);
     if let Some(tag) = image_tag {
         args.push("--image-tag".to_string());
         args.push(tag.to_string());
@@ -515,7 +519,7 @@ fn expand_scatter_gather<'a>(
     client: &Client,
     execution_type: &str,
     image_tag: Option<&str>,
-    resources_config: &Option<repx_core::config::Resources>,
+    options: &SubmitOptions,
 ) -> std::result::Result<Vec<(WorkUnitId, WorkUnit<'a>)>, ClientError> {
     let base_path = target.base_path();
     let job_root = base_path.join(dirs::OUTPUTS).join(&job_id.0);
@@ -606,7 +610,15 @@ fn expand_scatter_gather<'a>(
 
     let scatter_id = WorkUnitId::scatter(job_id);
 
-    let sg_common = build_sg_common_args(job_id, job, target, client, execution_type, image_tag)?;
+    let sg_common = build_sg_common_args(
+        job_id,
+        job,
+        target,
+        client,
+        execution_type,
+        image_tag,
+        options.verbose,
+    )?;
 
     let mut units = Vec::new();
 
@@ -625,7 +637,7 @@ fn expand_scatter_gather<'a>(
                 deps.push(scatter_id.clone());
             }
 
-            let (mem, cpus) = get_step_resources(job, &exe_key, resources_config, job_id);
+            let (mem, cpus) = get_step_resources(job, &exe_key, &options.resources, job_id);
 
             let mut extra_args = sg_common.clone();
             extra_args.extend_from_slice(&[
@@ -654,8 +666,8 @@ fn expand_scatter_gather<'a>(
     let gather_deps: Vec<WorkUnitId> = (0..work_items.len())
         .map(|b| WorkUnitId::step(job_id, b, &sink_step))
         .collect();
-    let gather_mem = get_job_mem_bytes(job, resources_config);
-    let gather_cpus = get_job_cpus(job, resources_config);
+    let gather_mem = get_job_mem_bytes(job, &options.resources);
+    let gather_cpus = get_job_cpus(job, &options.resources);
 
     let mut gather_extra = sg_common;
     gather_extra.extend_from_slice(&["--phase".to_string(), "gather".to_string()]);
@@ -780,6 +792,7 @@ pub fn submit_local_batch_run(
                 client,
                 &execution_type,
                 image_tag,
+                options.verbose,
             )?;
             extra_args.extend_from_slice(&["--phase".to_string(), "scatter-only".to_string()]);
 
@@ -809,6 +822,7 @@ pub fn submit_local_batch_run(
                 client,
                 &execution_type,
                 image_tag,
+                options.verbose,
             )?;
 
             work_units.insert(
@@ -954,7 +968,7 @@ pub fn submit_local_batch_run(
                                     client,
                                     &execution_type,
                                     image_tag,
-                                    &options.resources,
+                                    options,
                                 )?;
                                 let num_expanded = expanded.len();
                                 for (new_id, new_unit) in expanded {
