@@ -12,7 +12,7 @@ let
 
   termframeConfig = pkgs.writeText "termframe-config.toml" ''
     [[fonts]]
-    family = "JetBrainsMono Nerd Font"
+    family = "JetBrains Mono"
     files = [
       "${fontDir}/JetBrainsMonoNerdFont-Regular.ttf",
       "${fontDir}/JetBrainsMonoNerdFont-Bold.ttf",
