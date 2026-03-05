@@ -56,7 +56,11 @@ let
 
     mkdir -p "$out"
     echo "Clearing output directory for a clean run: $out" >&2
-    find "$out" -mindepth 1 -not -name 'slurm-*.out' -delete
+    find "$out" -mindepth 1 -depth -not -name 'slurm-*.out' -print0 |
+    while IFS= read -r -d "" item; do
+      chmod -R u+w -- "$item"
+      rm -rf -- "$item"
+    done
     mkdir -p "$out"
     cd "$out"
   '';
