@@ -141,12 +141,27 @@ pub struct TuiJob {
     pub context_depends_on: String,
     pub context_dependents: String,
     pub logs: Vec<String>,
+    #[serde(skip)]
+    pub id_lower: String,
+    #[serde(skip)]
+    pub name_lower: String,
+    #[serde(skip)]
+    pub run_lower: String,
 }
+
+impl TuiJob {
+    pub fn compute_lowercase_fields(&mut self) {
+        self.id_lower = self.id.to_lowercase();
+        self.name_lower = self.name.to_lowercase();
+        self.run_lower = self.run.to_lowercase();
+    }
+}
+
 #[derive(Clone, Debug)]
 pub enum TuiRowItem {
     Group { name: String },
     Run { id: repx_core::model::RunId },
-    Job { job: Box<TuiJob> },
+    Job { job: std::sync::Arc<TuiJob> },
 }
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum RowSegment {
@@ -416,7 +431,7 @@ mod tests {
 
     #[test]
     fn test_tui_job_serialize_deserialize() {
-        let job = TuiJob {
+        let mut job = TuiJob {
             full_id: repx_core::model::JobId::from("run-test/stage-a/job-123"),
             id: "job-123".to_string(),
             name: "Test Job".to_string(),
@@ -427,14 +442,21 @@ mod tests {
             context_depends_on: "job-122".to_string(),
             context_dependents: "job-124, job-125".to_string(),
             logs: vec!["log line 1".to_string(), "log line 2".to_string()],
+            id_lower: String::new(),
+            name_lower: String::new(),
+            run_lower: String::new(),
         };
+        job.compute_lowercase_fields();
 
         let serialized = serde_json::to_string(&job).expect("TuiJob must serialize");
-        let deserialized: TuiJob =
+        let mut deserialized: TuiJob =
             serde_json::from_str(&serialized).expect("serialized TuiJob must deserialize");
+        deserialized.compute_lowercase_fields();
 
         assert_eq!(deserialized.id, "job-123");
         assert_eq!(deserialized.name, "Test Job");
         assert_eq!(deserialized.logs.len(), 2);
+        assert_eq!(deserialized.id_lower, "job-123");
+        assert_eq!(deserialized.name_lower, "test job");
     }
 }

@@ -35,7 +35,7 @@ impl BwrapRuntime {
         let extract_dir = image_dir.join("rootfs");
         let success_marker = image_dir.join(SUCCESS_MARKER);
 
-        let temp_path = ctx.get_temp_path();
+        let temp_path = ctx.get_temp_path().await;
         let lock_path = temp_path.join(format!("repx-extract-{}.lock", image_hash));
 
         tokio::fs::create_dir_all(&images_cache_dir).await?;
@@ -56,7 +56,7 @@ impl BwrapRuntime {
             extract_dir
         );
 
-        let image_path = ctx.find_image_file(image_tag).ok_or_else(|| {
+        let image_path = ctx.find_image_file(image_tag).await.ok_or_else(|| {
             ExecutorError::ImageNotFound(format!(
                 "Image file for tag '{}' not found in artifacts/images or artifacts/image",
                 image_tag
@@ -104,7 +104,7 @@ impl BwrapRuntime {
         }
         tokio::fs::create_dir_all(&staging_dir).await?;
 
-        let tar_path = ctx.resolve_tool("tar")?;
+        let tar_path = ctx.resolve_tool("tar").await?;
 
         for layer in layers {
             let layer_path = image_path.join(layer);
@@ -132,7 +132,7 @@ impl BwrapRuntime {
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped());
 
-            ctx.restrict_command_environment(&mut cmd_layer, &[]);
+            ctx.restrict_command_environment(&mut cmd_layer, &[]).await;
 
             let output = cmd_layer.output().await?;
             if !output.status.success() {
@@ -250,12 +250,12 @@ impl BwrapRuntime {
     }
 
     async fn run_overlay_check(ctx: &RuntimeContext<'_>) -> bool {
-        let bwrap_path = match ctx.get_host_tool_path("bwrap") {
+        let bwrap_path = match ctx.get_host_tool_path("bwrap").await {
             Ok(p) => p,
             Err(_) => return false,
         };
 
-        let temp_base = ctx.get_temp_path();
+        let temp_base = ctx.get_temp_path().await;
         let temp_dir = match tempfile::Builder::new()
             .prefix(".repx-overlay-check-")
             .tempdir_in(&temp_base)
@@ -295,7 +295,7 @@ impl BwrapRuntime {
             .arg(&merged)
             .arg("true");
 
-        ctx.restrict_command_environment(&mut cmd, &[]);
+        ctx.restrict_command_environment(&mut cmd, &[]).await;
         cmd.stdout(Stdio::null()).stderr(Stdio::null());
 
         match cmd.status().await {
@@ -344,12 +344,12 @@ impl BwrapRuntime {
     }
 
     async fn run_tmp_overlay_check(ctx: &RuntimeContext<'_>, rootfs_path: &Path) -> bool {
-        let bwrap_path = match ctx.get_host_tool_path("bwrap") {
+        let bwrap_path = match ctx.get_host_tool_path("bwrap").await {
             Ok(p) => p,
             Err(_) => return false,
         };
 
-        let temp_base = ctx.get_temp_path();
+        let temp_base = ctx.get_temp_path().await;
         let temp_dir = match tempfile::Builder::new()
             .prefix(".repx-tmp-overlay-check-")
             .tempdir_in(&temp_base)
@@ -386,7 +386,7 @@ impl BwrapRuntime {
             .arg(&test_mount_point)
             .arg("true");
 
-        ctx.restrict_command_environment(&mut cmd, &[]);
+        ctx.restrict_command_environment(&mut cmd, &[]).await;
         cmd.stdout(Stdio::null()).stderr(Stdio::null());
 
         match cmd.status().await {
@@ -413,7 +413,7 @@ impl BwrapRuntime {
         script_path: &Path,
         args: &[String],
     ) -> Result<TokioCommand> {
-        let bwrap_path = ctx.get_host_tool_path("bwrap")?;
+        let bwrap_path = ctx.get_host_tool_path("bwrap").await?;
         let mut cmd = TokioCommand::new(bwrap_path);
         let request = ctx.request;
 
@@ -537,7 +537,7 @@ impl BwrapRuntime {
         cmd.arg(script_path);
         cmd.args(args);
 
-        ctx.restrict_command_environment(&mut cmd, &[]);
+        ctx.restrict_command_environment(&mut cmd, &[]).await;
 
         tracing::info!(
             job_id = %request.job_id,

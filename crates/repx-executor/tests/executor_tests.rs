@@ -74,8 +74,8 @@ fn test_execution_request_with_mount_paths() {
         .contains(&"/data".to_string()));
 }
 
-#[test]
-fn test_find_image_file_in_images_dir() {
+#[tokio::test]
+async fn test_find_image_file_in_images_dir() {
     let temp = tempdir().expect("tempdir creation must succeed");
     let images_dir = temp.path().join("artifacts/images");
     fs::create_dir_all(&images_dir).expect("dir creation must succeed");
@@ -86,13 +86,13 @@ fn test_find_image_file_in_images_dir() {
     let request = create_test_request(temp.path().to_path_buf());
     let executor = Executor::new(request);
 
-    let result = executor.find_image_file("my-image");
+    let result = executor.find_image_file("my-image").await;
     assert!(result.is_some());
     assert_eq!(result.expect("result must be Ok"), image_file);
 }
 
-#[test]
-fn test_find_image_file_in_image_dir() {
+#[tokio::test]
+async fn test_find_image_file_in_image_dir() {
     let temp = tempdir().expect("tempdir creation must succeed");
     let image_dir = temp.path().join("artifacts/image");
     fs::create_dir_all(&image_dir).expect("dir creation must succeed");
@@ -103,13 +103,13 @@ fn test_find_image_file_in_image_dir() {
     let request = create_test_request(temp.path().to_path_buf());
     let executor = Executor::new(request);
 
-    let result = executor.find_image_file("container");
+    let result = executor.find_image_file("container").await;
     assert!(result.is_some());
     assert_eq!(result.expect("result must be Ok"), image_file);
 }
 
-#[test]
-fn test_find_image_file_exact_match() {
+#[tokio::test]
+async fn test_find_image_file_exact_match() {
     let temp = tempdir().expect("tempdir creation must succeed");
     let images_dir = temp.path().join("artifacts/images");
     fs::create_dir_all(&images_dir).expect("dir creation must succeed");
@@ -120,12 +120,12 @@ fn test_find_image_file_exact_match() {
     let request = create_test_request(temp.path().to_path_buf());
     let executor = Executor::new(request);
 
-    let result = executor.find_image_file("exact-name");
+    let result = executor.find_image_file("exact-name").await;
     assert!(result.is_some());
 }
 
-#[test]
-fn test_find_image_file_not_found() {
+#[tokio::test]
+async fn test_find_image_file_not_found() {
     let temp = tempdir().expect("tempdir creation must succeed");
     let images_dir = temp.path().join("artifacts/images");
     fs::create_dir_all(&images_dir).expect("dir creation must succeed");
@@ -133,34 +133,34 @@ fn test_find_image_file_not_found() {
     let request = create_test_request(temp.path().to_path_buf());
     let executor = Executor::new(request);
 
-    let result = executor.find_image_file("nonexistent");
+    let result = executor.find_image_file("nonexistent").await;
     assert!(result.is_none());
 }
 
-#[test]
-fn test_find_image_file_no_artifacts_dir() {
+#[tokio::test]
+async fn test_find_image_file_no_artifacts_dir() {
     let temp = tempdir().expect("tempdir creation must succeed");
     let request = create_test_request(temp.path().to_path_buf());
     let executor = Executor::new(request);
 
-    let result = executor.find_image_file("any-image");
+    let result = executor.find_image_file("any-image").await;
     assert!(result.is_none());
 }
 
-#[test]
-fn test_get_host_tool_path_no_dir_configured() {
+#[tokio::test]
+async fn test_get_host_tool_path_no_dir_configured() {
     let temp = tempdir().expect("tempdir creation must succeed");
     let request = create_test_request(temp.path().to_path_buf());
     let executor = Executor::new(request);
 
-    let result = executor.get_host_tool_path("some-tool");
+    let result = executor.get_host_tool_path("some-tool").await;
     assert!(result.is_err());
     let err = result.expect_err("result must be Err");
     assert!(matches!(err, ExecutorError::Config(_)));
 }
 
-#[test]
-fn test_get_host_tool_path_tool_exists() {
+#[tokio::test]
+async fn test_get_host_tool_path_tool_exists() {
     let temp = tempdir().expect("tempdir creation must succeed");
     let host_tools = temp.path().join("host-tools/bin");
     fs::create_dir_all(&host_tools).expect("dir creation must succeed");
@@ -172,13 +172,13 @@ fn test_get_host_tool_path_tool_exists() {
         create_test_request_with_host_tools(temp.path().to_path_buf(), host_tools.clone());
     let executor = Executor::new(request);
 
-    let result = executor.get_host_tool_path("my-tool");
+    let result = executor.get_host_tool_path("my-tool").await;
     assert!(result.is_ok());
     assert_eq!(result.expect("result must be Ok"), tool_path);
 }
 
-#[test]
-fn test_get_host_tool_path_tool_not_found() {
+#[tokio::test]
+async fn test_get_host_tool_path_tool_not_found() {
     let temp = tempdir().expect("tempdir creation must succeed");
     let host_tools = temp.path().join("host-tools/bin");
     fs::create_dir_all(&host_tools).expect("dir creation must succeed");
@@ -186,22 +186,22 @@ fn test_get_host_tool_path_tool_not_found() {
     let request = create_test_request_with_host_tools(temp.path().to_path_buf(), host_tools);
     let executor = Executor::new(request);
 
-    let result = executor.get_host_tool_path("nonexistent-tool");
+    let result = executor.get_host_tool_path("nonexistent-tool").await;
     assert!(result.is_err());
 }
 
-#[test]
-fn test_calculate_restricted_path_empty_with_no_host_tools() {
+#[tokio::test]
+async fn test_calculate_restricted_path_empty_with_no_host_tools() {
     let temp = tempdir().expect("tempdir creation must succeed");
     let request = create_test_request(temp.path().to_path_buf());
     let executor = Executor::new(request);
 
-    let path = executor.calculate_restricted_path(&[]);
+    let path = executor.calculate_restricted_path(&[]).await;
     assert_eq!(path, std::ffi::OsString::from(""));
 }
 
-#[test]
-fn test_calculate_restricted_path_with_host_tools() {
+#[tokio::test]
+async fn test_calculate_restricted_path_with_host_tools() {
     let temp = tempdir().expect("tempdir creation must succeed");
     let host_tools = temp.path().join("host-tools/bin");
     fs::create_dir_all(&host_tools).expect("dir creation must succeed");
@@ -210,17 +210,17 @@ fn test_calculate_restricted_path_with_host_tools() {
         create_test_request_with_host_tools(temp.path().to_path_buf(), host_tools.clone());
     let executor = Executor::new(request);
 
-    let path = executor.calculate_restricted_path(&[]);
+    let path = executor.calculate_restricted_path(&[]).await;
     assert!(path.to_string_lossy().contains("host-tools"));
 }
 
-#[test]
-fn test_calculate_restricted_path_rejects_disallowed_binary() {
+#[tokio::test]
+async fn test_calculate_restricted_path_rejects_disallowed_binary() {
     let temp = tempdir().expect("tempdir creation must succeed");
     let request = create_test_request(temp.path().to_path_buf());
     let executor = Executor::new(request);
 
-    let path = executor.calculate_restricted_path(&["rm", "curl"]);
+    let path = executor.calculate_restricted_path(&["rm", "curl"]).await;
     assert_eq!(path, std::ffi::OsString::from(""));
 }
 

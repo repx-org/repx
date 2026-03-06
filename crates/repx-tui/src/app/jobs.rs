@@ -80,18 +80,25 @@ impl JobsState {
                     Some(j) => j,
                     None => continue,
                 };
-                let tui_job = TuiJob {
+                let id_str = id_part.to_string();
+                let name_str = name_part.to_string();
+                let run_str = run_id.to_string();
+                let mut tui_job = TuiJob {
                     full_id: job_id.clone(),
-                    id: id_part.to_string(),
-                    name: name_part.to_string(),
-                    run: run_id.to_string(),
+                    id: id_str.clone(),
+                    name: name_str.clone(),
+                    run: run_str.clone(),
                     params: job_def.params.clone(),
                     params_str: crate::tree_view::format_params_single_line(&job_def.params),
                     status: JobStatus::Unknown,
                     context_depends_on: "-".to_string(),
                     context_dependents: "-".to_string(),
                     logs: vec!["Awaiting update...".to_string()],
+                    id_lower: id_str.to_lowercase(),
+                    name_lower: name_str.to_lowercase(),
+                    run_lower: run_str.to_lowercase(),
                 };
+                tui_job.compute_lowercase_fields();
                 job_index_map.insert(job_id.clone(), all_jobs.len());
                 all_jobs.push(tui_job);
             }
@@ -258,7 +265,7 @@ impl JobsState {
             let job = &self.jobs[idx];
             self.display_rows.push(TuiDisplayRow {
                 item: TuiRowItem::Job {
-                    job: Box::new(job.clone()),
+                    job: std::sync::Arc::new(job.clone()),
                 },
                 id: RowId::job(job.full_id.clone()),
                 depth: 0,
@@ -571,7 +578,7 @@ impl JobsState {
 
         self.display_rows.push(TuiDisplayRow {
             item: TuiRowItem::Job {
-                job: Box::new(tui_job.clone()),
+                job: std::sync::Arc::new(tui_job.clone()),
             },
             id: job_instance_id.clone(),
             depth,
@@ -823,13 +830,13 @@ impl JobsState {
         for filter in filters {
             let matches = match filter.filter_type {
                 FilterType::Global => {
-                    job.id.to_lowercase().contains(&filter.term)
-                        || job.name.to_lowercase().contains(&filter.term)
-                        || job.run.to_lowercase().contains(&filter.term)
+                    job.id_lower.contains(&filter.term)
+                        || job.name_lower.contains(&filter.term)
+                        || job.run_lower.contains(&filter.term)
                 }
-                FilterType::Id => job.id.to_lowercase().contains(&filter.term),
-                FilterType::Name => job.name.to_lowercase().contains(&filter.term),
-                FilterType::Run => job.run.to_lowercase().contains(&filter.term),
+                FilterType::Id => job.id_lower.contains(&filter.term),
+                FilterType::Name => job.name_lower.contains(&filter.term),
+                FilterType::Run => job.run_lower.contains(&filter.term),
                 FilterType::Params => self.params_match(&job.params, &filter.term),
                 FilterType::Status => job.status.as_str().to_lowercase().contains(&filter.term),
             };
