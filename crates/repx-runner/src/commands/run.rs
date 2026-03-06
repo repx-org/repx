@@ -47,8 +47,9 @@ pub fn handle_run(
 
     let cancelled = Arc::new(AtomicBool::new(false));
     let cancelled_clone = cancelled.clone();
+    let cancelled_for_submit = cancelled.clone();
     let _ = ctrlc::set_handler(move || {
-        eprintln!("\nCancellation requested (Ctrl+C). Waiting for in-flight work to stop...");
+        eprintln!("\nCancellation requested (Ctrl+C). Killing running processes...");
         cancelled_clone.store(true, Ordering::SeqCst);
     });
 
@@ -62,6 +63,7 @@ pub fn handle_run(
             event_sender: Some(tx),
             continue_on_failure,
             verbose,
+            cancel_flag: Some(cancelled_for_submit),
         };
         client.submit_batch_run(run_specs, &target_name_clone, scheduler, options)
     });

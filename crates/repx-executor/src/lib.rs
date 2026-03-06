@@ -50,6 +50,12 @@ impl Executor {
         args: &[String],
         cancel: &CancellationToken,
     ) -> Result<()> {
+        if cancel.is_cancelled() {
+            return Err(ExecutorError::Cancelled {
+                job_id: self.request.job_id.to_string(),
+            });
+        }
+
         let (stdout_log, stderr_log) = self.create_log_files().await?;
         let stderr_path = self.request.repx_out_dir.join(logs::STDERR);
 

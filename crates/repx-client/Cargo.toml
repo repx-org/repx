@@ -23,6 +23,7 @@ sysinfo = { workspace = true }
 
 [dev-dependencies]
 repx-core = { workspace = true }
+nix = { workspace = true }
 
 [lints]
 workspace = true

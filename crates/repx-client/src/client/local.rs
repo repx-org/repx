@@ -12,7 +12,9 @@ use repx_core::{
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
-use std::sync::Arc;
+use std::process::Child;
+use std::sync::atomic::Ordering;
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 use sysinfo::System;
@@ -20,6 +22,12 @@ use sysinfo::System;
 const DEFAULT_JOB_MEM_BYTES: u64 = 1024 * 1024 * 1024;
 const DEFAULT_JOB_CPUS: u32 = 1;
 const POLL_INTERVAL_MS: u64 = 50;
+
+type ActiveHandle = (
+    WorkUnitId,
+    Arc<Mutex<Option<Child>>>,
+    std::thread::JoinHandle<std::io::Result<std::process::Output>>,
+);
 
 fn get_job_mem_bytes(job: &Job, resources_config: &Option<repx_core::config::Resources>) -> u64 {
     let hints = job.resource_hints.as_ref();
@@ -855,17 +863,35 @@ pub fn submit_local_batch_run(
     let mut total_work_units = units_left.len();
 
     let mut resource_tracker = ResourceTracker::new();
-    let mut active_handles: Vec<(
-        WorkUnitId,
-        std::thread::JoinHandle<std::io::Result<std::process::Output>>,
-    )> = vec![];
+    let mut active_handles: Vec<ActiveHandle> = vec![];
     let mut failed_units: Vec<(WorkUnitId, String)> = vec![];
     let mut blocked_units: HashSet<WorkUnitId> = HashSet::new();
     let mut submitted_count: usize = 0;
 
     loop {
+        if let Some(ref flag) = options.cancel_flag {
+            if flag.load(Ordering::SeqCst) {
+                tracing::warn!(
+                    "Cancellation requested, killing {} running processes...",
+                    active_handles.len()
+                );
+                for (uid, child_handle, _) in &active_handles {
+                    if let Ok(mut guard) = child_handle.lock() {
+                        if let Some(ref mut child) = *guard {
+                            tracing::debug!("Killing process for unit {}", uid);
+                            let _ = child.kill();
+                        }
+                    }
+                }
+                thread::sleep(Duration::from_millis(100));
+                return Err(ClientError::Config(CoreError::CommandFailed(
+                    "Batch run cancelled by user".to_string(),
+                )));
+            }
+        }
+
         let mut finished_indices = Vec::new();
-        for (i, (_id, handle)) in active_handles.iter().enumerate() {
+        for (i, (_id, _, handle)) in active_handles.iter().enumerate() {
             if handle.is_finished() {
                 finished_indices.push(i);
             }
@@ -873,7 +899,7 @@ pub fn submit_local_batch_run(
         let any_finished = !finished_indices.is_empty();
 
         for i in finished_indices.into_iter().rev() {
-            let (unit_id, handle) = active_handles.remove(i);
+            let (unit_id, _, handle) = active_handles.remove(i);
             resource_tracker.release(&unit_id);
 
             match handle.join() {
@@ -1126,8 +1152,25 @@ pub fn submit_local_batch_run(
                     phase: uid.phase(),
                 });
 
-                let handle = thread::spawn(move || child.wait_with_output());
-                active_handles.push((uid, handle));
+                let child_handle = Arc::new(Mutex::new(Some(child)));
+                let child_handle_clone = child_handle.clone();
+                let handle = thread::spawn(move || {
+                    let guard_result = child_handle_clone.lock();
+                    match guard_result {
+                        Ok(mut guard) => {
+                            if let Some(child) = guard.take() {
+                                child.wait_with_output()
+                            } else {
+                                Err(std::io::Error::new(
+                                    std::io::ErrorKind::Interrupted,
+                                    "Process was killed",
+                                ))
+                            }
+                        }
+                        Err(_) => Err(std::io::Error::other("Mutex was poisoned")),
+                    }
+                });
+                active_handles.push((uid, child_handle, handle));
             }
         }
 

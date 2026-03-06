@@ -17,7 +17,7 @@ use std::path::Path;
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
     path::PathBuf,
-    sync::{mpsc::Sender, Arc, Mutex},
+    sync::{atomic::AtomicBool, mpsc::Sender, Arc, Mutex},
 };
 
 pub mod local;
@@ -162,6 +162,7 @@ pub struct SubmitOptions {
     pub event_sender: Option<Sender<ClientEvent>>,
     pub continue_on_failure: bool,
     pub verbose: repx_core::logging::Verbosity,
+    pub cancel_flag: Option<Arc<AtomicBool>>,
 }
 #[derive(Clone)]
 pub struct Client {
