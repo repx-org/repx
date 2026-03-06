@@ -27,7 +27,7 @@ impl ContainerRuntime {
         let (binary, image_tag) = Self::get_runtime_details(runtime)?;
         let image_hash = crate::util::extract_image_hash(image_tag)?;
 
-        let temp_path = ctx.get_temp_path();
+        let temp_path = ctx.get_temp_path().await;
         let lock_path = temp_path.join(format!("repx-load-{}.lock", image_hash));
 
         let _lock = super::acquire_flock(&lock_path, "image load").await?;
@@ -36,14 +36,15 @@ impl ContainerRuntime {
 
         let mut check_cmd = TokioCommand::new(binary);
         check_cmd.args(["images", "-q", image_tag]);
-        ctx.restrict_command_environment(&mut check_cmd, &[binary]);
+        ctx.restrict_command_environment(&mut check_cmd, &[binary])
+            .await;
 
         let check_output = check_cmd.output().await?;
 
         if check_output.stdout.is_empty() {
             tracing::info!("Image '{}' not found in cache. Loading...", image_tag);
 
-            let image_full_path = ctx.find_image_file(image_tag).ok_or_else(|| {
+            let image_full_path = ctx.find_image_file(image_tag).await.ok_or_else(|| {
                 ExecutorError::ImageNotFound(format!(
                     "Image file for tag '{}' not found",
                     image_tag
@@ -55,7 +56,8 @@ impl ContainerRuntime {
             load_cmd.stdin(Stdio::piped());
             load_cmd.stdout(Stdio::piped());
             load_cmd.stderr(Stdio::piped());
-            ctx.restrict_command_environment(&mut load_cmd, &[binary]);
+            ctx.restrict_command_environment(&mut load_cmd, &[binary])
+                .await;
 
             let mut child = load_cmd.spawn()?;
             let mut load_stdin = child.stdin.take().ok_or_else(|| {
@@ -67,7 +69,7 @@ impl ContainerRuntime {
 
             if image_full_path.is_dir() {
                 tracing::debug!("Streaming image directory from {:?}...", image_full_path);
-                let tar_path = ctx.resolve_tool("tar")?;
+                let tar_path = ctx.resolve_tool("tar").await?;
                 let mut tar_cmd = TokioCommand::new(tar_path);
                 tar_cmd
                     .arg("-C")
@@ -143,7 +145,8 @@ impl ContainerRuntime {
             if let Some(id) = loaded_image_id {
                 let mut tag_cmd = TokioCommand::new(binary);
                 tag_cmd.args(["tag", &id, image_tag]);
-                ctx.restrict_command_environment(&mut tag_cmd, &[binary]);
+                ctx.restrict_command_environment(&mut tag_cmd, &[binary])
+                    .await;
                 let tag_output = tag_cmd.output().await?;
                 if !tag_output.status.success() {
                     let stderr = String::from_utf8_lossy(&tag_output.stderr);
@@ -248,7 +251,7 @@ impl ContainerRuntime {
         cmd.arg(image_tag).arg(script_path);
 
         cmd.args(args);
-        ctx.restrict_command_environment(&mut cmd, &[binary]);
+        ctx.restrict_command_environment(&mut cmd, &[binary]).await;
         Ok(cmd)
     }
 }

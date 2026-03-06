@@ -181,7 +181,7 @@ struct ResourceTracker {
 
 impl ResourceTracker {
     fn new() -> Self {
-        let sys = System::new_all();
+        let sys = System::new();
         let total_mem_bytes = sys.total_memory();
         let total_cpus = num_cpus::get();
 
@@ -842,6 +842,16 @@ pub fn submit_local_batch_run(
         }
     }
 
+    let mut dependents: HashMap<WorkUnitId, Vec<WorkUnitId>> = HashMap::new();
+    for (unit_id, unit) in &work_units {
+        for dep in &unit.deps {
+            dependents
+                .entry(dep.clone())
+                .or_default()
+                .push(unit_id.clone());
+        }
+    }
+
     let mut total_work_units = units_left.len();
 
     let mut resource_tracker = ResourceTracker::new();
@@ -897,10 +907,14 @@ pub fn submit_local_batch_run(
                             }
 
                             let failed_job_id = work_units.get(&unit_id).map(|u| u.job_id.clone());
-                            for (candidate_id, candidate) in &work_units {
-                                if units_left.contains(candidate_id)
-                                    && candidate.deps.contains(&unit_id)
-                                {
+                            if let Some(dependent_ids) = dependents.get(&unit_id) {
+                                for candidate_id in dependent_ids {
+                                    if !units_left.contains(candidate_id) {
+                                        continue;
+                                    }
+                                    let Some(candidate) = work_units.get(candidate_id) else {
+                                        continue;
+                                    };
                                     blocked_units.insert(candidate_id.clone());
                                     if let Some(ref blocked_by_jid) = failed_job_id {
                                         let blocked_phase = candidate_id.phase();

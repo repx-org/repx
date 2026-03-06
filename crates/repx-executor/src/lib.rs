@@ -146,20 +146,21 @@ impl Executor {
         NativeRuntime::build_command(&self.request, script_path, args)
     }
 
-    pub fn find_image_file(&self, image_tag: &str) -> Option<PathBuf> {
-        self.context().find_image_file(image_tag)
+    pub async fn find_image_file(&self, image_tag: &str) -> Option<PathBuf> {
+        self.context().find_image_file(image_tag).await
     }
 
-    pub fn get_host_tool_path(&self, tool_name: &str) -> Result<PathBuf> {
-        self.context().get_host_tool_path(tool_name)
+    pub async fn get_host_tool_path(&self, tool_name: &str) -> Result<PathBuf> {
+        self.context().get_host_tool_path(tool_name).await
     }
 
-    pub fn calculate_restricted_path(
+    pub async fn calculate_restricted_path(
         &self,
         required_system_binaries: &[&str],
     ) -> std::ffi::OsString {
         self.context()
             .calculate_restricted_path(required_system_binaries)
+            .await
     }
 
     pub async fn ensure_bwrap_rootfs_extracted(&self, image_tag: &str) -> Result<PathBuf> {

@@ -12,11 +12,23 @@ type RunStages<'a> = BTreeMap<String, StageJobs<'a>>;
 
 pub(crate) struct VizGenerator<'a> {
     pub lab: &'a Lab,
+    scatter_gather_clean_names: HashSet<String>,
 }
 
 impl<'a> VizGenerator<'a> {
     pub fn new(lab: &'a Lab) -> Self {
-        Self { lab }
+        let scatter_gather_clean_names = lab
+            .jobs
+            .values()
+            .filter(|job| job.stage_type == StageType::ScatterGather)
+            .filter_map(|job| job.name.as_ref())
+            .map(|name| clean_id(name))
+            .collect();
+
+        Self {
+            lab,
+            scatter_gather_clean_names,
+        }
     }
 
     #[allow(clippy::expect_used)]
@@ -240,10 +252,7 @@ impl<'a> VizGenerator<'a> {
     }
 
     fn is_scatter_gather_stage_by_clean_name(&self, clean_name: &str) -> bool {
-        self.lab.jobs.values().any(|job| {
-            let name = job.name.clone().unwrap_or_default();
-            clean_id(&name) == clean_name && job.stage_type == StageType::ScatterGather
-        })
+        self.scatter_gather_clean_names.contains(clean_name)
     }
 
     #[allow(clippy::expect_used)]
