@@ -93,73 +93,139 @@ impl ContainerRuntime {
                     res
                 });
 
+                let copy_result = copy_task.await;
                 let tar_status = tar_child.wait().await?;
-                if !tar_status.success() {
+
+                let tar_failed = !tar_status.success();
+                let tar_error_msg = if tar_failed {
+                    Some(format!("tar failed with status {}", tar_status))
+                } else {
+                    None
+                };
+
+                let copy_error_msg = match copy_result {
+                    Ok(Ok(_)) => None,
+                    Ok(Err(e)) => Some(format!(
+                        "Copying tar output to {} load failed: {}",
+                        binary, e
+                    )),
+                    Err(join_err) => Some(format!("tar-to-load copy task panicked: {}", join_err)),
+                };
+
+                let load_output = child.wait_with_output().await?;
+                if !load_output.status.success() {
+                    let stderr = String::from_utf8_lossy(&load_output.stderr);
+                    let stdout = String::from_utf8_lossy(&load_output.stdout);
                     return Err(ExecutorError::Io(std::io::Error::other(format!(
-                        "tar decompression failed with status {}",
-                        tar_status
+                        "'{} load' failed with status {}. Stderr:\n{}\nStdout:\n{}",
+                        binary, load_output.status, stderr, stdout
                     ))));
                 }
 
-                match copy_task.await {
-                    Ok(Ok(_)) => {}
-                    Ok(Err(e)) => {
+                if let Some(ref copy_err) = copy_error_msg {
+                    let is_broken_pipe = copy_err.contains("Broken pipe")
+                        || copy_err.contains("os error 32")
+                        || copy_err.contains("BrokenPipe");
+                    if !is_broken_pipe {
+                        return Err(ExecutorError::Io(std::io::Error::other(copy_err.clone())));
+                    } else {
+                        tracing::warn!(
+                            "Copy task got broken pipe but {} load succeeded. Continuing.",
+                            binary
+                        );
+                    }
+                }
+                if let Some(tar_err) = tar_error_msg {
+                    #[cfg(unix)]
+                    {
+                        use std::os::unix::process::ExitStatusExt;
+                        if tar_status.signal() == Some(13) {
+                            tracing::warn!(
+                                "tar received SIGPIPE but {} load succeeded. Continuing.",
+                                binary
+                            );
+                        } else {
+                            return Err(ExecutorError::Io(std::io::Error::other(tar_err)));
+                        }
+                    }
+                    #[cfg(not(unix))]
+                    {
+                        return Err(ExecutorError::Io(std::io::Error::other(tar_err)));
+                    }
+                }
+
+                let output_str = String::from_utf8_lossy(&load_output.stdout);
+                let loaded_image_id = output_str
+                    .lines()
+                    .find_map(|line| {
+                        line.strip_prefix("Loaded image ID: ")
+                            .or_else(|| line.strip_prefix("Loaded image: "))
+                    })
+                    .map(|s| s.trim().to_string());
+
+                if let Some(id) = loaded_image_id {
+                    let mut tag_cmd = TokioCommand::new(binary);
+                    tag_cmd.args(["tag", &id, image_tag]);
+                    ctx.restrict_command_environment(&mut tag_cmd, &[binary])
+                        .await;
+                    let tag_output = tag_cmd.output().await?;
+                    if !tag_output.status.success() {
+                        let stderr = String::from_utf8_lossy(&tag_output.stderr);
                         return Err(ExecutorError::Io(std::io::Error::other(format!(
-                            "Copying tar output to {} load failed: {}",
-                            binary, e
+                            "'{} tag {} {}' failed with status {}. Stderr:\n{}",
+                            binary, id, image_tag, tag_output.status, stderr
                         ))));
                     }
-                    Err(join_err) => {
-                        return Err(ExecutorError::Io(std::io::Error::other(format!(
-                            "tar-to-load copy task panicked: {}",
-                            join_err
-                        ))));
-                    }
+                    tracing::info!("Successfully loaded and tagged image '{}'", image_tag);
+                } else {
+                    tracing::info!(
+                        "Could not parse image ID from load output. Assuming tag is correct."
+                    );
                 }
             } else {
                 tracing::debug!("Loading image tarball from {:?}...", image_full_path);
                 let mut file = File::open(&image_full_path).await?;
                 tokio::io::copy(&mut file, &mut load_stdin).await?;
                 drop(load_stdin);
-            }
 
-            let load_output = child.wait_with_output().await?;
-            if !load_output.status.success() {
-                let stderr = String::from_utf8_lossy(&load_output.stderr);
-                let stdout = String::from_utf8_lossy(&load_output.stdout);
-                return Err(ExecutorError::Io(std::io::Error::other(format!(
-                    "'{} load' failed with status {}. Stderr:\n{}\nStdout:\n{}",
-                    binary, load_output.status, stderr, stdout
-                ))));
-            }
-
-            let output_str = String::from_utf8_lossy(&load_output.stdout);
-            let loaded_image_id = output_str
-                .lines()
-                .find_map(|line| {
-                    line.strip_prefix("Loaded image ID: ")
-                        .or_else(|| line.strip_prefix("Loaded image: "))
-                })
-                .map(|s| s.trim().to_string());
-
-            if let Some(id) = loaded_image_id {
-                let mut tag_cmd = TokioCommand::new(binary);
-                tag_cmd.args(["tag", &id, image_tag]);
-                ctx.restrict_command_environment(&mut tag_cmd, &[binary])
-                    .await;
-                let tag_output = tag_cmd.output().await?;
-                if !tag_output.status.success() {
-                    let stderr = String::from_utf8_lossy(&tag_output.stderr);
+                let load_output = child.wait_with_output().await?;
+                if !load_output.status.success() {
+                    let stderr = String::from_utf8_lossy(&load_output.stderr);
+                    let stdout = String::from_utf8_lossy(&load_output.stdout);
                     return Err(ExecutorError::Io(std::io::Error::other(format!(
-                        "'{} tag {} {}' failed with status {}. Stderr:\n{}",
-                        binary, id, image_tag, tag_output.status, stderr
+                        "'{} load' failed with status {}. Stderr:\n{}\nStdout:\n{}",
+                        binary, load_output.status, stderr, stdout
                     ))));
                 }
-                tracing::info!("Successfully loaded and tagged image '{}'", image_tag);
-            } else {
-                tracing::info!(
-                    "Could not parse image ID from load output. Assuming tag is correct."
-                );
+
+                let output_str = String::from_utf8_lossy(&load_output.stdout);
+                let loaded_image_id = output_str
+                    .lines()
+                    .find_map(|line| {
+                        line.strip_prefix("Loaded image ID: ")
+                            .or_else(|| line.strip_prefix("Loaded image: "))
+                    })
+                    .map(|s| s.trim().to_string());
+
+                if let Some(id) = loaded_image_id {
+                    let mut tag_cmd = TokioCommand::new(binary);
+                    tag_cmd.args(["tag", &id, image_tag]);
+                    ctx.restrict_command_environment(&mut tag_cmd, &[binary])
+                        .await;
+                    let tag_output = tag_cmd.output().await?;
+                    if !tag_output.status.success() {
+                        let stderr = String::from_utf8_lossy(&tag_output.stderr);
+                        return Err(ExecutorError::Io(std::io::Error::other(format!(
+                            "'{} tag {} {}' failed with status {}. Stderr:\n{}",
+                            binary, id, image_tag, tag_output.status, stderr
+                        ))));
+                    }
+                    tracing::info!("Successfully loaded and tagged image '{}'", image_tag);
+                } else {
+                    tracing::info!(
+                        "Could not parse image ID from load output. Assuming tag is correct."
+                    );
+                }
             }
         } else {
             tracing::debug!("Image '{}' found in cache. Skipping load.", image_tag);
