@@ -11,6 +11,8 @@ const SUCCESS_MARKER: &str = "SUCCESS";
 
 #[derive(Debug, Serialize, Deserialize)]
 struct OverlayCapabilityCache {
+    #[serde(default)]
+    overlay_supported: Option<bool>,
     tmp_overlay_supported: bool,
     checked_at: String,
 }
@@ -107,12 +109,12 @@ impl BwrapRuntime {
         for layer in layers {
             let layer_path = image_path.join(layer);
             if !layer_path.exists() {
-                tracing::debug!(
-                    "Layer {} listed in manifest but not found at {:?}, skipping.",
+                let _ = tokio::fs::remove_dir_all(&staging_dir).await;
+                return Err(ExecutorError::Io(std::io::Error::other(format!(
+                    "Layer '{}' listed in manifest but not found at '{}'",
                     layer,
-                    layer_path
-                );
-                continue;
+                    layer_path.display()
+                ))));
             }
 
             tracing::debug!("Extracting layer: {:?}", layer_path);
@@ -212,11 +214,39 @@ impl BwrapRuntime {
 
         if let Ok(content) = tokio::fs::read_to_string(&cache_file).await {
             if let Ok(cached) = serde_json::from_str::<OverlayCapabilityCache>(&content) {
-                return cached.tmp_overlay_supported;
+                if let Some(supported) = cached.overlay_supported {
+                    tracing::debug!(
+                        "Using cached overlay support result: supported={}",
+                        supported
+                    );
+                    return supported;
+                }
             }
         }
 
-        Self::run_overlay_check(ctx).await
+        let supported = Self::run_overlay_check(ctx).await;
+
+        if let Err(e) = tokio::fs::create_dir_all(&cache_dir).await {
+            tracing::debug!("Failed to create capabilities cache dir: {}", e);
+        } else {
+            let existing = tokio::fs::read_to_string(&cache_file)
+                .await
+                .ok()
+                .and_then(|c| serde_json::from_str::<OverlayCapabilityCache>(&c).ok());
+
+            let cache_entry = OverlayCapabilityCache {
+                overlay_supported: Some(supported),
+                tmp_overlay_supported: existing.map(|e| e.tmp_overlay_supported).unwrap_or(false),
+                checked_at: chrono::Utc::now().to_rfc3339(),
+            };
+            if let Ok(json) = serde_json::to_string_pretty(&cache_entry) {
+                if let Err(e) = tokio::fs::write(&cache_file, json).await {
+                    tracing::debug!("Failed to write overlay capability cache: {}", e);
+                }
+            }
+        }
+
+        supported
     }
 
     async fn run_overlay_check(ctx: &RuntimeContext<'_>) -> bool {
@@ -281,7 +311,7 @@ impl BwrapRuntime {
         if let Ok(content) = tokio::fs::read_to_string(&cache_file).await {
             if let Ok(cached) = serde_json::from_str::<OverlayCapabilityCache>(&content) {
                 tracing::debug!(
-                    "Using cached overlay support result: supported={}",
+                    "Using cached tmp overlay support result: supported={}",
                     cached.tmp_overlay_supported
                 );
                 return cached.tmp_overlay_supported;
@@ -293,7 +323,13 @@ impl BwrapRuntime {
         if let Err(e) = tokio::fs::create_dir_all(&cache_dir).await {
             tracing::debug!("Failed to create capabilities cache dir: {}", e);
         } else {
+            let existing = tokio::fs::read_to_string(&cache_file)
+                .await
+                .ok()
+                .and_then(|c| serde_json::from_str::<OverlayCapabilityCache>(&c).ok());
+
             let cache_entry = OverlayCapabilityCache {
+                overlay_supported: existing.and_then(|e| e.overlay_supported),
                 tmp_overlay_supported: supported,
                 checked_at: chrono::Utc::now().to_rfc3339(),
             };

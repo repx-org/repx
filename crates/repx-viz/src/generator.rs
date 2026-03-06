@@ -63,7 +63,7 @@ impl<'a> VizGenerator<'a> {
         }
 
         let mut intra_edges: HashMap<(String, String, String, String), usize> = HashMap::new();
-        let mut inter_edges: HashSet<(String, String, String)> = HashSet::new();
+        let mut inter_edges: HashSet<(String, String, String, String)> = HashSet::new();
 
         for (jid, job) in &self.lab.jobs {
             let run_name = job_to_run
@@ -74,7 +74,6 @@ impl<'a> VizGenerator<'a> {
 
             let tgt_name = job.name.clone().unwrap_or_else(|| jid.to_string());
             let clean_tgt = clean_id(&tgt_name);
-            let unique_tgt = format!("{}_{}", clean_run, clean_tgt);
 
             let inputs = Self::get_job_inputs(job);
 
@@ -106,7 +105,12 @@ impl<'a> VizGenerator<'a> {
                         .dependency_type
                         .map(|d| d.to_string())
                         .unwrap_or_else(|| "hard".to_string());
-                    inter_edges.insert((srun.to_string(), unique_tgt.clone(), dtype));
+                    inter_edges.insert((
+                        srun.to_string(),
+                        clean_run.clone(),
+                        clean_tgt.clone(),
+                        dtype,
+                    ));
                 }
             }
         }
@@ -114,7 +118,7 @@ impl<'a> VizGenerator<'a> {
         let has_groups = !self.lab.groups.is_empty();
         let mut runs_in_groups: HashSet<String> = HashSet::new();
 
-        let mut node_prefixes: Vec<String> = Vec::new();
+        let mut run_to_prefix: HashMap<String, String> = HashMap::new();
 
         if has_groups {
             let mut sorted_groups: Vec<_> = self.lab.groups.iter().collect();
@@ -138,8 +142,9 @@ impl<'a> VizGenerator<'a> {
                     let run_name = run_id.as_str();
                     runs_in_groups.insert(run_name.to_string());
                     if let Some(jobs) = grouped_jobs.get(run_name) {
-                        let prefix = format!("{}_{}", clean_group, clean_id(run_name));
-                        node_prefixes.push(prefix.clone());
+                        let clean_run = clean_id(run_name);
+                        let prefix = format!("{}_{}", clean_group, clean_run);
+                        run_to_prefix.insert(clean_run, prefix.clone());
                         self.render_run_cluster(&mut dot, run_name, &prefix, jobs, "        ");
                     }
                 }
@@ -152,86 +157,82 @@ impl<'a> VizGenerator<'a> {
             if has_groups && runs_in_groups.contains(run_name) {
                 continue;
             }
-            let prefix = clean_id(run_name);
-            node_prefixes.push(prefix.clone());
+            let clean_run = clean_id(run_name);
+            let prefix = clean_run.clone();
+            run_to_prefix.insert(clean_run, prefix.clone());
             self.render_run_cluster(&mut dot, run_name, &prefix, jobs, "    ");
         }
 
-        for prefix in &node_prefixes {
-            for ((src_run, src_job_name, dst_run, dst_job_name), cnt) in &intra_edges {
-                let prefix_has_src =
-                    prefix == src_run || prefix.ends_with(&format!("_{}", src_run));
-                let prefix_has_dst =
-                    prefix == dst_run || prefix.ends_with(&format!("_{}", dst_run));
-
-                if prefix_has_src && prefix_has_dst {
-                    let width = if *cnt > 1 { "2.0" } else { "1.2" };
-
-                    let src_node = format!("{}_{}", prefix, src_job_name);
-                    let dst_node = format!("{}_{}", prefix, dst_job_name);
-
-                    let src_is_sg = self.is_scatter_gather_stage_by_clean_name(src_job_name);
-                    let dst_is_sg = self.is_scatter_gather_stage_by_clean_name(dst_job_name);
-
-                    let actual_src = if src_is_sg {
-                        format!("{}_sg_gather", src_node)
-                    } else {
-                        src_node.clone()
-                    };
-                    let actual_dst = if dst_is_sg {
-                        format!("{}_sg_scatter", dst_node)
-                    } else {
-                        dst_node.clone()
-                    };
-
-                    dot_write!(
-                        dot,
-                        "    {} -> {} [penwidth=\"{}\"",
-                        actual_src,
-                        actual_dst,
-                        width
-                    );
-                    if src_is_sg {
-                        dot_write!(dot, ", ltail=\"cluster_{}_sg\"", src_node);
-                    }
-                    if dst_is_sg {
-                        dot_write!(dot, ", lhead=\"cluster_{}_sg\"", dst_node);
-                    }
-                    dot.push_str("];\n");
-                }
+        for ((src_run, src_job_name, dst_run, dst_job_name), cnt) in &intra_edges {
+            if src_run != dst_run {
+                continue;
             }
+
+            let Some(prefix) = run_to_prefix.get(src_run) else {
+                continue;
+            };
+
+            let width = if *cnt > 1 { "2.0" } else { "1.2" };
+
+            let src_node = format!("{}_{}", prefix, src_job_name);
+            let dst_node = format!("{}_{}", prefix, dst_job_name);
+
+            let src_is_sg = self.is_scatter_gather_stage_by_clean_name(src_job_name);
+            let dst_is_sg = self.is_scatter_gather_stage_by_clean_name(dst_job_name);
+
+            let actual_src = if src_is_sg {
+                format!("{}_sg_gather", src_node)
+            } else {
+                src_node.clone()
+            };
+            let actual_dst = if dst_is_sg {
+                format!("{}_sg_scatter", dst_node)
+            } else {
+                dst_node.clone()
+            };
+
+            dot_write!(
+                dot,
+                "    {} -> {} [penwidth=\"{}\"",
+                actual_src,
+                actual_dst,
+                width
+            );
+            if src_is_sg {
+                dot_write!(dot, ", ltail=\"cluster_{}_sg\"", src_node);
+            }
+            if dst_is_sg {
+                dot_write!(dot, ", lhead=\"cluster_{}_sg\"", dst_node);
+            }
+            dot.push_str("];\n");
         }
 
         let mut sorted_inter: Vec<_> = inter_edges.into_iter().collect();
         sorted_inter.sort();
 
-        for (srun, unique_tgt, dtype) in sorted_inter {
-            if let Some(anchor_job) = run_anchors.get(&srun) {
-                let tgt_run = unique_tgt.split('_').next().unwrap_or("");
-                let tgt_job = unique_tgt.split('_').next_back().unwrap_or(&unique_tgt);
-                let clean_srun = clean_id(&srun);
+        for (srun, tgt_run, tgt_job, dtype) in sorted_inter {
+            let Some(anchor_job) = run_anchors.get(&srun) else {
+                continue;
+            };
+            let clean_srun = clean_id(&srun);
 
-                for src_prefix in &node_prefixes {
-                    if !src_prefix.contains(&clean_srun) {
-                        continue;
-                    }
-                    for tgt_prefix in &node_prefixes {
-                        if !tgt_prefix.contains(tgt_run) {
-                            continue;
-                        }
-                        let clean_anchor = clean_id(anchor_job);
-                        let unique_anchor = format!("{}_{}", src_prefix, clean_anchor);
-                        let prefixed_tgt = format!("{}_{}", tgt_prefix, tgt_job);
+            let Some(src_prefix) = run_to_prefix.get(&clean_srun) else {
+                continue;
+            };
+            let Some(tgt_prefix) = run_to_prefix.get(&tgt_run) else {
+                continue;
+            };
 
-                        let style = if dtype == "soft" { "dashed" } else { "solid" };
-                        dot_writeln!(dot, "    {} -> {} [", unique_anchor, prefixed_tgt);
-                        dot_writeln!(dot, "        ltail=\"cluster_{}\",", src_prefix);
-                        dot_writeln!(dot, "        style=\"{}\",", style);
-                        dot.push_str("        color=\"#64748B\"\n");
-                        dot.push_str("    ];\n");
-                    }
-                }
-            }
+            let clean_anchor = clean_id(anchor_job);
+            let unique_anchor = format!("{}_{}", src_prefix, clean_anchor);
+            let prefixed_tgt = format!("{}_{}", tgt_prefix, tgt_job);
+
+            let style = if dtype == "soft" { "dashed" } else { "solid" };
+            dot_writeln!(dot, "    {} -> {} [", unique_anchor, prefixed_tgt);
+            dot_writeln!(dot, "        ltail=\"cluster_{}\",", src_prefix);
+            dot_writeln!(dot, "        style=\"{}\",", style);
+            dot.push_str("        color=\"#64748B\"\n");
+            dot.push_str("    ];\n");
         }
 
         dot.push_str("}\n");
