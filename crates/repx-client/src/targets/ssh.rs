@@ -124,7 +124,7 @@ impl TargetInfo for SshTarget {
             self.address,
             self.base_path()
                 .join(dirs::OUTPUTS)
-                .join(&job_id.0)
+                .join(job_id.as_str())
                 .join(dirs::OUT)
                 .display()
         )

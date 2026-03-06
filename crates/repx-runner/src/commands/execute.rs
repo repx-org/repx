@@ -2,7 +2,7 @@ use crate::{cli::InternalExecuteArgs, error::CliError};
 use repx_core::{
     constants::{dirs, logs, markers},
     errors::ConfigError,
-    model::JobId,
+    model::{JobId, MountPolicy},
 };
 use repx_executor::{CancellationToken, ExecutionRequest, Executor};
 use std::fs;
@@ -17,8 +17,8 @@ pub fn handle_execute(args: InternalExecuteArgs) -> Result<(), CliError> {
 async fn async_handle_execute(args: InternalExecuteArgs) -> Result<(), CliError> {
     tracing::debug!("INTERNAL EXECUTE starting for job '{}'", args.job_id,);
 
-    let job_id = JobId(args.job_id);
-    let job_root = args.base_path.join(dirs::OUTPUTS).join(&job_id.0);
+    let job_id = JobId::from(args.job_id);
+    let job_root = args.base_path.join(dirs::OUTPUTS).join(job_id.as_str());
     let user_out_dir = job_root.join(dirs::OUT);
     let repx_dir = job_root.join(dirs::REPX);
     fs::create_dir_all(&user_out_dir)?;
@@ -39,7 +39,7 @@ async fn async_handle_execute(args: InternalExecuteArgs) -> Result<(), CliError>
         .to_path_buf();
     let inputs_json_path = repx_dir.join("inputs.json");
 
-    let runtime = super::parse_runtime(&args.runtime, args.image_tag)?;
+    let runtime = super::parse_runtime(args.runtime, args.image_tag)?;
     let host_tools_root = args.base_path.join("artifacts").join("host-tools");
     let host_tools_bin_dir = Some(host_tools_root.join(&args.host_tools_dir).join("bin"));
 
@@ -53,8 +53,7 @@ async fn async_handle_execute(args: InternalExecuteArgs) -> Result<(), CliError>
         user_out_dir,
         repx_out_dir: repx_dir.clone(),
         host_tools_bin_dir,
-        mount_host_paths: args.mount_host_paths,
-        mount_paths: args.mount_paths,
+        mount_policy: MountPolicy::from_flags(args.mount_host_paths, args.mount_paths),
     };
 
     let executor = Executor::new(request);

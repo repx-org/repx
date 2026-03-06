@@ -73,7 +73,7 @@ where
             if !failed_ids.is_empty() {
                 break;
             }
-            let mut remaining: Vec<String> = jobs_left.iter().map(|j| j.0.clone()).collect();
+            let mut remaining: Vec<String> = jobs_left.iter().map(|j| j.to_string()).collect();
             remaining.sort();
             return Err(SchedulerError::CycleDetected(remaining));
         }
@@ -122,7 +122,7 @@ mod tests {
 
     macro_rules! job_id {
         ($name:expr) => {
-            JobId($name.to_string())
+            JobId::from($name)
         };
     }
 
@@ -143,7 +143,7 @@ mod tests {
     fn failing_executor(fail_set: &HashSet<JobId>) -> impl Fn(&JobId) -> Result<(), String> + '_ {
         move |job_id: &JobId| {
             if fail_set.contains(job_id) {
-                Err(format!("{} failed", job_id.0))
+                Err(format!("{} failed", job_id.as_str()))
             } else {
                 Ok(())
             }

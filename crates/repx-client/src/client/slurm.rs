@@ -24,7 +24,7 @@ fn generate_repx_invoker_script(
     repx_command_to_wrap: String,
 ) -> Result<String> {
     let mut s = String::from("#!/usr/bin/env bash\n");
-    s.push_str(&format!("#SBATCH --job-name={}\n", job_id.0));
+    s.push_str(&format!("#SBATCH --job-name={}\n", job_id.as_str()));
     s.push_str(&format!(
         "#SBATCH --chdir={}\n",
         job_root_on_target.display()
@@ -40,10 +40,10 @@ fn generate_repx_invoker_script(
         s.push_str(&format!("#SBATCH --cpus-per-task={}\n", c));
     }
     if let Some(m) = &directives.mem {
-        s.push_str(&format!("#SBATCH --mem={}\n", m));
+        s.push_str(&format!("#SBATCH --mem={}\n", m.as_str()));
     }
     if let Some(t) = &directives.time {
-        s.push_str(&format!("#SBATCH --time={}\n", t));
+        s.push_str(&format!("#SBATCH --time={}\n", t.as_str()));
     }
     for opt in &directives.sbatch_opts {
         s.push_str(&format!("#SBATCH {}\n", opt));
@@ -95,7 +95,7 @@ pub fn submit_slurm_batch_run(
     let job_ids_in_batch: HashSet<JobId> = jobs_to_submit.keys().cloned().collect();
 
     for (job_id, job) in &jobs_to_submit {
-        let job_root_on_target = target.base_path().join(dirs::OUTPUTS).join(&job_id.0);
+        let job_root_on_target = target.base_path().join(dirs::OUTPUTS).join(job_id.as_str());
         let image_path_opt = client
             .lab
             .runs
@@ -114,7 +114,7 @@ pub fn submit_slurm_batch_run(
         );
         let mut repx_args = format!(
             "--job-id {} --runtime {} {} --base-path {} --host-tools-dir {}",
-            shell_quote(&job_id.0),
+            shell_quote(job_id.as_str()),
             shell_quote(&execution_type),
             image_tag
                 .map(|t| format!("--image-tag {}", shell_quote(t)))
@@ -128,31 +128,29 @@ pub fn submit_slurm_batch_run(
                 shell_quote(&local_path.to_string_lossy())
             ));
         }
-        if target.config().mount_host_paths {
-            if !target.config().mount_paths.is_empty() {
-                return Err(ClientError::Config(ConfigError::InvalidConfig {
-                    detail: "Cannot specify both 'mount_host_paths = true' and 'mount_paths'."
-                        .to_string(),
-                }));
+        match target.config().mount_policy() {
+            repx_core::model::MountPolicy::AllHostPaths => {
+                repx_args.push_str(" --mount-host-paths");
             }
-            repx_args.push_str(" --mount-host-paths");
-        } else {
-            for path in &target.config().mount_paths {
-                repx_args.push_str(&format!(" --mount-paths {}", shell_quote(path)));
+            repx_core::model::MountPolicy::SpecificPaths(ref paths) => {
+                for path in paths {
+                    repx_args.push_str(&format!(" --mount-paths {}", shell_quote(path)));
+                }
             }
+            repx_core::model::MountPolicy::Isolated => {}
         }
         let (repx_command_to_wrap, directives) = if job.stage_type
             == repx_core::model::StageType::ScatterGather
         {
             let scatter_exe = job.executables.get("scatter").ok_or_else(|| {
                 ClientError::Config(ConfigError::MissingExecutable {
-                    job_id: job_id.0.clone(),
+                    job_id: job_id.to_string(),
                     executable: "scatter".to_string(),
                 })
             })?;
             let gather_exe = job.executables.get("gather").ok_or_else(|| {
                 ClientError::Config(ConfigError::MissingExecutable {
-                    job_id: job_id.0.clone(),
+                    job_id: job_id.to_string(),
                     executable: "gather".to_string(),
                 })
             })?;
@@ -203,16 +201,14 @@ pub fn submit_slurm_batch_run(
                 gather_exe_path.display(),
                 steps_json.replace('\'', "'\\''"),
                 last_step_outputs_json.replace('\'', "'\\''"),
-                if target.config().mount_host_paths {
-                    "--mount-host-paths".to_string()
-                } else {
-                    target
-                        .config()
-                        .mount_paths
+                match target.config().mount_policy() {
+                    repx_core::model::MountPolicy::AllHostPaths => "--mount-host-paths".to_string(),
+                    repx_core::model::MountPolicy::SpecificPaths(ref paths) => paths
                         .iter()
                         .map(|p| format!("--mount-paths {}", p))
                         .collect::<Vec<_>>()
-                        .join(" ")
+                        .join(" "),
+                    repx_core::model::MountPolicy::Isolated => String::new(),
                 }
             );
 
@@ -241,7 +237,7 @@ pub fn submit_slurm_batch_run(
         } else {
             let main_exe = job.executables.get("main").ok_or_else(|| {
                 ClientError::Config(ConfigError::MissingExecutable {
-                    job_id: job_id.0.clone(),
+                    job_id: job_id.to_string(),
                     executable: "main".to_string(),
                 })
             })?;

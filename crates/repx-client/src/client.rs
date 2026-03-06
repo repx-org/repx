@@ -479,13 +479,13 @@ impl Client {
             LogType::Stderr => target
                 .base_path()
                 .join(dirs::OUTPUTS)
-                .join(&job_id.0)
+                .join(job_id.as_str())
                 .join(dirs::REPX)
                 .join(logs::STDERR),
             LogType::Stdout => target
                 .base_path()
                 .join(dirs::OUTPUTS)
-                .join(&job_id.0)
+                .join(job_id.as_str())
                 .join(dirs::REPX)
                 .join(logs::STDOUT),
             LogType::Auto => {
@@ -499,14 +499,14 @@ impl Client {
                         target
                             .base_path()
                             .join(dirs::OUTPUTS)
-                            .join(&job_id.0)
+                            .join(job_id.as_str())
                             .join(dirs::REPX)
                             .join(format!("slurm-{}.out", entry.slurm_id))
                     } else {
                         target
                             .base_path()
                             .join(dirs::OUTPUTS)
-                            .join(&job_id.0)
+                            .join(job_id.as_str())
                             .join(dirs::REPX)
                             .join(logs::STDOUT)
                     }
@@ -514,7 +514,7 @@ impl Client {
                     target
                         .base_path()
                         .join(dirs::OUTPUTS)
-                        .join(&job_id.0)
+                        .join(job_id.as_str())
                         .join(dirs::REPX)
                         .join(logs::STDOUT)
                 }
@@ -542,7 +542,7 @@ impl Client {
             let manifest_path = target
                 .base_path()
                 .join(dirs::OUTPUTS)
-                .join(&job_id.0)
+                .join(job_id.as_str())
                 .join(dirs::REPX)
                 .join(repx_core::constants::manifests::WORKER_SLURM_IDS);
 
@@ -592,10 +592,10 @@ impl Client {
             let out_dir = target
                 .base_path()
                 .join(dirs::OUTPUTS)
-                .join(&job_id.0)
+                .join(job_id.as_str())
                 .join(dirs::REPX);
             table.add_row(vec![
-                Cell::new(job_id.0.as_str()).fg(Color::Yellow),
+                Cell::new(job_id.as_str()).fg(Color::Yellow),
                 Cell::new(out_dir.to_string_lossy().as_ref()),
             ]);
         }

@@ -62,7 +62,7 @@ impl TargetInfo for LocalTarget {
     fn get_remote_path_str(&self, job_id: &JobId) -> String {
         self.base_path()
             .join(dirs::OUTPUTS)
-            .join(&job_id.0)
+            .join(job_id.as_str())
             .join(dirs::OUT)
             .to_string_lossy()
             .to_string()
@@ -429,7 +429,7 @@ impl JobRunner for LocalTarget {
 
                 if let Some(job_dir) = repx_dir.parent() {
                     let job_id_str = job_dir.file_name().and_then(|s| s.to_str()).unwrap_or("");
-                    let job_id = JobId(job_id_str.to_string());
+                    let job_id = JobId::from(job_id_str.to_string());
                     let location = self.name().to_string();
 
                     let status = if file_name == markers::SUCCESS {
@@ -769,7 +769,7 @@ impl LocalTarget {
                 total += dir_size_or_file(&art_path);
             }
             for job_id in lab.jobs.keys() {
-                let job_out = outputs_dir.join(&job_id.0);
+                let job_out = outputs_dir.join(job_id.as_str());
                 total += dir_size_or_file(&job_out);
             }
         }

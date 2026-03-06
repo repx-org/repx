@@ -1,8 +1,11 @@
-use crate::{cli::InternalScatterGatherArgs, error::CliError};
+use crate::{
+    cli::{InternalScatterGatherArgs, ScatterGatherPhase},
+    error::CliError,
+};
 use repx_core::{
     constants::{dirs, manifests, markers},
     errors::ConfigError,
-    model::JobId,
+    model::{JobId, Memory, MountPolicy, SlurmTime},
 };
 use repx_executor::{CancellationToken, ExecutionRequest, Executor, Runtime};
 use serde::{Deserialize, Serialize};
@@ -52,11 +55,11 @@ pub struct StepInputMapping {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StepResourceHints {
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub mem: Option<String>,
+    pub mem: Option<Memory>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cpus: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub time: Option<String>,
+    pub time: Option<SlurmTime>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub partition: Option<String>,
 }
@@ -89,14 +92,13 @@ pub(crate) struct ScatterGatherOrchestrator {
     pub(crate) static_inputs: Value,
     pub(crate) host_tools_bin_dir: Option<PathBuf>,
     pub(crate) node_local_path: Option<PathBuf>,
-    pub(crate) mount_host_paths: bool,
-    pub(crate) mount_paths: Vec<String>,
+    pub(crate) mount_policy: MountPolicy,
 }
 
 impl ScatterGatherOrchestrator {
     pub(crate) fn new(args: &InternalScatterGatherArgs) -> Result<Self, CliError> {
-        let job_id = JobId(args.job_id.clone());
-        let job_root = args.base_path.join(dirs::OUTPUTS).join(&job_id.0);
+        let job_id = JobId::from(args.job_id.clone());
+        let job_root = args.base_path.join(dirs::OUTPUTS).join(job_id.as_str());
         let user_out_dir = job_root.join(dirs::OUT);
         let repx_dir = job_root.join(dirs::REPX);
         let scatter_root = job_root.join("scatter");
@@ -104,7 +106,7 @@ impl ScatterGatherOrchestrator {
         let scatter_repx_dir = scatter_root.join(dirs::REPX);
         let inputs_json_path = repx_dir.join("inputs.json");
 
-        let runtime = super::parse_runtime(&args.runtime, args.image_tag.clone())?;
+        let runtime = super::parse_runtime(args.runtime, args.image_tag.clone())?;
         let host_tools_root = args.base_path.join("artifacts").join("host-tools");
         let host_tools_bin_dir = Some(host_tools_root.join(&args.host_tools_dir).join("bin"));
 
@@ -122,8 +124,7 @@ impl ScatterGatherOrchestrator {
             static_inputs: Value::Object(Default::default()),
             host_tools_bin_dir,
             node_local_path: args.node_local_path.clone(),
-            mount_host_paths: args.mount_host_paths,
-            mount_paths: args.mount_paths.clone(),
+            mount_policy: MountPolicy::from_flags(args.mount_host_paths, args.mount_paths.clone()),
         })
     }
 
@@ -162,8 +163,7 @@ impl ScatterGatherOrchestrator {
             user_out_dir: user_out,
             repx_out_dir: repx_out,
             host_tools_bin_dir: self.host_tools_bin_dir.clone(),
-            mount_host_paths: self.mount_host_paths,
-            mount_paths: self.mount_paths.clone(),
+            mount_policy: self.mount_policy.clone(),
         })
     }
 
@@ -540,23 +540,17 @@ async fn async_handle_scatter_gather(
 
     let mut orch = ScatterGatherOrchestrator::new(&args)?;
 
-    match args.phase.as_str() {
-        "scatter-only" => {
+    match args.phase {
+        ScatterGatherPhase::ScatterOnly => {
             return handle_phase_scatter_only(&mut orch, &args).await;
         }
-        "step" => {
+        ScatterGatherPhase::Step => {
             return handle_phase_step(&mut orch, &args, &steps_meta).await;
         }
-        "gather" => {
+        ScatterGatherPhase::Gather => {
             return handle_phase_gather(&mut orch, &args, sink_step).await;
         }
-        "all" => {}
-        other => {
-            return Err(CliError::Config(ConfigError::UnsupportedValue {
-                kind: "phase".to_string(),
-                value: other.to_string(),
-            }));
-        }
+        ScatterGatherPhase::All => {}
     }
 
     orch.init_dirs()?;
@@ -590,35 +584,38 @@ async fn async_handle_scatter_gather(
     let work_items_str = fs::read_to_string(orch.scatter_out_dir.join("work_items.json"))?;
     let work_items: Vec<Value> = serde_json::from_str(&work_items_str)?;
 
-    if args.scheduler == "slurm" {
-        let (last_step_slurm_ids, all_worker_slurm_ids) = slurm::submit_slurm_branches(
-            &orch,
-            &work_items,
-            &steps_meta,
-            &topo_order,
-            &args.step_sbatch_opts,
-        )
-        .await?;
+    match args.scheduler {
+        repx_core::model::SchedulerType::Slurm => {
+            let (last_step_slurm_ids, all_worker_slurm_ids) = slurm::submit_slurm_branches(
+                &orch,
+                &work_items,
+                &steps_meta,
+                &topo_order,
+                &args.step_sbatch_opts,
+            )
+            .await?;
 
-        let manifest_path = orch.repx_dir.join(manifests::WORKER_SLURM_IDS);
-        let manifest_json = serde_json::to_string(&all_worker_slurm_ids)?;
-        fs::write(&manifest_path, manifest_json)?;
-        tracing::info!(
-            "Wrote {} worker SLURM IDs to {}",
-            all_worker_slurm_ids.len(),
-            manifest_path.display()
-        );
+            let manifest_path = orch.repx_dir.join(manifests::WORKER_SLURM_IDS);
+            let manifest_json = serde_json::to_string(&all_worker_slurm_ids)?;
+            fs::write(&manifest_path, manifest_json)?;
+            tracing::info!(
+                "Wrote {} worker SLURM IDs to {}",
+                all_worker_slurm_ids.len(),
+                manifest_path.display()
+            );
 
-        slurm::submit_slurm_gather_job(&orch, &args, &last_step_slurm_ids, verbose).await?;
+            slurm::submit_slurm_gather_job(&orch, &args, &last_step_slurm_ids, verbose).await?;
 
-        tracing::info!(
-            "Orchestrator finished submitting branches and gather job. Exiting to free slot."
-        );
-    } else {
-        return Err(CliError::Config(ConfigError::UnsupportedValue {
-            kind: "scheduler".to_string(),
-            value: args.scheduler.clone(),
-        }));
+            tracing::info!(
+                "Orchestrator finished submitting branches and gather job. Exiting to free slot."
+            );
+        }
+        other => {
+            return Err(CliError::Config(ConfigError::UnsupportedValue {
+                kind: "scheduler".to_string(),
+                value: other.to_string(),
+            }));
+        }
     }
 
     Ok(())

@@ -61,7 +61,7 @@ fn selector_cell<'a>(app: &App, is_selected: bool) -> Cell<'a> {
 pub fn build_flat_rows<'a>(
     app: &App,
     display_rows: &'a [TuiDisplayRow],
-    selected_jobs: &HashSet<String>,
+    selected_jobs: &HashSet<crate::model::RowId>,
     visible_range: Option<std::ops::Range<usize>>,
 ) -> Vec<Row<'a>> {
     let range = visible_range.unwrap_or(0..display_rows.len());
@@ -97,7 +97,7 @@ pub fn build_flat_rows<'a>(
 pub fn build_tree_rows<'a>(
     app: &App,
     display_rows: &'a [TuiDisplayRow],
-    selected_jobs: &HashSet<String>,
+    selected_jobs: &HashSet<crate::model::RowId>,
 ) -> Vec<Row<'a>> {
     let mut rows = Vec::with_capacity(display_rows.len());
 

@@ -436,12 +436,9 @@ impl App {
 
         let mut job_id_to_watch: Option<JobId> = None;
         if let Some(row_id) = selected_row_id {
-            if let Some(last_segment) = row_id.split('/').next_back() {
-                if let Some(job_id_str) = last_segment.strip_prefix("job:") {
-                    let job_id = JobId(job_id_str.to_string());
-                    self.pending_context_job_id = Some(job_id.clone());
-                    job_id_to_watch = Some(job_id);
-                }
+            if let Some(job_id) = row_id.leaf_job_id() {
+                self.pending_context_job_id = Some(job_id.clone());
+                job_id_to_watch = Some(job_id.clone());
             }
         }
 
@@ -748,7 +745,7 @@ impl App {
         let job_repx_dir = target_config
             .base_path
             .join(dirs::OUTPUTS)
-            .join(job_id.0.as_str())
+            .join(job_id.as_str())
             .join(dirs::REPX);
 
         let stderr_log = job_repx_dir.join(logs::STDERR);
@@ -777,22 +774,11 @@ impl App {
     }
 
     fn get_target_ids_for_action(&self) -> Vec<String> {
-        let extract_id = |path_id: &str| -> Option<String> {
-            let last_segment = path_id.split('/').next_back()?;
-            let (kind, id) = last_segment.split_once(':')?;
-            match kind {
-                "group" => Some(format!("@{}", id)),
-                "run" => Some(id.to_string()),
-                "job" => Some(id.to_string()),
-                _ => Some(id.to_string()),
-            }
-        };
-
         if !self.jobs_state.selected_jobs.is_empty() {
             self.jobs_state
                 .selected_jobs
                 .iter()
-                .filter_map(|s| extract_id(s))
+                .filter_map(|row_id| row_id.action_id())
                 .collect()
         } else if let Some(selected_idx) = self.jobs_state.table_state.selected() {
             if let Some(row) = self.jobs_state.display_rows.get(selected_idx) {
@@ -866,13 +852,20 @@ impl App {
             .cloned()
             .collect();
 
-        let ids_to_potentially_run: Vec<String> =
-            final_job_ids_to_submit.into_iter().map(|id| id.0).collect();
+        let ids_to_potentially_run: Vec<String> = final_job_ids_to_submit
+            .into_iter()
+            .map(|id| id.to_string())
+            .collect();
 
         let ids_to_run: Vec<String> = ids_to_potentially_run
             .into_iter()
             .filter(|id_str| {
-                if let Some(job) = self.jobs_state.jobs.iter().find(|j| j.full_id.0 == *id_str) {
+                if let Some(job) = self
+                    .jobs_state
+                    .jobs
+                    .iter()
+                    .find(|j| j.full_id.as_str() == *id_str)
+                {
                     let is_submittable = !matches!(
                         job.status,
                         JobStatus::Succeeded
@@ -906,7 +899,7 @@ impl App {
         let all_jobs_to_submit: HashSet<JobId> = ids_to_run
             .iter()
             .flat_map(|id_str| {
-                let job_id = repx_core::model::JobId(id_str.to_string());
+                let job_id = repx_core::model::JobId::from(id_str.to_string());
                 engine::build_dependency_graph(&self.lab, &job_id)
             })
             .collect();
@@ -1038,7 +1031,7 @@ impl App {
                         if let Some(run) = self.lab.runs.get(run_id) {
                             job_ids_to_cancel.extend(run.jobs.iter().cloned());
                         } else {
-                            job_ids_to_cancel.push(JobId(run_id.0.clone()));
+                            job_ids_to_cancel.push(JobId::from(run_id.to_string()));
                         }
                     }
                 }

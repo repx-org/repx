@@ -87,13 +87,8 @@ pub fn run(cli: Cli) -> Result<(), CliError> {
                 })
             })?;
 
-            let scheduler: SchedulerType = if let Some(s) = &cli.scheduler {
-                s.parse()
-                    .map_err(|e: repx_core::model::ParseSchedulerTypeError| {
-                        CliError::Config(ConfigError::InvalidConfig {
-                            detail: e.to_string(),
-                        })
-                    })?
+            let scheduler: SchedulerType = if let Some(s) = cli.scheduler {
+                s
             } else {
                 target_config
                     .default_scheduler

@@ -221,7 +221,7 @@ mod tests {
 
             for inp in inputs {
                 exe.inputs.push(crate::model::InputMapping {
-                    job_id: Some(JobId(inp.to_string())),
+                    job_id: Some(JobId::from(inp)),
                     source_output: None,
                     target_input: "x".to_string(),
                     source: None,
@@ -237,33 +237,32 @@ mod tests {
         };
 
         lab.jobs
-            .insert(JobId("A".to_string()), define_job("A", vec!["B", "C"]));
+            .insert(JobId::from("A"), define_job("A", vec!["B", "C"]));
         lab.jobs
-            .insert(JobId("B".to_string()), define_job("B", vec!["D"]));
+            .insert(JobId::from("B"), define_job("B", vec!["D"]));
         lab.jobs
-            .insert(JobId("C".to_string()), define_job("C", vec!["D"]));
-        lab.jobs
-            .insert(JobId("D".to_string()), define_job("D", vec![]));
+            .insert(JobId::from("C"), define_job("C", vec!["D"]));
+        lab.jobs.insert(JobId::from("D"), define_job("D", vec![]));
 
-        let sorted = build_dependency_graph(&lab, &JobId("A".to_string()));
+        let sorted = build_dependency_graph(&lab, &JobId::from("A"));
         println!("Sorted order: {:?}", sorted);
 
         let pos_d = sorted
             .iter()
-            .position(|j| j.0 == "D")
+            .position(|j| j.as_str() == "D")
             .expect("D must be in sorted");
         let pos_b = sorted
             .iter()
-            .position(|j| j.0 == "B")
+            .position(|j| j.as_str() == "B")
             .expect("B must be in sorted");
 
         let pos_c = sorted
             .iter()
-            .position(|j| j.0 == "C")
+            .position(|j| j.as_str() == "C")
             .expect("C must be in sorted");
         let pos_a = sorted
             .iter()
-            .position(|j| j.0 == "A")
+            .position(|j| j.as_str() == "A")
             .expect("A must be in sorted");
 
         assert!(

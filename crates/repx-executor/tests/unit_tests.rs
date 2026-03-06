@@ -1,4 +1,4 @@
-use repx_executor::{extract_image_hash, is_binary_allowed, validate_image_identifier};
+use repx_executor::{extract_image_hash, is_binary_allowed, ImageTag};
 
 #[test]
 fn test_is_binary_allowed_rejects_invalid() {
@@ -59,30 +59,30 @@ fn test_extract_image_hash_rejects_slash_in_hash() {
 }
 
 #[test]
-fn test_validate_image_identifier_valid() {
-    assert!(validate_image_identifier("abc123def").is_ok());
-    assert!(validate_image_identifier("image-abc123").is_ok());
-    assert!(validate_image_identifier("image_abc.123").is_ok());
-    assert!(validate_image_identifier("v1.0").is_ok());
-    assert!(validate_image_identifier("sha256:abcdef0123456789").is_ok());
+fn test_image_tag_parse_valid() {
+    assert!(ImageTag::parse("abc123def").is_ok());
+    assert!(ImageTag::parse("image-abc123").is_ok());
+    assert!(ImageTag::parse("image_abc.123").is_ok());
+    assert!(ImageTag::parse("v1.0").is_ok());
+    assert!(ImageTag::parse("sha256:abcdef0123456789").is_ok());
 }
 
 #[test]
-fn test_validate_image_identifier_rejects_empty() {
-    assert!(validate_image_identifier("").is_err());
+fn test_image_tag_parse_rejects_empty() {
+    assert!(ImageTag::parse("").is_err());
 }
 
 #[test]
-fn test_validate_image_identifier_rejects_path_separators() {
-    assert!(validate_image_identifier("../escape").is_err());
-    assert!(validate_image_identifier("a/b").is_err());
-    assert!(validate_image_identifier("a\\b").is_err());
-    assert!(validate_image_identifier("/etc/passwd").is_err());
+fn test_image_tag_parse_rejects_path_separators() {
+    assert!(ImageTag::parse("../escape").is_err());
+    assert!(ImageTag::parse("a/b").is_err());
+    assert!(ImageTag::parse("a\\b").is_err());
+    assert!(ImageTag::parse("/etc/passwd").is_err());
 }
 
 #[test]
-fn test_validate_image_identifier_rejects_special_chars() {
-    assert!(validate_image_identifier("image;rm -rf /").is_err());
-    assert!(validate_image_identifier("image\0null").is_err());
-    assert!(validate_image_identifier("image tag").is_err());
+fn test_image_tag_parse_rejects_special_chars() {
+    assert!(ImageTag::parse("image;rm -rf /").is_err());
+    assert!(ImageTag::parse("image\0null").is_err());
+    assert!(ImageTag::parse("image tag").is_err());
 }

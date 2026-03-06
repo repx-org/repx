@@ -1,6 +1,6 @@
 use repx_core::{
     config::{ResourceRule, Resources},
-    model::{JobId, ResourceHints},
+    model::{JobId, Memory, ResourceHints, SlurmTime},
 };
 use wildmatch::WildMatch;
 
@@ -8,8 +8,8 @@ use wildmatch::WildMatch;
 pub struct SbatchDirectives {
     pub partition: Option<String>,
     pub cpus_per_task: Option<u32>,
-    pub mem: Option<String>,
-    pub time: Option<String>,
+    pub mem: Option<Memory>,
+    pub time: Option<SlurmTime>,
     pub sbatch_opts: Vec<String>,
 }
 
@@ -23,10 +23,10 @@ impl SbatchDirectives {
             opts.push(format!("--cpus-per-task={}", c));
         }
         if let Some(m) = &self.mem {
-            opts.push(format!("--mem={}", m));
+            opts.push(format!("--mem={}", m.as_str()));
         }
         if let Some(t) = &self.time {
-            opts.push(format!("--time={}", t));
+            opts.push(format!("--time={}", t.as_str()));
         }
         opts.extend(self.sbatch_opts.clone());
         opts
@@ -83,7 +83,7 @@ pub fn resolve_for_job(
             let glob_matches = rule
                 .job_id_glob
                 .as_ref()
-                .is_none_or(|glob| WildMatch::new(glob).matches(&job_id.0));
+                .is_none_or(|glob| WildMatch::new(glob).matches(job_id.as_str()));
             if target_matches && glob_matches {
                 merge_rule(&mut current, rule);
             }
@@ -128,7 +128,7 @@ pub fn resolve_worker_resources(
             let glob_matches = rule
                 .job_id_glob
                 .as_ref()
-                .is_none_or(|glob| WildMatch::new(glob).matches(&orchestrator_job_id.0));
+                .is_none_or(|glob| WildMatch::new(glob).matches(orchestrator_job_id.as_str()));
             target_matches && glob_matches
         });
         if let Some(rule) = final_rule {
@@ -206,11 +206,11 @@ cpus-per-task = 4
     #[test]
     fn test_default_resources() {
         let res = get_test_resources();
-        let job_id = JobId("some-random-job".into());
+        let job_id = JobId::from("some-random-job");
         let directives = resolve_for_job(&job_id, "any-cluster", &Some(res), None);
         assert_eq!(directives.partition, Some("default".into()));
         assert_eq!(directives.cpus_per_task, Some(1));
-        assert_eq!(directives.mem, Some("1G".into()));
+        assert_eq!(directives.mem, Some(Memory::from("1G")));
         assert!(directives.time.is_none());
         assert!(directives.sbatch_opts.is_empty());
     }
@@ -218,9 +218,9 @@ cpus-per-task = 4
     #[test]
     fn test_glob_match_override() {
         let res = get_test_resources();
-        let job_id = JobId("my-heavy-job-123".into());
+        let job_id = JobId::from("my-heavy-job-123");
         let directives = resolve_for_job(&job_id, "any-cluster", &Some(res), None);
-        assert_eq!(directives.mem, Some("128G".into()));
+        assert_eq!(directives.mem, Some(Memory::from("128G")));
         assert_eq!(directives.cpus_per_task, Some(16));
         assert_eq!(directives.partition, Some("default".into()));
     }
@@ -228,17 +228,17 @@ cpus-per-task = 4
     #[test]
     fn test_target_and_glob_match() {
         let res = get_test_resources();
-        let job_id = JobId("needs-a-gpu-job".into());
+        let job_id = JobId::from("needs-a-gpu-job");
         let directives = resolve_for_job(&job_id, "gpu-cluster", &Some(res), None);
         assert_eq!(directives.partition, Some("gpu".into()));
         assert_eq!(directives.sbatch_opts, vec!["--gres=gpu:1"]);
-        assert_eq!(directives.mem, Some("1G".into()));
+        assert_eq!(directives.mem, Some(Memory::from("1G")));
     }
 
     #[test]
     fn test_target_mismatch() {
         let res = get_test_resources();
-        let job_id = JobId("needs-a-gpu-job".into());
+        let job_id = JobId::from("needs-a-gpu-job");
         let directives = resolve_for_job(&job_id, "cpu-cluster", &Some(res), None);
         assert_eq!(directives.partition, Some("default".into()));
         assert!(directives.sbatch_opts.is_empty());
@@ -247,17 +247,17 @@ cpus-per-task = 4
     #[test]
     fn test_scatter_orchestrator_resources() {
         let res = get_test_resources();
-        let job_id = JobId("my-scatter-job".into());
+        let job_id = JobId::from("my-scatter-job");
         let directives = resolve_for_job(&job_id, "any-cluster", &Some(res), None);
-        assert_eq!(directives.mem, Some("500M".into()));
+        assert_eq!(directives.mem, Some(Memory::from("500M")));
     }
 
     #[test]
     fn test_scatter_worker_resources() {
         let res = get_test_resources();
-        let job_id = JobId("my-scatter-job".into());
+        let job_id = JobId::from("my-scatter-job");
         let directives = resolve_worker_resources(&job_id, "any-cluster", &Some(res), None, None);
-        assert_eq!(directives.mem, Some("16G".into()));
+        assert_eq!(directives.mem, Some(Memory::from("16G")));
         assert_eq!(directives.cpus_per_task, Some(4));
         assert_eq!(directives.partition, Some("default".into()));
     }
@@ -265,7 +265,7 @@ cpus-per-task = 4
     #[test]
     fn test_scatter_worker_inherits_parent_if_no_override() {
         let res = get_test_resources();
-        let job_id = JobId("my-heavy-job-123".into());
+        let job_id = JobId::from("my-heavy-job-123");
         let parent_directives = resolve_for_job(&job_id, "any-cluster", &Some(res.clone()), None);
         let worker_directives =
             resolve_worker_resources(&job_id, "any-cluster", &Some(res), None, None);
@@ -280,52 +280,52 @@ cpus-per-task = 4
     #[test]
     fn test_nix_hints_applied() {
         let res = get_test_resources();
-        let job_id = JobId("some-random-job".into());
+        let job_id = JobId::from("some-random-job");
         let hints = ResourceHints {
-            mem: Some("32G".into()),
+            mem: Some(Memory::from("32G")),
             cpus: Some(8),
-            time: Some("04:00:00".into()),
+            time: Some(SlurmTime::from("04:00:00")),
             partition: None,
             sbatch_opts: vec![],
         };
         let directives = resolve_for_job(&job_id, "any-cluster", &Some(res), Some(&hints));
-        assert_eq!(directives.mem, Some("32G".into()));
+        assert_eq!(directives.mem, Some(Memory::from("32G")));
         assert_eq!(directives.cpus_per_task, Some(8));
-        assert_eq!(directives.time, Some("04:00:00".into()));
+        assert_eq!(directives.time, Some(SlurmTime::from("04:00:00")));
         assert_eq!(directives.partition, Some("default".into()));
     }
 
     #[test]
     fn test_rules_override_hints() {
         let res = get_test_resources();
-        let job_id = JobId("my-heavy-job-123".into());
+        let job_id = JobId::from("my-heavy-job-123");
         let hints = ResourceHints {
-            mem: Some("8G".into()),
+            mem: Some(Memory::from("8G")),
             cpus: Some(2),
             time: None,
             partition: None,
             sbatch_opts: vec![],
         };
         let directives = resolve_for_job(&job_id, "any-cluster", &Some(res), Some(&hints));
-        assert_eq!(directives.mem, Some("128G".into()));
+        assert_eq!(directives.mem, Some(Memory::from("128G")));
         assert_eq!(directives.cpus_per_task, Some(16));
     }
 
     #[test]
     fn test_worker_hints_applied() {
         let res = get_test_resources();
-        let job_id = JobId("some-job".into());
+        let job_id = JobId::from("some-job");
         let orchestrator_hints = ResourceHints {
-            mem: Some("1G".into()),
+            mem: Some(Memory::from("1G")),
             cpus: Some(1),
             time: None,
             partition: None,
             sbatch_opts: vec![],
         };
         let worker_hints = ResourceHints {
-            mem: Some("64G".into()),
+            mem: Some(Memory::from("64G")),
             cpus: Some(4),
-            time: Some("08:00:00".into()),
+            time: Some(SlurmTime::from("08:00:00")),
             partition: None,
             sbatch_opts: vec![],
         };
@@ -336,8 +336,8 @@ cpus-per-task = 4
             Some(&orchestrator_hints),
             Some(&worker_hints),
         );
-        assert_eq!(directives.mem, Some("64G".into()));
+        assert_eq!(directives.mem, Some(Memory::from("64G")));
         assert_eq!(directives.cpus_per_task, Some(4));
-        assert_eq!(directives.time, Some("08:00:00".into()));
+        assert_eq!(directives.time, Some(SlurmTime::from("08:00:00")));
     }
 }

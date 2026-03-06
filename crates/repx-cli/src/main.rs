@@ -1,6 +1,7 @@
 use clap::{Args, CommandFactory, Parser, Subcommand};
 use clap_complete::{generate, Shell};
 use colored::Colorize;
+use repx_core::model::SchedulerType;
 use repx_runner::cli::Commands as RunnerCommands;
 use std::path::PathBuf;
 use std::process::Command;
@@ -42,7 +43,7 @@ struct Cli {
         global = true,
         help = "The scheduler to use: 'slurm' or 'local'. Overrides the target's configuration."
     )]
-    pub scheduler: Option<String>,
+    pub scheduler: Option<SchedulerType>,
 }
 
 #[derive(Subcommand)]

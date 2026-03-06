@@ -381,7 +381,9 @@ impl BwrapRuntime {
         let mut cmd = TokioCommand::new(bwrap_path);
         let request = ctx.request;
 
-        if request.mount_host_paths {
+        use repx_core::model::MountPolicy;
+
+        if request.mount_policy.is_all_host() {
             Self::configure_host_path_mounts(&mut cmd, ctx, rootfs_path).await?;
 
             cmd.arg("--unshare-pid")
@@ -393,7 +395,7 @@ impl BwrapRuntime {
                 .arg("--proc")
                 .arg("/proc");
         } else {
-            if request.mount_paths.is_empty() {
+            if matches!(request.mount_policy, MountPolicy::Isolated) {
                 cmd.arg("--unshare-all");
             } else {
                 tracing::info!(
@@ -467,7 +469,7 @@ impl BwrapRuntime {
             inner_path = format!("{}:{}", host_tools.display(), inner_path);
         }
 
-        if request.mount_host_paths {
+        if request.mount_policy.is_all_host() {
             let host_path = std::env::var("PATH").unwrap_or_default();
             if !host_path.is_empty() {
                 inner_path = format!("{}:{}", inner_path, host_path);
@@ -478,12 +480,10 @@ impl BwrapRuntime {
         } else {
             cmd.arg("--setenv").arg("HOME").arg("/");
 
-            if !request.mount_paths.is_empty() {
-                tracing::info!(
-                    "[IMPURE] Specific host paths mounted: {:?}",
-                    request.mount_paths
-                );
-                for path in &request.mount_paths {
+            let specific = request.mount_policy.specific_paths();
+            if !specific.is_empty() {
+                tracing::info!("[IMPURE] Specific host paths mounted: {:?}", specific);
+                for path in specific {
                     if path.starts_with("/dev/") {
                         cmd.arg("--dev-bind").arg(path).arg(path);
                     } else {
@@ -505,7 +505,7 @@ impl BwrapRuntime {
 
         tracing::info!(
             job_id = %request.job_id,
-            mount_host_paths = request.mount_host_paths,
+            mount_policy = ?request.mount_policy,
             job_package_path = %request.job_package_path.display(),
             script_path = %script_path.display(),
             rootfs_path = %rootfs_path.display(),

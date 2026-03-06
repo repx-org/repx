@@ -1,3 +1,4 @@
+use repx_core::model::{JobId, RunId};
 use serde::Deserialize;
 use serde::Serialize;
 use std::{collections::HashMap, fmt, str::FromStr};
@@ -147,10 +148,75 @@ pub enum TuiRowItem {
     Run { id: repx_core::model::RunId },
     Job { job: Box<TuiJob> },
 }
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum RowSegment {
+    Group(String),
+    Run(RunId),
+    Job(JobId),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct RowId(pub Vec<RowSegment>);
+
+impl RowId {
+    pub fn group(name: impl Into<String>) -> Self {
+        RowId(vec![RowSegment::Group(name.into())])
+    }
+
+    pub fn run(id: RunId) -> Self {
+        RowId(vec![RowSegment::Run(id)])
+    }
+
+    pub fn job(id: JobId) -> Self {
+        RowId(vec![RowSegment::Job(id)])
+    }
+
+    pub fn child(&self, segment: RowSegment) -> Self {
+        let mut path = self.0.clone();
+        path.push(segment);
+        RowId(path)
+    }
+
+    pub fn leaf(&self) -> Option<&RowSegment> {
+        self.0.last()
+    }
+
+    pub fn leaf_job_id(&self) -> Option<&JobId> {
+        match self.leaf()? {
+            RowSegment::Job(id) => Some(id),
+            _ => None,
+        }
+    }
+
+    pub fn action_id(&self) -> Option<String> {
+        match self.leaf()? {
+            RowSegment::Group(name) => Some(format!("@{}", name)),
+            RowSegment::Run(id) => Some(id.to_string()),
+            RowSegment::Job(id) => Some(id.to_string()),
+        }
+    }
+}
+
+impl fmt::Display for RowId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        for (i, seg) in self.0.iter().enumerate() {
+            if i > 0 {
+                write!(f, "/")?;
+            }
+            match seg {
+                RowSegment::Group(name) => write!(f, "group:{}", name)?,
+                RowSegment::Run(id) => write!(f, "run:{}", id)?,
+                RowSegment::Job(id) => write!(f, "job:{}", id)?,
+            }
+        }
+        Ok(())
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct TuiDisplayRow {
     pub item: TuiRowItem,
-    pub id: String,
+    pub id: RowId,
     pub depth: usize,
     pub is_last_child: bool,
     pub cached_tree_prefix: Option<String>,
@@ -351,7 +417,7 @@ mod tests {
     #[test]
     fn test_tui_job_serialize_deserialize() {
         let job = TuiJob {
-            full_id: repx_core::model::JobId("run-test/stage-a/job-123".to_string()),
+            full_id: repx_core::model::JobId::from("run-test/stage-a/job-123"),
             id: "job-123".to_string(),
             name: "Test Job".to_string(),
             run: "run-test".to_string(),

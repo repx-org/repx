@@ -1,7 +1,7 @@
 use crate::error::CliError;
 use repx_client::Client;
-use repx_core::errors::ConfigError;
-use repx_executor::Runtime;
+use repx_core::{errors::ConfigError, model::ExecutionType};
+use repx_executor::{ImageTag, Runtime};
 use std::path::Path;
 
 pub mod execute;
@@ -29,36 +29,33 @@ pub(crate) fn write_marker(path: &Path) -> std::io::Result<()> {
 }
 
 pub(crate) fn parse_runtime(
-    runtime_str: &str,
+    execution_type: ExecutionType,
     image_tag: Option<String>,
 ) -> Result<Runtime, CliError> {
-    match runtime_str {
-        "native" => Ok(Runtime::Native),
-        "podman" => Ok(Runtime::Podman {
-            image_tag: image_tag.ok_or_else(|| {
-                CliError::Config(ConfigError::ImageTagRequired {
-                    runtime: "podman".to_string(),
-                })
-            })?,
+    let parse_tag = |runtime_name: &str, raw: Option<String>| -> Result<ImageTag, CliError> {
+        let tag_str = raw.ok_or_else(|| {
+            CliError::Config(ConfigError::ImageTagRequired {
+                runtime: runtime_name.to_string(),
+            })
+        })?;
+        ImageTag::parse(tag_str).map_err(|e| {
+            CliError::Config(ConfigError::InvalidConfig {
+                detail: format!("Invalid image tag for {}: {}", runtime_name, e),
+            })
+        })
+    };
+
+    match execution_type {
+        ExecutionType::Native => Ok(Runtime::Native),
+        ExecutionType::Podman => Ok(Runtime::Podman {
+            image_tag: parse_tag("podman", image_tag)?,
         }),
-        "docker" => Ok(Runtime::Docker {
-            image_tag: image_tag.ok_or_else(|| {
-                CliError::Config(ConfigError::ImageTagRequired {
-                    runtime: "docker".to_string(),
-                })
-            })?,
+        ExecutionType::Docker => Ok(Runtime::Docker {
+            image_tag: parse_tag("docker", image_tag)?,
         }),
-        "bwrap" => Ok(Runtime::Bwrap {
-            image_tag: image_tag.ok_or_else(|| {
-                CliError::Config(ConfigError::ImageTagRequired {
-                    runtime: "bwrap".to_string(),
-                })
-            })?,
+        ExecutionType::Bwrap => Ok(Runtime::Bwrap {
+            image_tag: parse_tag("bwrap", image_tag)?,
         }),
-        other => Err(CliError::Config(ConfigError::UnsupportedValue {
-            kind: "runtime".to_string(),
-            value: other.to_string(),
-        })),
     }
 }
 

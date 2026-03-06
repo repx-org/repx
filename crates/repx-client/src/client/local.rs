@@ -21,38 +21,22 @@ const DEFAULT_JOB_MEM_BYTES: u64 = 1024 * 1024 * 1024;
 const DEFAULT_JOB_CPUS: u32 = 1;
 const POLL_INTERVAL_MS: u64 = 50;
 
-fn parse_mem_to_bytes(mem_str: &str) -> Option<u64> {
-    let mem_str = mem_str.trim().to_uppercase();
-    let (num_str, multiplier) = if let Some(n) = mem_str.strip_suffix('T') {
-        (n, 1024u64 * 1024 * 1024 * 1024)
-    } else if let Some(n) = mem_str.strip_suffix('G') {
-        (n, 1024u64 * 1024 * 1024)
-    } else if let Some(n) = mem_str.strip_suffix('M') {
-        (n, 1024u64 * 1024)
-    } else if let Some(n) = mem_str.strip_suffix('K') {
-        (n, 1024u64)
-    } else {
-        (mem_str.as_str(), 1u64)
-    };
-    num_str.parse::<u64>().ok().map(|n| n * multiplier)
-}
-
 fn get_job_mem_bytes(job: &Job, resources_config: &Option<repx_core::config::Resources>) -> u64 {
     let hints = job.resource_hints.as_ref();
 
-    let dummy_id = JobId("".into());
+    let dummy_id = JobId::from("");
     let directives = resources::resolve_for_job(&dummy_id, "", resources_config, hints);
 
     directives
         .mem
         .as_ref()
-        .and_then(|m| parse_mem_to_bytes(m))
+        .and_then(|m| m.to_bytes())
         .unwrap_or(DEFAULT_JOB_MEM_BYTES)
 }
 
 fn get_job_cpus(job: &Job, resources_config: &Option<repx_core::config::Resources>) -> u32 {
     let hints = job.resource_hints.as_ref();
-    let dummy_id = JobId("".into());
+    let dummy_id = JobId::from("");
     let directives = resources::resolve_for_job(&dummy_id, "", resources_config, hints);
     directives.cpus_per_task.unwrap_or(DEFAULT_JOB_CPUS)
 }
@@ -112,7 +96,7 @@ pub(crate) fn build_steps_json(
                 }
                 obj.insert("target_input".into(), json!(m.target_input));
                 if let Some(ref job_id) = m.job_id {
-                    obj.insert("job_id".into(), json!(job_id.0));
+                    obj.insert("job_id".into(), json!(job_id.as_str()));
                 }
                 if let Some(ref mapping_type) = m.mapping_type {
                     obj.insert("type".into(), json!(mapping_type));
@@ -255,16 +239,16 @@ struct WorkUnitId(String);
 
 impl WorkUnitId {
     fn from_job(id: &JobId) -> Self {
-        Self(id.0.clone())
+        Self(id.to_string())
     }
     fn scatter(job_id: &JobId) -> Self {
-        Self(format!("{}::scatter", job_id.0))
+        Self(format!("{}::scatter", job_id.as_str()))
     }
     fn step(job_id: &JobId, branch: usize, step: &str) -> Self {
-        Self(format!("{}::b{}::s-{}", job_id.0, branch, step))
+        Self(format!("{}::b{}::s-{}", job_id.as_str(), branch, step))
     }
     fn gather(job_id: &JobId) -> Self {
-        Self(format!("{}::gather", job_id.0))
+        Self(format!("{}::gather", job_id.as_str()))
     }
     fn short_id(&self) -> &str {
         if self.0.len() > 40 {
@@ -337,13 +321,13 @@ fn build_sg_common_args(
     let artifacts_base = target.artifacts_base_path();
     let scatter_exe = job.executables.get("scatter").ok_or_else(|| {
         ClientError::Config(ConfigError::MissingExecutable {
-            job_id: job_id.0.clone(),
+            job_id: job_id.to_string(),
             executable: "scatter".to_string(),
         })
     })?;
     let gather_exe = job.executables.get("gather").ok_or_else(|| {
         ClientError::Config(ConfigError::MissingExecutable {
-            job_id: job_id.0.clone(),
+            job_id: job_id.to_string(),
             executable: "gather".to_string(),
         })
     })?;
@@ -357,7 +341,7 @@ fn build_sg_common_args(
     args.extend_from_slice(&[
         "internal-scatter-gather".to_string(),
         "--job-id".to_string(),
-        job_id.0.clone(),
+        job_id.to_string(),
         "--runtime".to_string(),
         execution_type.to_string(),
     ]);
@@ -377,13 +361,17 @@ fn build_sg_common_args(
         "--host-tools-dir".to_string(),
         client.lab.host_tools_dir_name.clone(),
     ]);
-    if target.config().mount_host_paths {
-        args.push("--mount-host-paths".to_string());
-    } else {
-        for path in &target.config().mount_paths {
-            args.push("--mount-paths".to_string());
-            args.push(path.clone());
+    match target.config().mount_policy() {
+        repx_core::model::MountPolicy::AllHostPaths => {
+            args.push("--mount-host-paths".to_string());
         }
+        repx_core::model::MountPolicy::SpecificPaths(paths) => {
+            for path in &paths {
+                args.push("--mount-paths".to_string());
+                args.push(path.clone());
+            }
+        }
+        repx_core::model::MountPolicy::Isolated => {}
     }
     args.extend_from_slice(&[
         "--job-package-path".to_string(),
@@ -415,7 +403,7 @@ fn build_simple_job_args(
 ) -> std::result::Result<Vec<String>, ClientError> {
     let main_exe = job.executables.get("main").ok_or_else(|| {
         ClientError::Config(ConfigError::MissingExecutable {
-            job_id: job_id.0.clone(),
+            job_id: job_id.to_string(),
             executable: "main".to_string(),
         })
     })?;
@@ -425,7 +413,7 @@ fn build_simple_job_args(
     args.extend_from_slice(&[
         "internal-execute".to_string(),
         "--job-id".to_string(),
-        job_id.0.clone(),
+        job_id.to_string(),
         "--runtime".to_string(),
         execution_type.to_string(),
     ]);
@@ -445,13 +433,17 @@ fn build_simple_job_args(
         "--host-tools-dir".to_string(),
         client.lab.host_tools_dir_name.clone(),
     ]);
-    if target.config().mount_host_paths {
-        args.push("--mount-host-paths".to_string());
-    } else {
-        for path in &target.config().mount_paths {
-            args.push("--mount-paths".to_string());
-            args.push(path.clone());
+    match target.config().mount_policy() {
+        repx_core::model::MountPolicy::AllHostPaths => {
+            args.push("--mount-host-paths".to_string());
         }
+        repx_core::model::MountPolicy::SpecificPaths(paths) => {
+            for path in &paths {
+                args.push("--mount-paths".to_string());
+                args.push(path.clone());
+            }
+        }
+        repx_core::model::MountPolicy::Isolated => {}
     }
     args.extend_from_slice(&[
         "--executable-path".to_string(),
@@ -505,7 +497,7 @@ fn get_step_resources(
     let mem = directives
         .mem
         .as_ref()
-        .and_then(|m| parse_mem_to_bytes(m))
+        .and_then(|m| m.to_bytes())
         .unwrap_or(DEFAULT_JOB_MEM_BYTES);
     let cpus = directives.cpus_per_task.unwrap_or(DEFAULT_JOB_CPUS);
     (mem, cpus)
@@ -522,7 +514,7 @@ fn expand_scatter_gather<'a>(
     options: &SubmitOptions,
 ) -> std::result::Result<Vec<(WorkUnitId, WorkUnit<'a>)>, ClientError> {
     let base_path = target.base_path();
-    let job_root = base_path.join(dirs::OUTPUTS).join(&job_id.0);
+    let job_root = base_path.join(dirs::OUTPUTS).join(job_id.as_str());
     let work_items_path = job_root.join("scatter").join("out").join("work_items.json");
     let work_items_str = target.read_remote_file(&work_items_path).map_err(|e| {
         ClientError::Config(ConfigError::CommandFailed(format!(
@@ -759,7 +751,7 @@ pub fn submit_local_batch_run(
             .or_else(|| job.executables.get("scatter"))
             .ok_or_else(|| {
                 ClientError::Config(ConfigError::MissingExecutable {
-                    job_id: job_id.0.clone(),
+                    job_id: job_id.to_string(),
                     executable: "main or scatter".to_string(),
                 })
             })?;
@@ -1151,22 +1143,26 @@ mod tests {
 
     #[test]
     fn test_parse_mem_to_bytes() {
-        assert_eq!(parse_mem_to_bytes("1G"), Some(1024 * 1024 * 1024));
-        assert_eq!(parse_mem_to_bytes("512M"), Some(512 * 1024 * 1024));
+        use repx_core::model::Memory;
+        assert_eq!(Memory::from("1G").to_bytes(), Some(1024 * 1024 * 1024));
+        assert_eq!(Memory::from("512M").to_bytes(), Some(512 * 1024 * 1024));
         assert_eq!(
-            parse_mem_to_bytes("2T"),
+            Memory::from("2T").to_bytes(),
             Some(2 * 1024 * 1024 * 1024 * 1024)
         );
-        assert_eq!(parse_mem_to_bytes("1024K"), Some(1024 * 1024));
-        assert_eq!(parse_mem_to_bytes("4096"), Some(4096));
+        assert_eq!(Memory::from("1024K").to_bytes(), Some(1024 * 1024));
+        assert_eq!(Memory::from("4096").to_bytes(), Some(4096));
 
-        assert_eq!(parse_mem_to_bytes("8g"), Some(8 * 1024 * 1024 * 1024));
-        assert_eq!(parse_mem_to_bytes("256m"), Some(256 * 1024 * 1024));
+        assert_eq!(Memory::from("8g").to_bytes(), Some(8 * 1024 * 1024 * 1024));
+        assert_eq!(Memory::from("256m").to_bytes(), Some(256 * 1024 * 1024));
 
-        assert_eq!(parse_mem_to_bytes("  4G  "), Some(4 * 1024 * 1024 * 1024));
+        assert_eq!(
+            Memory::from("  4G  ").to_bytes(),
+            Some(4 * 1024 * 1024 * 1024)
+        );
 
-        assert_eq!(parse_mem_to_bytes("invalid"), None);
-        assert_eq!(parse_mem_to_bytes("G"), None);
+        assert_eq!(Memory::from("invalid").to_bytes(), None);
+        assert_eq!(Memory::from("G").to_bytes(), None);
     }
 
     #[test]
@@ -1190,9 +1186,9 @@ mod tests {
             in_flight: HashMap::new(),
         };
 
-        let u1 = WorkUnitId::from_job(&JobId("job1".into()));
-        let u2 = WorkUnitId::from_job(&JobId("job2".into()));
-        let u3 = WorkUnitId::from_job(&JobId("job3".into()));
+        let u1 = WorkUnitId::from_job(&JobId::from("job1"));
+        let u2 = WorkUnitId::from_job(&JobId::from("job2"));
+        let u3 = WorkUnitId::from_job(&JobId::from("job3"));
 
         assert!(tracker.can_fit(&u1, 8 * 1024 * 1024 * 1024, 4));
 
@@ -1220,8 +1216,8 @@ mod tests {
             in_flight: HashMap::new(),
         };
 
-        let u1 = WorkUnitId::from_job(&JobId("job1".into()));
-        let u2 = WorkUnitId::from_job(&JobId("job2".into()));
+        let u1 = WorkUnitId::from_job(&JobId::from("job1"));
+        let u2 = WorkUnitId::from_job(&JobId::from("job2"));
 
         tracker.reserve(u1.clone(), 4 * 1024 * 1024 * 1024, 2);
         assert_eq!(tracker.used_mem_bytes, 4 * 1024 * 1024 * 1024);
@@ -1254,7 +1250,7 @@ mod tests {
             in_flight: HashMap::new(),
         };
 
-        let big = WorkUnitId::from_job(&JobId("big_job".into()));
+        let big = WorkUnitId::from_job(&JobId::from("big_job"));
 
         assert!(tracker.can_fit(&big, 32 * 1024 * 1024 * 1024, 16));
     }
@@ -1269,8 +1265,8 @@ mod tests {
             in_flight: HashMap::new(),
         };
 
-        let small = WorkUnitId::from_job(&JobId("small_job".into()));
-        let big = WorkUnitId::from_job(&JobId("big_job".into()));
+        let small = WorkUnitId::from_job(&JobId::from("small_job"));
+        let big = WorkUnitId::from_job(&JobId::from("big_job"));
 
         tracker.reserve(small.clone(), 1024 * 1024 * 1024, 1);
 
@@ -1287,7 +1283,7 @@ mod tests {
             in_flight: HashMap::new(),
         };
 
-        let unknown = WorkUnitId::from_job(&JobId("unknown".into()));
+        let unknown = WorkUnitId::from_job(&JobId::from("unknown"));
 
         tracker.release(&unknown);
 

@@ -55,7 +55,7 @@ pub(crate) async fn submit_slurm_gather_job(
         "--job-id".to_string(),
         args.job_id.clone(),
         "--runtime".to_string(),
-        args.runtime.clone(),
+        args.runtime.to_string(),
         "--base-path".to_string(),
         args.base_path.to_string_lossy().to_string(),
         "--host-tools-dir".to_string(),
@@ -76,13 +76,23 @@ pub(crate) async fn submit_slurm_gather_job(
         format!("'{}'", args.last_step_outputs_json),
     ]);
 
-    if args.mount_host_paths {
-        gather_cmd_parts.push("--mount-host-paths".to_string());
-    }
-
-    for path in &args.mount_paths {
-        gather_cmd_parts.push("--mount-paths".to_string());
-        gather_cmd_parts.push(path.clone());
+    {
+        let policy = repx_core::model::MountPolicy::from_flags(
+            args.mount_host_paths,
+            args.mount_paths.clone(),
+        );
+        match &policy {
+            repx_core::model::MountPolicy::AllHostPaths => {
+                gather_cmd_parts.push("--mount-host-paths".to_string());
+            }
+            repx_core::model::MountPolicy::SpecificPaths(paths) => {
+                for path in paths {
+                    gather_cmd_parts.push("--mount-paths".to_string());
+                    gather_cmd_parts.push(path.clone());
+                }
+            }
+            repx_core::model::MountPolicy::Isolated => {}
+        }
     }
 
     if let Some(tag) = &args.image_tag {
@@ -109,7 +119,7 @@ pub(crate) async fn submit_slurm_gather_job(
         ));
     }
     sbatch
-        .arg(format!("--job-name={}-gather", orch.job_id.0))
+        .arg(format!("--job-name={}-gather", orch.job_id.as_str()))
         .arg(format!(
             "--output={}/gather/repx/slurm-%j.out",
             orch.job_root.display()
@@ -217,7 +227,9 @@ pub(crate) async fn submit_slurm_branches(
             sbatch
                 .arg(format!(
                     "--job-name={}-b{}-{}",
-                    orch.job_id.0, branch_idx, step_name
+                    orch.job_id.as_str(),
+                    branch_idx,
+                    step_name
                 ))
                 .arg(format!("--output={}/slurm-%j.out", step_repx.display()))
                 .arg("--wrap")

@@ -202,15 +202,15 @@ fn list_jobs(
         let matches: Vec<_> = lab
             .runs
             .iter()
-            .filter(|(k, _)| k.0.starts_with(&run_id.0))
+            .filter(|(k, _)| k.as_str().starts_with(run_id.as_str()))
             .collect();
 
         if matches.len() == 1 {
             Some(matches[0])
         } else if matches.len() > 1 {
-            let options: Vec<String> = matches.iter().map(|(k, _)| k.0.clone()).collect();
+            let options: Vec<String> = matches.iter().map(|(k, _)| k.to_string()).collect();
             return Err(CliError::Domain(DomainError::AmbiguousJobId {
-                input: run_id.0,
+                input: run_id.into_inner(),
                 matches: options,
             }));
         } else {
@@ -228,7 +228,7 @@ fn list_jobs(
         let matching_jobs: Vec<_> = lab
             .jobs
             .keys()
-            .filter(|jid| jid.0.starts_with(job_id_query))
+            .filter(|jid| jid.as_str().starts_with(job_id_query))
             .collect();
 
         if !matching_jobs.is_empty() {
@@ -251,7 +251,7 @@ fn list_jobs(
                 if found_runs.len() == 1 {
                     println!();
                     let new_args = ListJobsArgs {
-                        name: Some(found_runs[0].0.clone()),
+                        name: Some(found_runs[0].to_string()),
                         stage: args.stage.clone(),
                         status: args.status.clone(),
                         output_paths: args.output_paths,
@@ -264,12 +264,14 @@ fn list_jobs(
             }
         }
 
-        Err(CliError::Domain(DomainError::TargetNotFound(run_id.0)))
+        Err(CliError::Domain(DomainError::TargetNotFound(
+            run_id.into_inner(),
+        )))
     }
 }
 
 fn extract_stage_name(job_id: &JobId) -> String {
-    let s = &job_id.0;
+    let s = job_id.as_str();
     if let Some(first_dash) = s.find('-') {
         let after_hash = &s[first_dash + 1..];
         if let Some(last_dash) = after_hash.rfind('-') {
@@ -296,7 +298,7 @@ fn print_jobs_list(
 
     let jobs: Vec<_> = if let Some(stage) = stage_filter {
         jobs.into_iter()
-            .filter(|job_id| job_id.0.contains(stage))
+            .filter(|job_id| job_id.as_str().contains(stage))
             .collect()
     } else {
         jobs
@@ -415,7 +417,10 @@ fn print_job_line(_lab: &Lab, job_id: &JobId, ctx: &ListJobsContext, indent: usi
     }
 
     if let Some(ref store) = ctx.store_path {
-        let output_path = store.join(dirs::OUTPUTS).join(&job_id.0).join(dirs::OUT);
+        let output_path = store
+            .join(dirs::OUTPUTS)
+            .join(job_id.as_str())
+            .join(dirs::OUT);
         if output_path.exists() {
             line.push_str(&format!("  {}", output_path.display()));
         } else {
@@ -505,17 +510,17 @@ fn list_groups(lab: &Lab, name: Option<&str>) -> Result<(), CliError> {
 }
 
 fn list_dependencies(lab: &Lab, job_id_str: &str) -> Result<(), CliError> {
-    let target_input = RunId(job_id_str.to_string());
+    let target_input = RunId::from(job_id_str.to_string());
     let job_id = resolver::resolve_target_job_id(lab, &target_input)?;
 
-    println!("Dependency tree for job '{}':", job_id.0);
+    println!("Dependency tree for job '{}':", job_id.as_str());
     print_dependency_tree(lab, job_id, 0);
     Ok(())
 }
 
 fn print_dependency_tree(lab: &Lab, job_id: &JobId, level: usize) {
     let indent = "  ".repeat(level);
-    println!("{}{}", indent, job_id.0);
+    println!("{}{}", indent, job_id.as_str());
 
     if let Some(job) = lab.jobs.get(job_id) {
         let mut dependencies = Vec::new();

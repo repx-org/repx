@@ -7,6 +7,7 @@ pub use container::ContainerRuntime;
 pub use native::NativeRuntime;
 
 use crate::error::ExecutorError;
+use crate::util::ImageTag;
 use nix::fcntl::{Flock, FlockArg};
 
 pub(crate) const CONTAINER_HOSTNAME: &str = "repx-container";
@@ -14,13 +15,13 @@ pub(crate) const CONTAINER_HOSTNAME: &str = "repx-container";
 #[derive(Debug, Clone)]
 pub enum Runtime {
     Native,
-    Podman { image_tag: String },
-    Docker { image_tag: String },
-    Bwrap { image_tag: String },
+    Podman { image_tag: ImageTag },
+    Docker { image_tag: ImageTag },
+    Bwrap { image_tag: ImageTag },
 }
 
 impl Runtime {
-    pub fn image_tag(&self) -> Option<&str> {
+    pub fn image_tag(&self) -> Option<&ImageTag> {
         match self {
             Runtime::Native => None,
             Runtime::Podman { image_tag }

@@ -1,5 +1,5 @@
 use crate::app::StatusFilter;
-use crate::model::{JobStatus, TuiDisplayRow, TuiJob, TuiRowItem};
+use crate::model::{JobStatus, RowId, RowSegment, TuiDisplayRow, TuiJob, TuiRowItem};
 use ratatui::widgets::TableState;
 use repx_core::engine;
 use repx_core::model::{JobId, Lab};
@@ -24,8 +24,8 @@ pub struct JobsState {
     pub jobs: Vec<TuiJob>,
     pub display_rows: Vec<TuiDisplayRow>,
     pub table_state: TableState,
-    pub selected_jobs: HashSet<String>,
-    pub collapsed_nodes: HashSet<String>,
+    pub selected_jobs: HashSet<RowId>,
+    pub collapsed_nodes: HashSet<RowId>,
     pub filter_text: String,
     pub filter_cursor_position: usize,
     pub status_filter: StatusFilter,
@@ -260,7 +260,7 @@ impl JobsState {
                 item: TuiRowItem::Job {
                     job: Box::new(job.clone()),
                 },
-                id: format!("job:{}", job.full_id),
+                id: RowId::job(job.full_id.clone()),
                 depth: 0,
                 is_last_child: false,
                 cached_tree_prefix: None,
@@ -292,7 +292,7 @@ impl JobsState {
             .iter()
             .filter(|run_id| match lab.runs.get(run_id) {
                 Some(run) => {
-                    let name_match = self.run_matches(&run_id.0, filters);
+                    let name_match = self.run_matches(run_id.as_str(), filters);
                     let has_jobs = run.jobs.iter().any(|id| visible_job_ids.contains(id));
                     name_match || has_jobs
                 }
@@ -303,7 +303,7 @@ impl JobsState {
 
         let num_runs = visible_runs.len();
         for (i, run_id) in visible_runs.iter().enumerate() {
-            let run_unique_id = format!("run:{}", run_id);
+            let run_unique_id = RowId::run(run_id.clone());
             self.display_rows.push(TuiDisplayRow {
                 item: TuiRowItem::Run { id: run_id.clone() },
                 id: run_unique_id.clone(),
@@ -348,7 +348,7 @@ impl JobsState {
                 !grouped_run_ids.contains(run_id) && {
                     match lab.runs.get(run_id) {
                         Some(run) => {
-                            let name_match = self.run_matches(&run_id.0, filters);
+                            let name_match = self.run_matches(run_id.as_str(), filters);
                             let has_jobs = run.jobs.iter().any(|id| visible_job_ids.contains(id));
                             name_match || has_jobs
                         }
@@ -368,7 +368,7 @@ impl JobsState {
                 .iter()
                 .filter(|run_id| {
                     if let Some(run) = lab.runs.get(run_id) {
-                        let name_match = self.run_matches(&run_id.0, filters);
+                        let name_match = self.run_matches(run_id.as_str(), filters);
                         let has_jobs = run.jobs.iter().any(|id| visible_job_ids.contains(id));
                         name_match || has_jobs
                     } else {
@@ -384,7 +384,7 @@ impl JobsState {
             }
 
             let is_last_top = top_idx == total_top_level - 1;
-            let group_unique_id = format!("group:{}", group_name);
+            let group_unique_id = RowId::group(group_name.clone());
             self.display_rows.push(TuiDisplayRow {
                 item: TuiRowItem::Group {
                     name: group_name.clone(),
@@ -398,7 +398,7 @@ impl JobsState {
             if !self.collapsed_nodes.contains(&group_unique_id) {
                 let num_group_runs = visible_group_runs.len();
                 for (j, run_id) in visible_group_runs.iter().enumerate() {
-                    let run_unique_id = format!("{}/run:{}", group_unique_id, run_id);
+                    let run_unique_id = group_unique_id.child(RowSegment::Run(run_id.clone()));
                     let run_is_last = j == num_group_runs - 1;
                     self.display_rows.push(TuiDisplayRow {
                         item: TuiRowItem::Run { id: run_id.clone() },
@@ -425,7 +425,7 @@ impl JobsState {
         let num_ungrouped = ungrouped_runs.len();
         for (i, run_id) in ungrouped_runs.iter().enumerate() {
             let is_last_top = top_idx == total_top_level - 1;
-            let run_unique_id = format!("run:{}", run_id);
+            let run_unique_id = RowId::run(run_id.clone());
             self.display_rows.push(TuiDisplayRow {
                 item: TuiRowItem::Run { id: run_id.clone() },
                 id: run_unique_id.clone(),
@@ -495,7 +495,7 @@ impl JobsState {
         lab: &Lab,
         run_id: &repx_core::model::RunId,
         visible_job_ids: &HashSet<JobId>,
-        parent_path: &str,
+        parent_path: &RowId,
         parent_is_last: bool,
         run_depth: usize,
     ) {
@@ -557,9 +557,9 @@ impl JobsState {
         is_last: bool,
         prefix: String,
         visible_job_ids: &HashSet<JobId>,
-        parent_path: &str,
+        parent_path: &RowId,
     ) {
-        let job_instance_id = format!("{}/job:{}", parent_path, job_id);
+        let job_instance_id = parent_path.child(RowSegment::Job(job_id.clone()));
         let tui_job = match self
             .job_index_map
             .get(job_id)
@@ -614,7 +614,7 @@ impl JobsState {
         }
     }
 
-    fn restore_selection(&mut self, previous_id: Option<String>) {
+    fn restore_selection(&mut self, previous_id: Option<RowId>) {
         let new_len = self.display_rows.len();
         let new_index = if let Some(id) = previous_id {
             self.display_rows
@@ -669,17 +669,19 @@ impl JobsState {
 
     pub fn collapse_all(&mut self, lab: &Lab) {
         for group_name in lab.groups.keys() {
-            self.collapsed_nodes.insert(format!("group:{}", group_name));
+            self.collapsed_nodes
+                .insert(RowId::group(group_name.clone()));
         }
         for run_id in lab.runs.keys() {
-            self.collapsed_nodes.insert(format!("run:{}", run_id));
+            self.collapsed_nodes.insert(RowId::run(run_id.clone()));
             for group_name in lab.groups.keys() {
-                self.collapsed_nodes
-                    .insert(format!("group:{}/run:{}", group_name, run_id));
+                self.collapsed_nodes.insert(
+                    RowId::group(group_name.clone()).child(RowSegment::Run(run_id.clone())),
+                );
             }
         }
         for job_id in lab.jobs.keys() {
-            self.collapsed_nodes.insert(format!("job:{}", job_id));
+            self.collapsed_nodes.insert(RowId::job(job_id.clone()));
         }
     }
 
@@ -695,7 +697,7 @@ impl JobsState {
         let group_ids: Vec<_> = lab
             .groups
             .keys()
-            .map(|name| format!("group:{}", name))
+            .map(|name| RowId::group(name.clone()))
             .collect();
 
         let any_expanded = group_ids
@@ -714,15 +716,16 @@ impl JobsState {
     }
 
     pub fn toggle_all_runs(&mut self, lab: &Lab) {
-        let mut run_ids: Vec<String> = Vec::new();
+        let mut run_ids: Vec<RowId> = Vec::new();
 
         for run_id in lab.runs.keys() {
-            run_ids.push(format!("run:{}", run_id));
+            run_ids.push(RowId::run(run_id.clone()));
         }
 
         for (group_name, group_runs) in &lab.groups {
             for run_id in group_runs {
-                run_ids.push(format!("group:{}/run:{}", group_name, run_id));
+                run_ids
+                    .push(RowId::group(group_name.clone()).child(RowSegment::Run(run_id.clone())));
             }
         }
 

@@ -24,7 +24,7 @@ pub fn resolve_run_spec(lab: &Lab, spec: &str) -> Result<Vec<RunId>, DomainError
             }
         }
     } else {
-        Ok(vec![RunId(spec.to_string())])
+        Ok(vec![RunId::from(spec)])
     }
 }
 fn find_final_jobs_in_run<'a>(lab: &'a Lab, run: &'a crate::model::Run) -> Vec<&'a JobId> {
@@ -51,7 +51,7 @@ fn resolve_job_id_by_prefix<'a>(lab: &'a Lab, input: &str) -> Result<Vec<&'a Job
     let candidates: Vec<&JobId> = lab
         .jobs
         .keys()
-        .filter(|job_id| job_id.0.starts_with(input))
+        .filter(|job_id| job_id.as_str().starts_with(input))
         .collect();
 
     match candidates.len() {
@@ -71,7 +71,7 @@ pub fn resolve_all_final_job_ids<'a>(
     if let Some(run) = lab.runs.get(run_id) {
         return Ok(find_final_jobs_in_run(lab, run));
     }
-    resolve_job_id_by_prefix(lab, &run_id.0)
+    resolve_job_id_by_prefix(lab, run_id.as_str())
 }
 
 pub fn resolve_target_job_id<'a>(
@@ -83,13 +83,13 @@ pub fn resolve_target_job_id<'a>(
         return match final_jobs.len() {
             1 => Ok(final_jobs[0]),
             _ => Err(DomainError::AmbiguousRun(
-                user_input.0.clone(),
+                user_input.to_string(),
                 run.jobs.clone(),
             )),
         };
     }
 
-    let candidates = resolve_job_id_by_prefix(lab, &user_input.0)?;
+    let candidates = resolve_job_id_by_prefix(lab, user_input.as_str())?;
     Ok(candidates[0])
 }
 
@@ -104,7 +104,7 @@ mod tests {
         let inputs = deps
             .iter()
             .map(|s| InputMapping {
-                job_id: Some(JobId(s.to_string())),
+                job_id: Some(JobId::from(*s)),
                 source_output: Some("default".to_string()),
                 target_input: "default".to_string(),
                 source: None,
@@ -142,37 +142,37 @@ mod tests {
             content_hash: "test-hash".to_string(),
             runs: HashMap::from([
                 (
-                    RunId("run-a".into()),
+                    RunId::from("run-a"),
                     Run {
                         image: None,
-                        jobs: vec![JobId("job-a1".into()), JobId("job-a2".into())],
+                        jobs: vec![JobId::from("job-a1"), JobId::from("job-a2")],
                         dependencies: HashMap::new(),
                     },
                 ),
                 (
-                    RunId("run-b-ambiguous".into()),
+                    RunId::from("run-b-ambiguous"),
                     Run {
                         image: None,
-                        jobs: vec![JobId("job-b1".into()), JobId("job-b2".into())],
+                        jobs: vec![JobId::from("job-b1"), JobId::from("job-b2")],
                         dependencies: HashMap::new(),
                     },
                 ),
             ]),
             jobs: HashMap::from([
-                (JobId("job-a1".into()), job(&[])),
-                (JobId("job-a2".into()), job(&["job-a1"])),
-                (JobId("job-b1".into()), job(&[])),
-                (JobId("job-b2".into()), job(&[])),
-                (JobId("12345-unique-name".into()), job(&[])),
-                (JobId("multi-abc-1".into()), job(&[])),
-                (JobId("multi-def-2".into()), job(&[])),
+                (JobId::from("job-a1"), job(&[])),
+                (JobId::from("job-a2"), job(&["job-a1"])),
+                (JobId::from("job-b1"), job(&[])),
+                (JobId::from("job-b2"), job(&[])),
+                (JobId::from("12345-unique-name"), job(&[])),
+                (JobId::from("multi-abc-1"), job(&[])),
+                (JobId::from("multi-def-2"), job(&[])),
             ]),
             groups: HashMap::from([
                 (
                     "all".to_string(),
-                    vec![RunId("run-a".into()), RunId("run-b-ambiguous".into())],
+                    vec![RunId::from("run-a"), RunId::from("run-b-ambiguous")],
                 ),
-                ("only-a".to_string(), vec![RunId("run-a".into())]),
+                ("only-a".to_string(), vec![RunId::from("run-a")]),
                 ("empty".to_string(), vec![]),
             ]),
             host_tools_path: PathBuf::from("host-tools"),
@@ -183,15 +183,15 @@ mod tests {
     #[test]
     fn resolve_direct_run_id_success() {
         let lab = test_lab();
-        let input = RunId("run-a".to_string());
+        let input = RunId::from("run-a");
         let result = resolve_target_job_id(&lab, &input).expect("direct run ID should resolve");
-        assert_eq!(result, &JobId("job-a2".to_string()));
+        assert_eq!(result, &JobId::from("job-a2"));
     }
 
     #[test]
     fn resolve_ambiguous_run_id() {
         let lab = test_lab();
-        let input = RunId("run-b-ambiguous".to_string());
+        let input = RunId::from("run-b-ambiguous");
         let result = resolve_target_job_id(&lab, &input);
         assert!(matches!(result, Err(DomainError::AmbiguousRun(_, _))));
     }
@@ -199,24 +199,24 @@ mod tests {
     #[test]
     fn resolve_full_job_id_success() {
         let lab = test_lab();
-        let input = RunId("12345-unique-name".to_string());
+        let input = RunId::from("12345-unique-name");
         let result = resolve_target_job_id(&lab, &input).expect("full job ID should resolve");
-        assert_eq!(result, &JobId("12345-unique-name".to_string()));
+        assert_eq!(result, &JobId::from("12345-unique-name"));
     }
 
     #[test]
     fn resolve_partial_job_id_unique_match() {
         let lab = test_lab();
-        let input = RunId("12345".to_string());
+        let input = RunId::from("12345");
         let result =
             resolve_target_job_id(&lab, &input).expect("partial job ID should resolve uniquely");
-        assert_eq!(result, &JobId("12345-unique-name".to_string()));
+        assert_eq!(result, &JobId::from("12345-unique-name"));
     }
 
     #[test]
     fn resolve_partial_job_id_ambiguous() {
         let lab = test_lab();
-        let input = RunId("multi".to_string());
+        let input = RunId::from("multi");
         let result = resolve_target_job_id(&lab, &input);
         assert!(matches!(result, Err(DomainError::AmbiguousJobId { .. })));
     }
@@ -224,7 +224,7 @@ mod tests {
     #[test]
     fn resolve_target_not_found() {
         let lab = test_lab();
-        let input = RunId("does-not-exist".to_string());
+        let input = RunId::from("does-not-exist");
         let result = resolve_target_job_id(&lab, &input);
         assert!(matches!(result, Err(DomainError::TargetNotFound(_))));
     }
@@ -234,15 +234,15 @@ mod tests {
         let lab = test_lab();
         let result = resolve_run_spec(&lab, "@all").expect("@all group should resolve");
         assert_eq!(result.len(), 2);
-        assert!(result.contains(&RunId("run-a".into())));
-        assert!(result.contains(&RunId("run-b-ambiguous".into())));
+        assert!(result.contains(&RunId::from("run-a")));
+        assert!(result.contains(&RunId::from("run-b-ambiguous")));
     }
 
     #[test]
     fn resolve_run_spec_single_group() {
         let lab = test_lab();
         let result = resolve_run_spec(&lab, "@only-a").expect("@only-a group should resolve");
-        assert_eq!(result, vec![RunId("run-a".into())]);
+        assert_eq!(result, vec![RunId::from("run-a")]);
     }
 
     #[test]
@@ -270,6 +270,6 @@ mod tests {
     fn resolve_run_spec_plain_run_name_falls_through() {
         let lab = test_lab();
         let result = resolve_run_spec(&lab, "run-a").expect("plain run name should resolve");
-        assert_eq!(result, vec![RunId("run-a".into())]);
+        assert_eq!(result, vec![RunId::from("run-a")]);
     }
 }
