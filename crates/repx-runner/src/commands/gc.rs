@@ -3,7 +3,7 @@ use crate::cli::{
 };
 use crate::commands::AppContext;
 use crate::error::CliError;
-use repx_core::{config::Config, constants::dirs, errors::DomainError, lab};
+use repx_core::{config::Config, constants::dirs, errors::DomainError, lab, resolver};
 use std::collections::HashSet;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
@@ -382,18 +382,38 @@ fn handle_gc_unpin(
         .get_target(target_name)
         .ok_or_else(|| CliError::Domain(DomainError::TargetNotFound(target_name.to_string())))?;
 
+    let roots = target
+        .list_gc_roots(false)
+        .map_err(|e| CliError::ExecutionFailed {
+            message: "Failed to list GC roots".to_string(),
+            log_path: None,
+            log_summary: e.to_string(),
+        })?;
+
+    let pinned_names: Vec<&str> = roots
+        .iter()
+        .filter(|r| matches!(r.kind, repx_client::targets::GcRootKind::Pinned))
+        .map(|r| r.name.as_str())
+        .collect();
+
+    let resolved_name =
+        resolver::resolve_name_by_prefix(pinned_names, &args.name).map_err(CliError::Domain)?;
+
     target
-        .unpin_gc_root(&args.name)
+        .unpin_gc_root(resolved_name)
         .map_err(|e| CliError::ExecutionFailed {
             message: format!(
                 "Failed to unpin '{}' on target '{}'",
-                args.name, target_name
+                resolved_name, target_name
             ),
             log_path: None,
             log_summary: e.to_string(),
         })?;
 
-    println!("Unpinned '{}' from target '{}'.", args.name, target_name);
+    println!(
+        "Unpinned '{}' from target '{}'.",
+        resolved_name, target_name
+    );
     Ok(())
 }
 

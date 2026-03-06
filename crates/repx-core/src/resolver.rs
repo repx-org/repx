@@ -4,6 +4,25 @@ use crate::{
 };
 use std::collections::HashSet;
 
+pub fn resolve_name_by_prefix<'a, I>(names: I, input: &str) -> Result<&'a str, DomainError>
+where
+    I: IntoIterator<Item = &'a str>,
+{
+    let candidates: Vec<&str> = names
+        .into_iter()
+        .filter(|name| name.starts_with(input))
+        .collect();
+
+    match candidates.len() {
+        0 => Err(DomainError::GcRootNotFound(input.to_string())),
+        1 => Ok(candidates[0]),
+        _ => Err(DomainError::AmbiguousGcRoot {
+            input: input.to_string(),
+            matches: candidates.iter().map(|s| (*s).to_string()).collect(),
+        }),
+    }
+}
+
 pub fn resolve_run_spec(lab: &Lab, spec: &str) -> Result<Vec<RunId>, DomainError> {
     if let Some(group_name) = spec.strip_prefix('@') {
         if group_name.is_empty() {
@@ -271,5 +290,53 @@ mod tests {
         let lab = test_lab();
         let result = resolve_run_spec(&lab, "run-a").expect("plain run name should resolve");
         assert_eq!(result, vec![RunId::from("run-a")]);
+    }
+
+    #[test]
+    fn resolve_name_by_prefix_exact_match() {
+        let names = vec!["foo-bar-123", "baz-qux-456", "quux-789"];
+        let result = resolve_name_by_prefix(names, "foo-bar-123").expect("exact match should work");
+        assert_eq!(result, "foo-bar-123");
+    }
+
+    #[test]
+    fn resolve_name_by_prefix_unique_prefix() {
+        let names = vec!["foo-bar-123", "baz-qux-456", "quux-789"];
+        let result = resolve_name_by_prefix(names, "foo").expect("unique prefix should resolve");
+        assert_eq!(result, "foo-bar-123");
+    }
+
+    #[test]
+    fn resolve_name_by_prefix_short_unique_prefix() {
+        let names = vec!["abc123def", "xyz789ghi"];
+        let result = resolve_name_by_prefix(names, "a").expect("short unique prefix should work");
+        assert_eq!(result, "abc123def");
+    }
+
+    #[test]
+    fn resolve_name_by_prefix_ambiguous() {
+        let names = vec!["prefix-abc", "prefix-def", "other-123"];
+        let result = resolve_name_by_prefix(names, "prefix");
+        assert!(matches!(result, Err(DomainError::AmbiguousGcRoot { .. })));
+        if let Err(DomainError::AmbiguousGcRoot { input, matches }) = result {
+            assert_eq!(input, "prefix");
+            assert_eq!(matches.len(), 2);
+            assert!(matches.contains(&"prefix-abc".to_string()));
+            assert!(matches.contains(&"prefix-def".to_string()));
+        }
+    }
+
+    #[test]
+    fn resolve_name_by_prefix_not_found() {
+        let names = vec!["foo-bar", "baz-qux"];
+        let result = resolve_name_by_prefix(names, "nonexistent");
+        assert!(matches!(result, Err(DomainError::GcRootNotFound(_))));
+    }
+
+    #[test]
+    fn resolve_name_by_prefix_empty_list() {
+        let names: Vec<&str> = vec![];
+        let result = resolve_name_by_prefix(names, "anything");
+        assert!(matches!(result, Err(DomainError::GcRootNotFound(_))));
     }
 }
