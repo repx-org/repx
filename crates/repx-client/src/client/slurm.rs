@@ -7,7 +7,7 @@ use crate::targets::Target;
 use fs_err;
 use repx_core::{
     constants::{dirs, targets},
-    errors::ConfigError,
+    errors::CoreError,
     model::{Job, JobId},
 };
 use sha2::{Digest, Sha256};
@@ -76,7 +76,7 @@ pub fn submit_slurm_batch_run(
     });
     let local_target = client
         .get_target(targets::LOCAL)
-        .ok_or(ClientError::Config(ConfigError::MissingLocalTarget))?;
+        .ok_or(ClientError::Config(CoreError::MissingLocalTarget))?;
     let client_temp_dir = local_target.base_path().join("repx").join("temp");
     let local_batch_dir = client_temp_dir.join("slurm_batch");
     if local_batch_dir.exists() {
@@ -88,8 +88,7 @@ pub fn submit_slurm_batch_run(
             );
         }
     }
-    fs_err::create_dir_all(&local_batch_dir)
-        .map_err(|e| ClientError::Config(ConfigError::Io(e)))?;
+    fs_err::create_dir_all(&local_batch_dir).map_err(|e| ClientError::Config(CoreError::Io(e)))?;
 
     let mut plan = OrchestrationPlan::new(target.base_path(), &client.lab.content_hash);
     let job_ids_in_batch: HashSet<JobId> = jobs_to_submit.keys().cloned().collect();
@@ -143,13 +142,13 @@ pub fn submit_slurm_batch_run(
             == repx_core::model::StageType::ScatterGather
         {
             let scatter_exe = job.executables.get("scatter").ok_or_else(|| {
-                ClientError::Config(ConfigError::MissingExecutable {
+                ClientError::Config(CoreError::MissingExecutable {
                     job_id: job_id.to_string(),
                     executable: "scatter".to_string(),
                 })
             })?;
             let gather_exe = job.executables.get("gather").ok_or_else(|| {
-                ClientError::Config(ConfigError::MissingExecutable {
+                ClientError::Config(CoreError::MissingExecutable {
                     job_id: job_id.to_string(),
                     executable: "gather".to_string(),
                 })
@@ -181,7 +180,7 @@ pub fn submit_slurm_batch_run(
                     })
                     .collect();
                 sink_candidates.first().cloned().cloned().ok_or_else(|| {
-                    ClientError::Config(ConfigError::InconsistentMetadata {
+                    ClientError::Config(CoreError::InconsistentMetadata {
                         detail: format!(
                             "Scatter-gather job '{}' has no sink step in its step DAG",
                             job_id
@@ -236,7 +235,7 @@ pub fn submit_slurm_batch_run(
             (command, main_directives)
         } else {
             let main_exe = job.executables.get("main").ok_or_else(|| {
-                ClientError::Config(ConfigError::MissingExecutable {
+                ClientError::Config(CoreError::MissingExecutable {
                     job_id: job_id.to_string(),
                     executable: "main".to_string(),
                 })
@@ -269,18 +268,18 @@ pub fn submit_slurm_batch_run(
         let script_hash = format!("{:x}", hash_bytes);
 
         let script_path = local_batch_dir.join(format!("{}.sbatch", script_hash));
-        let mut file = fs_err::File::create(script_path)
-            .map_err(|e| ClientError::Config(ConfigError::Io(e)))?;
+        let mut file =
+            fs_err::File::create(script_path).map_err(|e| ClientError::Config(CoreError::Io(e)))?;
         file.write_all(script_content.as_bytes())
-            .map_err(|e| ClientError::Config(ConfigError::Io(e)))?;
+            .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
 
         plan.add_job(job_id.clone(), job, script_hash, &job_ids_in_batch)?;
     }
     let plan_filename = "plan.json";
-    let plan_content = serde_json::to_string_pretty(&plan)
-        .map_err(|e| ClientError::Config(ConfigError::Json(e)))?;
+    let plan_content =
+        serde_json::to_string_pretty(&plan).map_err(|e| ClientError::Config(CoreError::Json(e)))?;
     fs_err::write(local_batch_dir.join(plan_filename), plan_content)
-        .map_err(|e| ClientError::Config(ConfigError::Io(e)))?;
+        .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
 
     send(ClientEvent::ExecutingOrchestrator);
     send(ClientEvent::SubmittingJobs {

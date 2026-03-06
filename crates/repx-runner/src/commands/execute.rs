@@ -1,7 +1,7 @@
 use crate::{cli::InternalExecuteArgs, error::CliError};
 use repx_core::{
     constants::{dirs, logs, markers},
-    errors::ConfigError,
+    errors::CoreError,
     model::{JobId, MountPolicy},
 };
 use repx_executor::{CancellationToken, ExecutionRequest, Executor};
@@ -32,7 +32,7 @@ async fn async_handle_execute(args: InternalExecuteArgs) -> Result<(), CliError>
         .parent()
         .and_then(|p| p.parent())
         .ok_or_else(|| {
-            CliError::Config(ConfigError::InvalidConfig {
+            CliError::Config(CoreError::InvalidConfig {
                 detail: "Could not determine job package path from executable path".to_string(),
             })
         })?

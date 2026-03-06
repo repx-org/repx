@@ -2,23 +2,117 @@ use crate::model::JobId;
 use std::path::PathBuf;
 use thiserror::Error;
 
+#[derive(Debug)]
+pub struct PathIoError {
+    pub path: PathBuf,
+    pub source: std::io::Error,
+}
+
+impl std::fmt::Display for PathIoError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "I/O error on path '{}': {}",
+            self.path.display(),
+            self.source
+        )
+    }
+}
+
+impl std::error::Error for PathIoError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(&self.source)
+    }
+}
+
+#[derive(Debug)]
+pub struct JsonPathError {
+    pub path: PathBuf,
+    pub source: serde_json::Error,
+}
+
+impl std::fmt::Display for JsonPathError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "Failed to parse JSON in '{}': {}",
+            self.path.display(),
+            self.source
+        )
+    }
+}
+
+impl std::error::Error for JsonPathError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(&self.source)
+    }
+}
+
+#[derive(Debug)]
+pub struct TomlPathError {
+    pub path: PathBuf,
+    pub source: toml::de::Error,
+}
+
+impl std::fmt::Display for TomlPathError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "Failed to parse TOML in '{}': {}",
+            self.path.display(),
+            self.source
+        )
+    }
+}
+
+impl std::error::Error for TomlPathError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(&self.source)
+    }
+}
+
+impl CoreError {
+    pub fn path_io(path: impl Into<PathBuf>, source: std::io::Error) -> Self {
+        CoreError::PathIo(Box::new(PathIoError {
+            path: path.into(),
+            source,
+        }))
+    }
+
+    pub fn json_path(path: impl Into<PathBuf>, source: serde_json::Error) -> Self {
+        CoreError::JsonPath(Box::new(JsonPathError {
+            path: path.into(),
+            source,
+        }))
+    }
+
+    pub fn toml_path(path: impl Into<PathBuf>, source: toml::de::Error) -> Self {
+        CoreError::TomlPath(Box::new(TomlPathError {
+            path: path.into(),
+            source,
+        }))
+    }
+}
+
 #[derive(Error, Debug)]
 pub enum CoreError {
     #[error("I/O Error: {0}")]
     Io(#[from] std::io::Error),
 
-    #[error("I/O error on path '{path}': {source}")]
-    PathIo {
-        path: PathBuf,
-        #[source]
-        source: std::io::Error,
-    },
+    #[error(transparent)]
+    PathIo(Box<PathIoError>),
 
     #[error("Failed to parse metadata file: {0}")]
     Json(#[from] serde_json::Error),
 
+    #[error(transparent)]
+    JsonPath(Box<JsonPathError>),
+
     #[error("Failed to parse TOML configuration: {0}")]
     Toml(#[from] toml::de::Error),
+
+    #[error(transparent)]
+    TomlPath(Box<TomlPathError>),
 
     #[error("Failed to serialize TOML configuration: {0}")]
     TomlSerialize(#[from] toml::ser::Error),
@@ -110,8 +204,6 @@ pub enum CoreError {
     #[error("Host tool error: {detail}")]
     HostToolNotFound { detail: String },
 }
-
-pub type ConfigError = CoreError;
 
 #[derive(Error, Debug)]
 pub enum DomainError {

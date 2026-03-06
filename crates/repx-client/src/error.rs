@@ -3,7 +3,7 @@ use thiserror::Error;
 #[derive(Error, Debug)]
 pub enum ClientError {
     #[error(transparent)]
-    Config(#[from] repx_core::errors::ConfigError),
+    Config(#[from] repx_core::errors::CoreError),
 
     #[error(transparent)]
     Domain(#[from] repx_core::errors::DomainError),
@@ -14,7 +14,7 @@ pub enum ClientError {
     #[error("Failed to execute command on target '{target}': {source}")]
     TargetCommandFailed {
         target: String,
-        source: repx_core::errors::ConfigError,
+        source: repx_core::errors::CoreError,
     },
 
     #[error("Could not find target '{0}' in configuration.")]

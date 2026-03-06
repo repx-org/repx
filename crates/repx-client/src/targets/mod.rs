@@ -13,7 +13,7 @@ use repx_core::{
     config,
     constants::{dirs, markers},
     engine,
-    errors::ConfigError,
+    errors::CoreError,
     model::JobId,
 };
 use sha2::{Digest, Sha256};
@@ -25,12 +25,12 @@ use std::{
 };
 
 pub(crate) fn compute_file_hash(path: &Path) -> Result<String> {
-    let mut file = fs_err::File::open(path).map_err(ConfigError::Io)?;
+    let mut file = fs_err::File::open(path).map_err(CoreError::Io)?;
     let mut hasher = Sha256::new();
     let mut buffer = [0u8; 8192];
 
     loop {
-        let count = file.read(&mut buffer).map_err(ConfigError::Io)?;
+        let count = file.read(&mut buffer).map_err(CoreError::Io)?;
         if count == 0 {
             break;
         }
@@ -40,7 +40,7 @@ pub(crate) fn compute_file_hash(path: &Path) -> Result<String> {
 }
 
 pub(crate) fn find_local_runner_binary() -> Result<PathBuf> {
-    let current_exe = std::env::current_exe().map_err(ConfigError::Io)?;
+    let current_exe = std::env::current_exe().map_err(CoreError::Io)?;
     let mut exe_dir = current_exe
         .parent()
         .ok_or_else(|| ClientError::InvalidPath {
@@ -62,7 +62,7 @@ pub(crate) fn find_local_runner_binary() -> Result<PathBuf> {
             return Ok(cli_exe_path);
         }
 
-        return Err(ClientError::Config(ConfigError::InvalidConfig {
+        return Err(ClientError::Config(CoreError::InvalidConfig {
             detail: format!(
                 "Could not find repx runner binary. Searched for:\n  {}\n  {}",
                 runner_exe_path.display(),

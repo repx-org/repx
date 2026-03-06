@@ -1,5 +1,5 @@
 use crate::error::CliError;
-use repx_core::errors::ConfigError;
+use repx_core::errors::CoreError;
 use std::collections::HashMap;
 
 use super::StepMeta;
@@ -13,7 +13,7 @@ pub(crate) fn toposort_steps(steps: &HashMap<String, StepMeta>) -> Result<Vec<St
         in_degree.entry(name.as_str()).or_insert(0);
         for dep in &meta.deps {
             if !steps.contains_key(dep) {
-                return Err(CliError::Config(ConfigError::StepError {
+                return Err(CliError::Config(CoreError::StepError {
                     detail: format!("Step '{}' depends on unknown step '{}'", name, dep),
                 }));
             }
@@ -53,7 +53,7 @@ pub(crate) fn toposort_steps(steps: &HashMap<String, StepMeta>) -> Result<Vec<St
     }
 
     if result.len() != steps.len() {
-        return Err(CliError::Config(ConfigError::CycleDetected {
+        return Err(CliError::Config(CoreError::CycleDetected {
             context: "step dependency graph".to_string(),
         }));
     }

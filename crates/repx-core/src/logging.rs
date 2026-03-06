@@ -1,5 +1,5 @@
 use crate::config::LoggingConfig;
-use crate::errors::ConfigError;
+use crate::errors::CoreError;
 use chrono::Local;
 use std::env;
 use std::fs::{self, OpenOptions};
@@ -85,7 +85,7 @@ impl FormatTime for LocalTimeFormatter {
 }
 
 #[allow(clippy::expect_used)]
-fn rotate_logs(log_dir: &Path, prefix: &str, config: &LoggingConfig) -> Result<(), ConfigError> {
+fn rotate_logs(log_dir: &Path, prefix: &str, config: &LoggingConfig) -> Result<(), CoreError> {
     if !log_dir.exists() {
         fs::create_dir_all(log_dir)?;
     }
@@ -121,12 +121,13 @@ fn rotate_logs(log_dir: &Path, prefix: &str, config: &LoggingConfig) -> Result<(
             let parts: Vec<&str> = name.split('_').collect();
             if parts.len() >= 2 {
                 if let Ok(date) = chrono::NaiveDate::parse_from_str(parts[1], "%Y-%m-%d") {
-                    let log_time = date
-                        .and_hms_opt(0, 0, 0)
-                        .expect("midnight HMS is always valid")
-                        .and_local_timezone(chrono::Local)
-                        .earliest()
-                        .expect("midnight in local timezone must be resolvable");
+                    let Some(naive_midnight) = date.and_hms_opt(0, 0, 0) else {
+                        return true;
+                    };
+                    let Some(log_time) = naive_midnight.and_local_timezone(chrono::Local).single()
+                    else {
+                        return true;
+                    };
                     let log_sys_time = SystemTime::from(log_time);
                     if let Ok(age) = now.duration_since(log_sys_time) {
                         if age > max_age {
@@ -143,7 +144,7 @@ fn rotate_logs(log_dir: &Path, prefix: &str, config: &LoggingConfig) -> Result<(
     Ok(())
 }
 
-fn init_tracing_subscriber(log_path: &Path) -> Result<(), ConfigError> {
+fn init_tracing_subscriber(log_path: &Path) -> Result<(), CoreError> {
     if let Some(parent) = log_path.parent() {
         fs::create_dir_all(parent)?;
     }
@@ -281,14 +282,10 @@ where
     }
 }
 
-fn init_logger(
-    config: &LoggingConfig,
-    prefix: &str,
-    symlink_name: &str,
-) -> Result<(), ConfigError> {
+fn init_logger(config: &LoggingConfig, prefix: &str, symlink_name: &str) -> Result<(), CoreError> {
     let xdg_dirs = crate::xdg_dirs();
     let cache_home = xdg_dirs.get_cache_home().ok_or_else(|| {
-        ConfigError::Io(std::io::Error::new(
+        CoreError::Io(std::io::Error::new(
             std::io::ErrorKind::NotFound,
             "Could not find cache home directory",
         ))
@@ -316,7 +313,7 @@ fn init_logger(
     Ok(())
 }
 
-pub fn init_session_logger(config: &LoggingConfig) -> Result<(), ConfigError> {
+pub fn init_session_logger(config: &LoggingConfig) -> Result<(), CoreError> {
     init_logger(config, "repx_", "repx.log")
 }
 
@@ -336,7 +333,7 @@ pub fn init_stderr_logger() {
         .init();
 }
 
-pub fn init_tui_logger(config: &LoggingConfig) -> Result<(), ConfigError> {
+pub fn init_tui_logger(config: &LoggingConfig) -> Result<(), CoreError> {
     init_logger(config, "repx-tui_", "repx-tui.log")
 }
 

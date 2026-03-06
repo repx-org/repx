@@ -3,7 +3,7 @@ use super::{
     ArtifactSync, CommandRunner, FileOps, GcOps, JobRunner, RemoteCommand, SlurmOps, TargetInfo,
 };
 use crate::error::{ClientError, Result};
-use repx_core::{config, constants::dirs, errors::ConfigError, logging, model::JobId};
+use repx_core::{config, constants::dirs, errors::CoreError, logging, model::JobId};
 use std::{
     collections::HashSet,
     io::Write,
@@ -82,11 +82,11 @@ impl SshTarget {
         logging::log_and_print_command(&scp_cmd);
         let output = scp_cmd
             .output()
-            .map_err(|e| ClientError::Config(ConfigError::Io(e)))?;
+            .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(ClientError::Config(ConfigError::CommandFailed(format!(
+            return Err(ClientError::Config(CoreError::CommandFailed(format!(
                 "scp failed for rsync binary to {}: {}",
                 self.address, stderr
             ))));
@@ -149,13 +149,13 @@ impl CommandRunner for SshTarget {
         logging::log_and_print_command(&cmd);
         let output = cmd
             .output()
-            .map_err(|e| ClientError::Config(ConfigError::Io(e)))?;
+            .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
             return Err(ClientError::TargetCommandFailed {
                 target: self.name.clone(),
-                source: ConfigError::CommandFailed(format!(
+                source: CoreError::CommandFailed(format!(
                     "Command '{}' failed on target '{}': {}",
                     remote_command_string, self.name, stderr
                 )),
@@ -216,7 +216,7 @@ impl SshTarget {
             return Ok(fallback);
         }
 
-        Err(ClientError::Config(ConfigError::ManifestNotFound {
+        Err(ClientError::Config(CoreError::ManifestNotFound {
             hash: lab_hash.to_string(),
         }))
     }
@@ -242,11 +242,11 @@ impl SshTarget {
         logging::log_and_print_command(&rsync_cmd);
         let output = rsync_cmd
             .output()
-            .map_err(|e| ClientError::Config(ConfigError::Io(e)))?;
+            .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(ClientError::Config(ConfigError::CommandFailed(format!(
+            return Err(ClientError::Config(CoreError::CommandFailed(format!(
                 "rsync directory sync failed: {}",
                 stderr
             ))));
@@ -313,15 +313,15 @@ impl ArtifactSync for SshTarget {
         let mut temp_file = tempfile::Builder::new()
             .prefix("repx-sync-list-")
             .tempfile_in(&self.local_temp_path)
-            .map_err(|e| ClientError::Config(ConfigError::Io(e)))?;
+            .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
 
         for path in artifacts {
             writeln!(temp_file, "{}", path.to_string_lossy())
-                .map_err(|e| ClientError::Config(ConfigError::Io(e)))?;
+                .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
         }
         temp_file
             .flush()
-            .map_err(|e| ClientError::Config(ConfigError::Io(e)))?;
+            .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
 
         let remote_rsync_path = self.deploy_rsync_binary()?;
 
@@ -343,11 +343,11 @@ impl ArtifactSync for SshTarget {
         logging::log_and_print_command(&rsync_cmd);
         let output = rsync_cmd
             .output()
-            .map_err(|e| ClientError::Config(ConfigError::Io(e)))?;
+            .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(ClientError::Config(ConfigError::CommandFailed(format!(
+            return Err(ClientError::Config(CoreError::CommandFailed(format!(
                 "rsync batch sync failed: {}",
                 stderr
             ))));
@@ -386,11 +386,11 @@ impl ArtifactSync for SshTarget {
         logging::log_and_print_command(&scp_cmd);
         let output = scp_cmd
             .output()
-            .map_err(|e| ClientError::Config(ConfigError::Io(e)))?;
+            .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(ClientError::Config(ConfigError::CommandFailed(format!(
+            return Err(ClientError::Config(CoreError::CommandFailed(format!(
                 "scp failed for {}: {}",
                 relative_path.display(),
                 stderr
@@ -440,8 +440,7 @@ impl ArtifactSync for SshTarget {
     ) -> Result<()> {
         let store_cache = local_cache_root.join("store");
 
-        fs_err::create_dir_all(&store_cache)
-            .map_err(|e| ClientError::Config(ConfigError::Io(e)))?;
+        fs_err::create_dir_all(&store_cache).map_err(|e| ClientError::Config(CoreError::Io(e)))?;
 
         let tar_tool = self.local_tool("tar");
 
@@ -575,11 +574,11 @@ impl ArtifactSync for SshTarget {
                 logging::log_and_print_command(&rsync_cmd);
                 let output = rsync_cmd
                     .output()
-                    .map_err(|e| ClientError::Config(ConfigError::Io(e)))?;
+                    .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
 
                 if !output.status.success() {
                     let stderr = String::from_utf8_lossy(&output.stderr);
-                    return Err(ClientError::Config(ConfigError::CommandFailed(format!(
+                    return Err(ClientError::Config(CoreError::CommandFailed(format!(
                         "rsync failed for layer {}: {}",
                         layer_name, stderr
                     ))));
@@ -591,7 +590,7 @@ impl ArtifactSync for SshTarget {
             .file_name()
             .and_then(|s| s.to_str())
             .ok_or_else(|| {
-                ClientError::Config(ConfigError::InvalidConfig {
+                ClientError::Config(CoreError::InvalidConfig {
                     detail: format!(
                         "Image path '{}' has no valid filename",
                         image_path.display()
@@ -604,7 +603,7 @@ impl ArtifactSync for SshTarget {
         let manifest_content = serde_json::to_string(&vec![super::common::ManifestEntry {
             layers: layers.clone(),
         }])
-        .map_err(|e| ClientError::Config(ConfigError::Json(e)))?;
+        .map_err(|e| ClientError::Config(CoreError::Json(e)))?;
 
         self.write_remote_file(&remote_image_dir.join("manifest.json"), &manifest_content)?;
 
@@ -699,10 +698,10 @@ impl FileOps for SshTarget {
 
         let mut child = cmd
             .spawn()
-            .map_err(|e| ClientError::Config(ConfigError::Io(e)))?;
+            .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
 
         let mut stdin = child.stdin.take().ok_or_else(|| {
-            ClientError::Config(ConfigError::InvalidConfig {
+            ClientError::Config(CoreError::InvalidConfig {
                 detail: "Failed to capture stdin pipe for remote write command".to_string(),
             })
         })?;
@@ -714,7 +713,7 @@ impl FileOps for SshTarget {
         });
 
         let output = child.wait_with_output().map_err(|e| {
-            ClientError::Config(ConfigError::CommandFailed(format!(
+            ClientError::Config(CoreError::CommandFailed(format!(
                 "Failed to wait for remote write: {}",
                 e
             )))
@@ -724,7 +723,7 @@ impl FileOps for SshTarget {
             let stderr = String::from_utf8_lossy(&output.stderr);
             return Err(ClientError::TargetCommandFailed {
                 target: self.name.clone(),
-                source: ConfigError::CommandFailed(format!(
+                source: CoreError::CommandFailed(format!(
                     "Failed to write '{}': {}",
                     path.display(),
                     stderr
@@ -750,7 +749,7 @@ impl JobRunner for SshTarget {
                 Ok(_) => Ok(()),
                 Err(e) => Err(ClientError::TargetCommandFailed {
                     target: self.name.clone(),
-                    source: ConfigError::TargetSetupFailed(format!(
+                    source: CoreError::TargetSetupFailed(format!(
                         "Binary verification failed. The deployed binary failed to execute. Check architecture compatibility.\nError: {}",
                         e
                     )),
@@ -785,11 +784,11 @@ impl JobRunner for SshTarget {
         logging::log_and_print_command(&scp_cmd);
         let output = scp_cmd
             .output()
-            .map_err(|e| ClientError::Config(ConfigError::Io(e)))?;
+            .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(ClientError::Config(ConfigError::CommandFailed(format!(
+            return Err(ClientError::Config(CoreError::CommandFailed(format!(
                 "scp failed for repx binary to {}: {}",
                 self.address, stderr
             ))));
@@ -820,7 +819,7 @@ impl JobRunner for SshTarget {
         logging::log_and_print_command(&cmd);
 
         cmd.spawn().map_err(|e| {
-            ClientError::Config(ConfigError::CommandFailed(format!(
+            ClientError::Config(CoreError::CommandFailed(format!(
                 "Failed to spawn SSH process: {}",
                 e
             )))
@@ -893,7 +892,7 @@ impl GcOps for SshTarget {
             shell_quote(&link_path.to_string_lossy())
         );
         if self.run_command("sh", &["-c", &check_script]).is_err() {
-            return Err(ClientError::Config(ConfigError::GcRootNotFound {
+            return Err(ClientError::Config(CoreError::GcRootNotFound {
                 name: name.to_string(),
             }));
         }

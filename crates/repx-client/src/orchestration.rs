@@ -1,5 +1,5 @@
 use crate::error::ClientError;
-use repx_core::errors::ConfigError;
+use repx_core::errors::CoreError;
 use repx_core::model::{Job, JobId, StageType};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -38,7 +38,7 @@ impl OrchestrationPlan {
             .get("main")
             .or_else(|| job_def.executables.get("scatter"))
             .ok_or_else(|| {
-                ClientError::Config(ConfigError::MissingExecutable {
+                ClientError::Config(CoreError::MissingExecutable {
                     job_id: job_id.to_string(),
                     executable: "main or scatter".to_string(),
                 })

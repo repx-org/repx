@@ -2,7 +2,7 @@ use crate::cli::{Cli, Commands};
 use crate::commands::AppContext;
 use repx_client::Client;
 use repx_core::{
-    config, constants::targets, errors::ConfigError, logging::Verbosity, model::SchedulerType,
+    config, constants::targets, errors::CoreError, logging::Verbosity, model::SchedulerType,
 };
 
 pub mod cli;
@@ -78,11 +78,11 @@ pub fn run(cli: Cli) -> Result<(), CliError> {
 
             let target_name = match cli.target.as_ref().or(config.submission_target.as_ref()) {
                 Some(name) => name.clone(),
-                None => return Err(CliError::Config(ConfigError::NoSubmissionTarget)),
+                None => return Err(CliError::Config(CoreError::NoSubmissionTarget)),
             };
 
             let target_config = config.targets.get(&target_name).ok_or_else(|| {
-                CliError::Config(ConfigError::TargetNotConfigured {
+                CliError::Config(CoreError::TargetNotConfigured {
                     name: target_name.clone(),
                 })
             })?;

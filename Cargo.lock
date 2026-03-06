@@ -1966,6 +1966,7 @@ name = "repx-core"
 version = "0.4.0"
 dependencies = [
  "chrono",
+ "nix 0.29.0",
  "rayon",
  "serde",
  "serde_json",

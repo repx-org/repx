@@ -6,7 +6,7 @@ use repx_core::{
     config,
     constants::{dirs, targets},
     engine::JobStatus,
-    errors::{ConfigError, DomainError},
+    errors::{CoreError, DomainError},
     lab,
     model::{JobId, Lab, RunId},
     resolver,
@@ -77,7 +77,7 @@ fn list_jobs(
         let target_name = target.unwrap_or(targets::LOCAL).to_string();
 
         let target_config = config.targets.get(&target_name).ok_or_else(|| {
-            CliError::Config(ConfigError::TargetNotConfigured {
+            CliError::Config(CoreError::TargetNotConfigured {
                 name: target_name.clone(),
             })
         })?;
@@ -90,14 +90,14 @@ fn list_jobs(
 
         let statuses = if !args.status.is_empty() {
             let client = Client::new(config.clone(), lab_path.to_path_buf()).map_err(|e| {
-                CliError::Config(ConfigError::InvalidConfig {
+                CliError::Config(CoreError::InvalidConfig {
                     detail: format!("Failed to initialize client: {}", e),
                 })
             })?;
             let job_statuses =
                 client_status::get_statuses_for_active_target(&client, &target_name, None)
                     .map_err(|e| {
-                        CliError::Config(ConfigError::CommandFailed(format!(
+                        CliError::Config(CoreError::CommandFailed(format!(
                             "Failed to get job statuses: {}",
                             e
                         )))
@@ -191,7 +191,7 @@ fn list_jobs(
     }
 
     let run_id = RunId::from_str(run_id_str).map_err(|e| {
-        CliError::Config(ConfigError::InvalidConfig {
+        CliError::Config(CoreError::InvalidConfig {
             detail: e.to_string(),
         })
     })?;

@@ -1,6 +1,6 @@
 use crate::{
     constants::{dirs, markers},
-    errors::ConfigError,
+    errors::CoreError,
     model::JobId,
     path_safety::safe_join,
 };
@@ -25,7 +25,7 @@ pub struct FoundJob {
 pub fn get_job_outcomes(
     store_path: &Path,
     job_ids_to_check: &[JobId],
-) -> Result<HashMap<JobId, FoundJob>, ConfigError> {
+) -> Result<HashMap<JobId, FoundJob>, CoreError> {
     let outputs_dir = store_path.join(dirs::OUTPUTS);
     if !outputs_dir.exists() {
         return Ok(HashMap::new());
@@ -74,7 +74,7 @@ pub fn merge_stores(
     sources: &[PathBuf],
     destination: &Path,
     mut on_progress: impl FnMut(MergeProgress),
-) -> Result<(), ConfigError> {
+) -> Result<(), CoreError> {
     fs::create_dir_all(destination)?;
 
     let entries: Vec<_> = sources
@@ -122,7 +122,7 @@ pub fn merge_stores(
                         .canonicalize()
                         .unwrap_or(source_root.to_path_buf());
                     if !canonical.starts_with(&canonical_root) {
-                        return Err(ConfigError::SymlinkEscape {
+                        return Err(CoreError::SymlinkEscape {
                             link: path.to_path_buf(),
                             target: canonical,
                         });

@@ -1,6 +1,6 @@
 use crate::error::CliError;
 use repx_client::Client;
-use repx_core::{errors::ConfigError, model::ExecutionType};
+use repx_core::{errors::CoreError, model::ExecutionType};
 use repx_executor::{ImageTag, Runtime};
 use std::path::Path;
 
@@ -16,7 +16,7 @@ pub mod trace;
 
 pub(crate) fn create_tokio_runtime() -> Result<tokio::runtime::Runtime, CliError> {
     tokio::runtime::Runtime::new().map_err(|e| {
-        CliError::Config(ConfigError::InvalidConfig {
+        CliError::Config(CoreError::InvalidConfig {
             detail: format!("Failed to create async runtime: {}", e),
         })
     })
@@ -34,12 +34,12 @@ pub(crate) fn parse_runtime(
 ) -> Result<Runtime, CliError> {
     let parse_tag = |runtime_name: &str, raw: Option<String>| -> Result<ImageTag, CliError> {
         let tag_str = raw.ok_or_else(|| {
-            CliError::Config(ConfigError::ImageTagRequired {
+            CliError::Config(CoreError::ImageTagRequired {
                 runtime: runtime_name.to_string(),
             })
         })?;
         ImageTag::parse(tag_str).map_err(|e| {
-            CliError::Config(ConfigError::InvalidConfig {
+            CliError::Config(CoreError::InvalidConfig {
                 detail: format!("Invalid image tag for {}: {}", runtime_name, e),
             })
         })
