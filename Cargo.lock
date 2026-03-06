@@ -1946,6 +1946,7 @@ dependencies = [
  "chrono",
  "comfy-table",
  "fs-err",
+ "nix 0.29.0",
  "num_cpus",
  "repx-core",
  "serde",
