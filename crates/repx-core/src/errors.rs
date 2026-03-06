@@ -219,6 +219,12 @@ pub enum DomainError {
     #[error("Ambiguous input '{input}'. It matches multiple jobs:\n  - {}", matches.join("\n  - "))]
     AmbiguousJobId { input: String, matches: Vec<String> },
 
+    #[error("Ambiguous GC root '{input}'. It matches multiple roots:\n  - {}", matches.join("\n  - "))]
+    AmbiguousGcRoot { input: String, matches: Vec<String> },
+
+    #[error("No GC root found matching '{0}'.")]
+    GcRootNotFound(String),
+
     #[error("Invalid output path for job '{job_id}'. Output '{output_name}' path '{path}' must start with '$out/'.")]
     InvalidOutputPath {
         job_id: JobId,
