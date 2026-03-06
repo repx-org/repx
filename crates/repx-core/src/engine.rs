@@ -124,14 +124,14 @@ pub fn determine_run_aggregate_statuses(
 
             let aggregate_status = if has_running {
                 JobStatus::Running
-            } else if has_queued {
-                JobStatus::Queued
-            } else if has_pending {
-                JobStatus::Pending
             } else if has_failed {
                 JobStatus::Failed {
                     location: "".to_string(),
                 }
+            } else if has_queued {
+                JobStatus::Queued
+            } else if has_pending {
+                JobStatus::Pending
             } else if has_blocked {
                 JobStatus::Blocked {
                     missing_deps: Default::default(),

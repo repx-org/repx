@@ -290,7 +290,7 @@ impl App {
                             target_name,
                             active_target
                         );
-                        return;
+                        continue;
                     }
 
                     let was_loading = self.is_loading;

@@ -37,7 +37,9 @@ pub fn handle_log(args: LogArgs, context: &AppContext) -> Result<(), CliError> {
             r.store(false, Ordering::SeqCst);
         });
 
-        let mut last_line_count = lines.len();
+        let mut last_seen_lines: Vec<String> = lines.iter().rev().take(10).cloned().collect();
+        last_seen_lines.reverse();
+
         while running.load(Ordering::SeqCst) {
             thread::sleep(Duration::from_secs(1));
             let new_lines = context.client.get_log_tail(
@@ -47,11 +49,36 @@ pub fn handle_log(args: LogArgs, context: &AppContext) -> Result<(), CliError> {
                 log_type,
             )?;
 
-            if new_lines.len() > last_line_count {
-                for line in &new_lines[last_line_count..] {
-                    println!("{}", line);
+            if new_lines.is_empty() {
+                continue;
+            }
+
+            let start_idx = if last_seen_lines.is_empty() {
+                0
+            } else {
+                let mut found_idx = None;
+                for i in 0..new_lines.len() {
+                    let remaining = new_lines.len() - i;
+                    let check_len = last_seen_lines.len().min(remaining);
+                    if check_len > 0
+                        && new_lines[i..i + check_len] == last_seen_lines[..check_len]
+                        && last_seen_lines.len() <= remaining
+                        && new_lines[i..i + last_seen_lines.len()] == last_seen_lines[..]
+                    {
+                        found_idx = Some(i + last_seen_lines.len());
+                        break;
+                    }
                 }
-                last_line_count = new_lines.len();
+                found_idx.unwrap_or(0)
+            };
+
+            for line in &new_lines[start_idx..] {
+                println!("{}", line);
+            }
+
+            if !new_lines.is_empty() {
+                last_seen_lines = new_lines.iter().rev().take(10).cloned().collect();
+                last_seen_lines.reverse();
             }
         }
     }

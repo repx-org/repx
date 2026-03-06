@@ -93,16 +93,25 @@ impl ContainerRuntime {
 
                 let tar_status = tar_child.wait().await?;
                 if !tar_status.success() {
-                    tracing::debug!("tar command failed with status {}", tar_status);
+                    return Err(ExecutorError::Io(std::io::Error::other(format!(
+                        "tar decompression failed with status {}",
+                        tar_status
+                    ))));
                 }
 
                 match copy_task.await {
                     Ok(Ok(_)) => {}
                     Ok(Err(e)) => {
-                        tracing::debug!("Copying tar output to {} load failed: {}", binary, e);
+                        return Err(ExecutorError::Io(std::io::Error::other(format!(
+                            "Copying tar output to {} load failed: {}",
+                            binary, e
+                        ))));
                     }
                     Err(join_err) => {
-                        tracing::warn!("tar-to-load copy task panicked: {}", join_err);
+                        return Err(ExecutorError::Io(std::io::Error::other(format!(
+                            "tar-to-load copy task panicked: {}",
+                            join_err
+                        ))));
                     }
                 }
             } else {
