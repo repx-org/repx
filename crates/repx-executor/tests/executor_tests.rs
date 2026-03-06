@@ -1,14 +1,16 @@
 #![allow(clippy::expect_used)]
 
-use repx_core::model::JobId;
-use repx_executor::{CancellationToken, ExecutionRequest, Executor, ExecutorError, Runtime};
+use repx_core::model::{JobId, MountPolicy};
+use repx_executor::{
+    CancellationToken, ExecutionRequest, Executor, ExecutorError, ImageTag, Runtime,
+};
 use std::fs;
 use std::path::PathBuf;
 use tempfile::tempdir;
 
 fn create_test_request(base_path: PathBuf) -> ExecutionRequest {
     ExecutionRequest {
-        job_id: JobId("test-job-123".to_string()),
+        job_id: JobId::from("test-job-123"),
         runtime: Runtime::Native,
         base_path: base_path.clone(),
         node_local_path: None,
@@ -17,8 +19,7 @@ fn create_test_request(base_path: PathBuf) -> ExecutionRequest {
         user_out_dir: base_path.join("outputs/out"),
         repx_out_dir: base_path.join("outputs/repx"),
         host_tools_bin_dir: None,
-        mount_host_paths: false,
-        mount_paths: vec![],
+        mount_policy: MountPolicy::Isolated,
     }
 }
 
@@ -27,7 +28,7 @@ fn create_test_request_with_host_tools(
     host_tools: PathBuf,
 ) -> ExecutionRequest {
     ExecutionRequest {
-        job_id: JobId("test-job-456".to_string()),
+        job_id: JobId::from("test-job-456"),
         runtime: Runtime::Native,
         base_path: base_path.clone(),
         node_local_path: None,
@@ -36,8 +37,7 @@ fn create_test_request_with_host_tools(
         user_out_dir: base_path.join("outputs/out"),
         repx_out_dir: base_path.join("outputs/repx"),
         host_tools_bin_dir: Some(host_tools),
-        mount_host_paths: false,
-        mount_paths: vec![],
+        mount_policy: MountPolicy::Isolated,
     }
 }
 
@@ -47,14 +47,14 @@ fn test_executor_with_different_runtimes() {
 
     let mut request = create_test_request(temp.path().to_path_buf());
     request.runtime = Runtime::Docker {
-        image_tag: "test:latest".to_string(),
+        image_tag: ImageTag::parse("test:latest").expect("valid image tag"),
     };
     let executor = Executor::new(request);
     assert!(matches!(executor.request.runtime, Runtime::Docker { .. }));
 
     let mut request2 = create_test_request(temp.path().to_path_buf());
     request2.runtime = Runtime::Podman {
-        image_tag: "test:v1".to_string(),
+        image_tag: ImageTag::parse("test:v1").expect("valid image tag"),
     };
     let executor2 = Executor::new(request2);
     assert!(matches!(executor2.request.runtime, Runtime::Podman { .. }));
@@ -64,10 +64,14 @@ fn test_executor_with_different_runtimes() {
 fn test_execution_request_with_mount_paths() {
     let temp = tempdir().expect("tempdir creation must succeed");
     let mut request = create_test_request(temp.path().to_path_buf());
-    request.mount_paths = vec!["/data".to_string(), "/scratch".to_string()];
+    request.mount_policy =
+        MountPolicy::SpecificPaths(vec!["/data".to_string(), "/scratch".to_string()]);
 
-    assert_eq!(request.mount_paths.len(), 2);
-    assert!(request.mount_paths.contains(&"/data".to_string()));
+    assert_eq!(request.mount_policy.specific_paths().len(), 2);
+    assert!(request
+        .mount_policy
+        .specific_paths()
+        .contains(&"/data".to_string()));
 }
 
 #[test]
@@ -328,9 +332,9 @@ async fn test_ensure_bwrap_rootfs_extracted_from_directory() {
         fs::set_permissions(&tar_path, perms).expect("set permissions must succeed");
     }
 
-    let image_tag = "my-image:v1";
+    let image_tag_str = "my-image:v1";
     let image_hash = "v1";
-    let image_dir = images_dir.join(image_tag);
+    let image_dir = images_dir.join(image_tag_str);
     fs::create_dir_all(&image_dir).expect("dir creation must succeed");
 
     let manifest_json = r#"[{"Layers": ["layer1/layer.tar"]}]"#;
@@ -342,11 +346,11 @@ async fn test_ensure_bwrap_rootfs_extracted_from_directory() {
 
     let mut request = create_test_request_with_host_tools(base_path.clone(), host_tools);
     request.runtime = Runtime::Bwrap {
-        image_tag: image_tag.to_string(),
+        image_tag: ImageTag::parse(image_tag_str).expect("valid image tag"),
     };
     let executor = Executor::new(request);
 
-    let result = executor.ensure_bwrap_rootfs_extracted(image_tag).await;
+    let result = executor.ensure_bwrap_rootfs_extracted(image_tag_str).await;
 
     assert!(
         result.is_ok(),
@@ -436,17 +440,17 @@ async fn test_ensure_bwrap_rootfs_fails_if_file() {
         fs::set_permissions(&tar_path, perms).expect("set permissions must succeed");
     }
 
-    let image_tag = "my-image:v1";
-    let image_file = images_dir.join(image_tag);
+    let image_tag_str = "my-image:v1";
+    let image_file = images_dir.join(image_tag_str);
     fs::write(&image_file, "i am a file").expect("file write must succeed");
 
     let mut request = create_test_request_with_host_tools(base_path.clone(), host_tools);
     request.runtime = Runtime::Bwrap {
-        image_tag: image_tag.to_string(),
+        image_tag: ImageTag::parse(image_tag_str).expect("valid image tag"),
     };
     let executor = Executor::new(request);
 
-    let result = executor.ensure_bwrap_rootfs_extracted(image_tag).await;
+    let result = executor.ensure_bwrap_rootfs_extracted(image_tag_str).await;
 
     assert!(result.is_err());
     let err = result.expect_err("result must be Err");
@@ -467,7 +471,7 @@ fn create_runnable_request(temp: &tempfile::TempDir) -> (ExecutionRequest, PathB
     fs::create_dir_all(&job_pkg).expect("create job_package_path");
 
     let request = ExecutionRequest {
-        job_id: JobId("cancel-test-job".to_string()),
+        job_id: JobId::from("cancel-test-job"),
         runtime: Runtime::Native,
         base_path: base.clone(),
         node_local_path: None,
@@ -476,8 +480,7 @@ fn create_runnable_request(temp: &tempfile::TempDir) -> (ExecutionRequest, PathB
         user_out_dir: user_out,
         repx_out_dir: repx_out,
         host_tools_bin_dir: None,
-        mount_host_paths: false,
-        mount_paths: vec![],
+        mount_policy: MountPolicy::Isolated,
     };
     (request, base)
 }

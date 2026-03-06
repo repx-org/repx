@@ -503,12 +503,12 @@ async fn run_branch(
     for step_name in topo_order {
         let args = InternalScatterGatherArgs {
             job_id: "test-job".into(),
-            runtime: "native".into(),
+            runtime: repx_core::model::ExecutionType::Native,
             image_tag: None,
             base_path: tmp.to_path_buf(),
             node_local_path: None,
             host_tools_dir: String::new(),
-            scheduler: repx_core::constants::targets::LOCAL.into(),
+            scheduler: repx_core::model::SchedulerType::Local,
             step_sbatch_opts: String::new(),
             job_package_path: scripts.clone(),
             scatter_exe_path: scripts.join("scatter.sh"),
@@ -516,7 +516,7 @@ async fn run_branch(
             steps_json: steps_json.clone(),
             last_step_outputs_json: "{}".into(),
             anchor_id: None,
-            phase: "step".into(),
+            phase: crate::cli::ScatterGatherPhase::Step,
             branch_idx: Some(branch_idx),
             step_name: Some(step_name.clone()),
             mount_host_paths: false,
@@ -609,7 +609,7 @@ async fn test_scatter_skipped_on_rerun_if_already_succeeded() {
     );
 
     let mut orch = ScatterGatherOrchestrator {
-        job_id: JobId("test-sg-job".into()),
+        job_id: JobId::from("test-sg-job"),
         base_path: tmp.path().to_path_buf(),
         job_root: job_root.clone(),
         user_out_dir: job_root.join(dirs::OUT),
@@ -622,8 +622,7 @@ async fn test_scatter_skipped_on_rerun_if_already_succeeded() {
         static_inputs: Value::Object(Default::default()),
         host_tools_bin_dir: None,
         node_local_path: None,
-        mount_host_paths: false,
-        mount_paths: vec![],
+        mount_policy: repx_core::model::MountPolicy::Isolated,
     };
 
     orch.init_dirs().expect("init_dirs must succeed");

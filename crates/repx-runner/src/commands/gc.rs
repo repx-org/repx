@@ -440,7 +440,7 @@ pub async fn async_handle_internal_gc(args: InternalGcArgs) -> Result<(), CliErr
 
                     if let Ok(lab) = lab::load_from_path_unchecked(&lab_root) {
                         for job_id in lab.jobs.keys() {
-                            live_js.insert(job_id.0.clone());
+                            live_js.insert(job_id.as_str().to_owned());
                         }
                         for ref_file in &lab.referenced_files {
                             live_arts.insert(ref_file.clone());

@@ -30,7 +30,7 @@ fn handle_show_job(
     let lab = lab::load_from_path(lab_path)?;
     let config = config::load_config()?;
 
-    let target_input = RunId(args.job_id.clone());
+    let target_input = RunId::from(args.job_id.clone());
     let job_id = resolver::resolve_target_job_id(&lab, &target_input)?;
 
     let job = lab.jobs.get(job_id).ok_or_else(|| {
@@ -43,7 +43,7 @@ fn handle_show_job(
         .runs
         .iter()
         .find(|(_, run)| run.jobs.contains(job_id))
-        .map(|(run_id, _)| run_id.0.clone());
+        .map(|(run_id, _)| run_id.to_string());
 
     let store_path = get_store_path(&config, target)?;
     let outcomes = get_job_outcomes(&store_path, std::slice::from_ref(job_id))?;
@@ -52,7 +52,7 @@ fn handle_show_job(
         JobOutcome::Failed => "FAILED",
     });
 
-    println!("Job: {}", job_id.0);
+    println!("Job: {}", job_id.as_str());
     if let Some(name) = &job.name {
         println!("Name: {}", name);
     }
@@ -84,13 +84,13 @@ fn handle_show_job(
         println!();
         println!("Resource Hints (from Nix):");
         if let Some(mem) = &hints.mem {
-            println!("  mem: {}", mem);
+            println!("  mem: {}", mem.as_str());
         }
         if let Some(cpus) = hints.cpus {
             println!("  cpus: {}", cpus);
         }
         if let Some(time) = &hints.time {
-            println!("  time: {}", time);
+            println!("  time: {}", time.as_str());
         }
         if let Some(partition) = &hints.partition {
             println!("  partition: {}", partition);
@@ -110,9 +110,9 @@ fn handle_show_job(
                     has_sub_hints = true;
                 }
                 let parts: Vec<String> = [
-                    hints.mem.as_ref().map(|m| format!("mem={}", m)),
+                    hints.mem.as_ref().map(|m| format!("mem={}", m.as_str())),
                     hints.cpus.map(|c| format!("cpus={}", c)),
-                    hints.time.as_ref().map(|t| format!("time={}", t)),
+                    hints.time.as_ref().map(|t| format!("time={}", t.as_str())),
                 ]
                 .into_iter()
                 .flatten()
@@ -164,7 +164,7 @@ fn handle_show_job(
 
     println!();
     println!("Paths:");
-    let output_dir = store_path.join(dirs::OUTPUTS).join(&job_id.0);
+    let output_dir = store_path.join(dirs::OUTPUTS).join(job_id.as_str());
     let out_dir = output_dir.join(dirs::OUT);
     let repx_dir = output_dir.join(dirs::REPX);
 
@@ -304,11 +304,11 @@ fn handle_show_output(
     let lab = lab::load_from_path(lab_path)?;
     let config = config::load_config()?;
 
-    let target_input = RunId(args.job_id.clone());
+    let target_input = RunId::from(args.job_id.clone());
     let job_id = resolver::resolve_target_job_id(&lab, &target_input)?;
 
     let store_path = get_store_path(&config, target)?;
-    let output_dir = store_path.join(dirs::OUTPUTS).join(&job_id.0);
+    let output_dir = store_path.join(dirs::OUTPUTS).join(job_id.as_str());
     let out_dir = output_dir.join(dirs::OUT);
 
     if !out_dir.exists() {

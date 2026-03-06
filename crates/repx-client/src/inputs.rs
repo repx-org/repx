@@ -19,7 +19,7 @@ pub fn generate_and_write_inputs_json(
 
     let exe = job.executables.get(executable_name).ok_or_else(|| {
         ClientError::Config(ConfigError::MissingExecutable {
-            job_id: job_id.0.clone(),
+            job_id: job_id.to_string(),
             executable: executable_name.to_string(),
         })
     })?;
@@ -42,7 +42,7 @@ pub fn generate_and_write_inputs_json(
             }
             .ok_or_else(|| {
                 ClientError::Config(ConfigError::MissingExecutable {
-                    job_id: dep_job_id.0.clone(),
+                    job_id: dep_job_id.to_string(),
                     executable: "main/gather".to_string(),
                 })
             })?;
@@ -68,7 +68,7 @@ pub fn generate_and_write_inputs_json(
             let dep_output_dir = target
                 .base_path()
                 .join(dirs::OUTPUTS)
-                .join(&dep_job_id.0)
+                .join(dep_job_id.as_str())
                 .join(dirs::OUT);
             let final_path = value_template.replace("$out", &dep_output_dir.to_string_lossy());
 
@@ -86,7 +86,7 @@ pub fn generate_and_write_inputs_json(
             );
         } else if let Some(run_id) = &mapping.source_run {
             let revision_dir = local_lab_path.join("revision");
-            let suffix = format!("metadata-{}.json", run_id.0);
+            let suffix = format!("metadata-{}.json", run_id.as_str());
 
             let mut found_filename = None;
 
@@ -122,7 +122,7 @@ pub fn generate_and_write_inputs_json(
     let inputs_json_path_on_target = target
         .base_path()
         .join(dirs::OUTPUTS)
-        .join(&job_id.0)
+        .join(job_id.as_str())
         .join(dirs::REPX)
         .join("inputs.json");
 

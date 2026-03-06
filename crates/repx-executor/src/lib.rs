@@ -6,11 +6,12 @@ mod util;
 pub use context::RuntimeContext;
 pub use error::{ExecutorError, Result};
 pub use runtime::{BwrapRuntime, ContainerRuntime, NativeRuntime, Runtime};
-pub use util::{
-    extract_image_hash, is_binary_allowed, validate_image_identifier, ALLOWED_SYSTEM_BINARIES,
-};
+pub use util::{extract_image_hash, is_binary_allowed, ImageTag, ALLOWED_SYSTEM_BINARIES};
 
-use repx_core::{constants::logs, model::JobId};
+use repx_core::{
+    constants::logs,
+    model::{JobId, MountPolicy},
+};
 use std::path::{Path, PathBuf};
 use tokio::fs::{File, OpenOptions};
 use tokio::process::Command as TokioCommand;
@@ -27,8 +28,7 @@ pub struct ExecutionRequest {
     pub user_out_dir: PathBuf,
     pub repx_out_dir: PathBuf,
     pub host_tools_bin_dir: Option<PathBuf>,
-    pub mount_host_paths: bool,
-    pub mount_paths: Vec<String>,
+    pub mount_policy: MountPolicy,
 }
 
 pub struct Executor {
@@ -117,7 +117,8 @@ impl Executor {
                     .await?
             }
             Runtime::Bwrap { image_tag } => {
-                let rootfs_path = BwrapRuntime::ensure_rootfs_extracted(&ctx, image_tag).await?;
+                let rootfs_path =
+                    BwrapRuntime::ensure_rootfs_extracted(&ctx, image_tag.as_str()).await?;
                 BwrapRuntime::build_command(&ctx, &rootfs_path, script_path, args).await?
             }
         };

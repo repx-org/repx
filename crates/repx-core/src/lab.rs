@@ -103,10 +103,10 @@ fn verify_file_integrity(lab_path: &Path, files: &[FileEntry]) -> Result<(), Con
 
         let actual_hash = format!("{:x}", hasher.finalize());
 
-        if actual_hash != entry.sha256 {
+        if actual_hash != entry.sha256.as_str() {
             return Err(ConfigError::IntegrityHashMismatch {
                 path: entry.path.clone(),
-                expected: entry.sha256.clone(),
+                expected: entry.sha256.to_string(),
                 actual: actual_hash,
             });
         }
@@ -284,7 +284,7 @@ fn load_from_path_inner(initial_path: &Path, verify_integrity: bool) -> Result<L
         .groups
         .into_iter()
         .map(|(name, run_names)| {
-            let run_ids = run_names.into_iter().map(RunId).collect();
+            let run_ids = run_names.into_iter().map(RunId::from).collect();
             (name, run_ids)
         })
         .collect();
@@ -339,7 +339,7 @@ fn load_from_path_inner(initial_path: &Path, verify_integrity: bool) -> Result<L
         lab.runs.insert(run_id, run);
 
         for (job_id, mut job) in run_meta.jobs.drain() {
-            job.path_in_lab = PathBuf::from("jobs").join(&job_id.0);
+            job.path_in_lab = PathBuf::from("jobs").join(job_id.as_str());
             lab.referenced_files.push(job.path_in_lab.clone());
             lab.jobs.insert(job_id, job);
         }

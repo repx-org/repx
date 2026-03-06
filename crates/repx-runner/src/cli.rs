@@ -1,4 +1,5 @@
 use clap::{Args, Parser, Subcommand, ValueEnum};
+use repx_core::model::{ExecutionType, SchedulerType};
 use std::path::PathBuf;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -60,7 +61,7 @@ pub struct Cli {
         global = true,
         help = "The scheduler to use: 'slurm' or 'local'. Overrides the target's configuration."
     )]
-    pub scheduler: Option<String>,
+    pub scheduler: Option<SchedulerType>,
 }
 
 #[derive(Subcommand)]
@@ -227,6 +228,25 @@ pub enum GcCommand {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum ScatterGatherPhase {
+    All,
+    ScatterOnly,
+    Step,
+    Gather,
+}
+
+impl std::fmt::Display for ScatterGatherPhase {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ScatterGatherPhase::All => write!(f, "all"),
+            ScatterGatherPhase::ScatterOnly => write!(f, "scatter-only"),
+            ScatterGatherPhase::Step => write!(f, "step"),
+            ScatterGatherPhase::Gather => write!(f, "gather"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 pub enum GcKindFilter {
     Auto,
     Pinned,
@@ -324,7 +344,7 @@ pub struct InternalExecuteArgs {
     #[arg(long, help = "The ID of the job to execute.")]
     pub job_id: String,
     #[arg(long)]
-    pub runtime: String,
+    pub runtime: ExecutionType,
     #[arg(long)]
     pub image_tag: Option<String>,
     #[arg(long)]
@@ -348,7 +368,7 @@ pub struct InternalScatterGatherArgs {
     #[arg(long, help = "The ID of the composite scatter-gather job.")]
     pub job_id: String,
     #[arg(long)]
-    pub runtime: String,
+    pub runtime: ExecutionType,
     #[arg(long)]
     pub image_tag: Option<String>,
     #[arg(long)]
@@ -358,7 +378,7 @@ pub struct InternalScatterGatherArgs {
     #[arg(long)]
     pub host_tools_dir: String,
     #[arg(long)]
-    pub scheduler: String,
+    pub scheduler: SchedulerType,
     #[arg(long, allow_hyphen_values = true)]
     pub step_sbatch_opts: String,
     #[arg(long)]
@@ -375,8 +395,8 @@ pub struct InternalScatterGatherArgs {
     #[arg(long)]
     pub anchor_id: Option<u32>,
 
-    #[arg(long, default_value = "all")]
-    pub phase: String,
+    #[arg(long, value_enum, default_value = "all")]
+    pub phase: ScatterGatherPhase,
 
     #[arg(long)]
     pub branch_idx: Option<usize>,

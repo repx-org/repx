@@ -6,7 +6,7 @@ use repx_core::{lab, model::RunId, resolver};
 
 pub fn handle_log(args: LogArgs, context: &AppContext) -> Result<(), CliError> {
     let lab = lab::load_from_path(context.lab_path)?;
-    let target_input = RunId(args.job_id.clone());
+    let target_input = RunId::from(args.job_id.clone());
     let job_id = resolver::resolve_target_job_id(&lab, &target_input)?;
 
     let log_type = if args.stderr {

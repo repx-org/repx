@@ -41,7 +41,7 @@ impl<'a> VizGenerator<'a> {
         let mut job_to_run: HashMap<JobId, String> = HashMap::new();
         for (run_id, run) in &self.lab.runs {
             for jid in &run.jobs {
-                job_to_run.insert(jid.clone(), run_id.0.clone());
+                job_to_run.insert(jid.clone(), run_id.to_string());
             }
         }
 
@@ -50,7 +50,7 @@ impl<'a> VizGenerator<'a> {
                 .get(jid)
                 .cloned()
                 .unwrap_or_else(|| "detached".to_string());
-            let job_name = job.name.clone().unwrap_or_else(|| jid.0.clone());
+            let job_name = job.name.clone().unwrap_or_else(|| jid.to_string());
 
             grouped_jobs
                 .entry(run_name.clone())
@@ -72,7 +72,7 @@ impl<'a> VizGenerator<'a> {
                 .unwrap_or_else(|| "detached".to_string());
             let clean_run = clean_id(&run_name);
 
-            let tgt_name = job.name.clone().unwrap_or_else(|| jid.0.clone());
+            let tgt_name = job.name.clone().unwrap_or_else(|| jid.to_string());
             let clean_tgt = clean_id(&tgt_name);
             let unique_tgt = format!("{}_{}", clean_run, clean_tgt);
 
@@ -86,7 +86,7 @@ impl<'a> VizGenerator<'a> {
                         .unwrap_or_else(|| "detached".to_string());
 
                     if let Some(src_job) = self.lab.jobs.get(sid) {
-                        let src_name = src_job.name.clone().unwrap_or_else(|| sid.0.clone());
+                        let src_name = src_job.name.clone().unwrap_or_else(|| sid.to_string());
                         let clean_src_run = clean_id(&src_run);
                         let clean_src = clean_id(&src_name);
 
@@ -106,7 +106,7 @@ impl<'a> VizGenerator<'a> {
                         .dependency_type
                         .map(|d| d.to_string())
                         .unwrap_or_else(|| "hard".to_string());
-                    inter_edges.insert((srun.0.clone(), unique_tgt.clone(), dtype));
+                    inter_edges.insert((srun.to_string(), unique_tgt.clone(), dtype));
                 }
             }
         }
@@ -135,8 +135,8 @@ impl<'a> VizGenerator<'a> {
                 dot.push_str("        margin=\"20\";\n\n");
 
                 for run_id in group_run_ids {
-                    let run_name = &run_id.0;
-                    runs_in_groups.insert(run_name.clone());
+                    let run_name = run_id.as_str();
+                    runs_in_groups.insert(run_name.to_string());
                     if let Some(jobs) = grouped_jobs.get(run_name) {
                         let prefix = format!("{}_{}", clean_group, clean_id(run_name));
                         node_prefixes.push(prefix.clone());

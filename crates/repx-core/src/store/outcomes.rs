@@ -33,7 +33,7 @@ pub fn get_job_outcomes(
 
     let mut outcomes = HashMap::new();
     for job_id in job_ids_to_check {
-        let job_path = safe_join(&outputs_dir, &job_id.0)?;
+        let job_path = safe_join(&outputs_dir, job_id.as_str())?;
         if !job_path.is_dir() {
             continue;
         }

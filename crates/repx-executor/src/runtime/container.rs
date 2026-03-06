@@ -12,8 +12,8 @@ use super::{Runtime, CONTAINER_HOSTNAME};
 impl ContainerRuntime {
     fn get_runtime_details(runtime: &Runtime) -> Result<(&str, &str)> {
         match runtime {
-            Runtime::Docker { image_tag } => Ok(("docker", image_tag)),
-            Runtime::Podman { image_tag } => Ok(("podman", image_tag)),
+            Runtime::Docker { image_tag } => Ok(("docker", image_tag.as_str())),
+            Runtime::Podman { image_tag } => Ok(("podman", image_tag.as_str())),
             _ => Err(ExecutorError::Config(
                 repx_core::errors::ConfigError::UnsupportedValue {
                     kind: "runtime".to_string(),
@@ -215,24 +215,25 @@ impl ContainerRuntime {
             .arg("--workdir")
             .arg(request.user_out_dir.display().to_string());
 
-        if request.mount_host_paths {
-            tracing::info!("[IMPURE] mount_host_paths is enabled. Container is not isolated.");
-            for dir in ["/home", "/tmp", "/var", "/opt", "/run", "/media", "/mnt"] {
-                if Path::new(dir).exists() {
-                    cmd.arg("-v").arg(format!("{}:{}", dir, dir));
+        match &request.mount_policy {
+            repx_core::model::MountPolicy::AllHostPaths => {
+                tracing::info!("[IMPURE] mount_host_paths is enabled. Container is not isolated.");
+                for dir in ["/home", "/tmp", "/var", "/opt", "/run", "/media", "/mnt"] {
+                    if Path::new(dir).exists() {
+                        cmd.arg("-v").arg(format!("{}:{}", dir, dir));
+                    }
+                }
+                if Path::new("/nix").exists() {
+                    cmd.arg("-v").arg("/nix:/nix");
                 }
             }
-            if Path::new("/nix").exists() {
-                cmd.arg("-v").arg("/nix:/nix");
+            repx_core::model::MountPolicy::SpecificPaths(paths) => {
+                tracing::info!("[IMPURE] Specific host paths mounted: {:?}", paths);
+                for path in paths {
+                    cmd.arg("-v").arg(format!("{}:{}", path, path));
+                }
             }
-        } else if !request.mount_paths.is_empty() {
-            tracing::info!(
-                "[IMPURE] Specific host paths mounted: {:?}",
-                request.mount_paths
-            );
-            for path in &request.mount_paths {
-                cmd.arg("-v").arg(format!("{}:{}", path, path));
-            }
+            repx_core::model::MountPolicy::Isolated => {}
         }
 
         cmd.arg(image_tag).arg(script_path);

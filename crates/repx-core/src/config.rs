@@ -1,4 +1,5 @@
 use crate::errors::ConfigError;
+use crate::model::{Memory, SlurmTime};
 use crate::theme;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -38,6 +39,12 @@ pub struct Target {
     pub local: Option<SchedulerConfig>,
     #[serde(default)]
     pub slurm: Option<SchedulerConfig>,
+}
+
+impl Target {
+    pub fn mount_policy(&self) -> crate::model::MountPolicy {
+        crate::model::MountPolicy::from_flags(self.mount_host_paths, self.mount_paths.clone())
+    }
 }
 
 const TUI_DEFAULT_TICK_RATE_MS: u64 = 1000;
@@ -88,8 +95,8 @@ pub struct ResourceRule {
     pub partition: Option<String>,
     #[serde(rename = "cpus-per-task")]
     pub cpus_per_task: Option<u32>,
-    pub mem: Option<String>,
-    pub time: Option<String>,
+    pub mem: Option<Memory>,
+    pub time: Option<SlurmTime>,
     #[serde(default)]
     pub sbatch_opts: Vec<String>,
     #[serde(default)]

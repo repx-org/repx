@@ -72,7 +72,7 @@ pub fn handle_internal_orchestrate(args: InternalOrchestrateArgs) -> Result<(), 
                 anchor_cmd
                     .arg("--parsable")
                     .arg("--hold")
-                    .arg(format!("--job-name=anchor-{}", job_id.0))
+                    .arg(format!("--job-name=anchor-{}", job_id.as_str()))
                     .arg("--time=00:01:00")
                     .arg("--output=/dev/null")
                     .arg("--error=/dev/null")

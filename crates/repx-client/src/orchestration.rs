@@ -39,7 +39,7 @@ impl OrchestrationPlan {
             .or_else(|| job_def.executables.get("scatter"))
             .ok_or_else(|| {
                 ClientError::Config(ConfigError::MissingExecutable {
-                    job_id: job_id.0.clone(),
+                    job_id: job_id.to_string(),
                     executable: "main or scatter".to_string(),
                 })
             })?;

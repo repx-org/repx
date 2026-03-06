@@ -183,17 +183,17 @@ impl fmt::Display for DependencyType {
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize, Ord, PartialOrd)]
-pub struct JobId(pub String);
-
-impl fmt::Display for JobId {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
-const SHORT_HASH_LEN: usize = 12;
+pub struct JobId(String);
 
 impl JobId {
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    pub fn into_inner(self) -> String {
+        self.0
+    }
+
     pub fn short_id(&self) -> String {
         let s = &self.0;
         if let Some((hash, rest)) = s.split_once('-') {
@@ -209,9 +209,23 @@ impl JobId {
     }
 }
 
+impl fmt::Display for JobId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+const SHORT_HASH_LEN: usize = 12;
+
 impl From<String> for JobId {
     fn from(s: String) -> Self {
         JobId(s)
+    }
+}
+
+impl From<&str> for JobId {
+    fn from(s: &str) -> Self {
+        JobId(s.to_string())
     }
 }
 
@@ -219,6 +233,12 @@ impl FromStr for JobId {
     type Err = std::convert::Infallible;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         Ok(JobId(s.to_string()))
+    }
+}
+
+impl AsRef<str> for JobId {
+    fn as_ref(&self) -> &str {
+        &self.0
     }
 }
 
@@ -234,11 +254,33 @@ impl fmt::Display for ParseRunIdError {
 impl std::error::Error for ParseRunIdError {}
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize, Ord, PartialOrd)]
-pub struct RunId(pub String);
+pub struct RunId(String);
+
+impl RunId {
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    pub fn into_inner(self) -> String {
+        self.0
+    }
+}
 
 impl fmt::Display for RunId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.0)
+    }
+}
+
+impl From<String> for RunId {
+    fn from(s: String) -> Self {
+        RunId(s)
+    }
+}
+
+impl From<&str> for RunId {
+    fn from(s: &str) -> Self {
+        RunId(s.to_string())
     }
 }
 
@@ -251,6 +293,12 @@ impl FromStr for RunId {
             ))),
             _ => Ok(RunId(s.to_string())),
         }
+    }
+}
+
+impl AsRef<str> for RunId {
+    fn as_ref(&self) -> &str {
+        &self.0
     }
 }
 
@@ -270,16 +318,100 @@ pub struct InputMapping {
     pub source_stage_filter: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct Memory(String);
+
+impl Memory {
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    pub fn to_bytes(&self) -> Option<u64> {
+        let s = self.0.trim().to_uppercase();
+        let (num_str, multiplier) = if let Some(n) = s.strip_suffix('T') {
+            (n, 1024u64 * 1024 * 1024 * 1024)
+        } else if let Some(n) = s.strip_suffix('G') {
+            (n, 1024u64 * 1024 * 1024)
+        } else if let Some(n) = s.strip_suffix('M') {
+            (n, 1024u64 * 1024)
+        } else if let Some(n) = s.strip_suffix('K') {
+            (n, 1024u64)
+        } else {
+            (s.as_str(), 1u64)
+        };
+        num_str.parse::<u64>().ok().map(|n| n * multiplier)
+    }
+}
+
+impl fmt::Display for Memory {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl From<String> for Memory {
+    fn from(s: String) -> Self {
+        Memory(s)
+    }
+}
+
+impl From<&str> for Memory {
+    fn from(s: &str) -> Self {
+        Memory(s.to_string())
+    }
+}
+
+impl AsRef<str> for Memory {
+    fn as_ref(&self) -> &str {
+        &self.0
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct SlurmTime(String);
+
+impl SlurmTime {
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Display for SlurmTime {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl From<String> for SlurmTime {
+    fn from(s: String) -> Self {
+        SlurmTime(s)
+    }
+}
+
+impl From<&str> for SlurmTime {
+    fn from(s: &str) -> Self {
+        SlurmTime(s.to_string())
+    }
+}
+
+impl AsRef<str> for SlurmTime {
+    fn as_ref(&self) -> &str {
+        &self.0
+    }
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ResourceHints {
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub mem: Option<String>,
+    pub mem: Option<Memory>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cpus: Option<u32>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub time: Option<String>,
+    pub time: Option<SlurmTime>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub partition: Option<String>,
@@ -379,10 +511,48 @@ pub(crate) struct RunMetadataForLoading {
     pub jobs: HashMap<JobId, Job>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct Sha256Hash(String);
+
+impl Sha256Hash {
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    pub fn short(&self, n: usize) -> &str {
+        &self.0[..n.min(self.0.len())]
+    }
+}
+
+impl fmt::Display for Sha256Hash {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl From<String> for Sha256Hash {
+    fn from(s: String) -> Self {
+        Sha256Hash(s)
+    }
+}
+
+impl From<&str> for Sha256Hash {
+    fn from(s: &str) -> Self {
+        Sha256Hash(s.to_string())
+    }
+}
+
+impl AsRef<str> for Sha256Hash {
+    fn as_ref(&self) -> &str {
+        &self.0
+    }
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub(crate) struct FileEntry {
     pub path: String,
-    pub sha256: String,
+    pub sha256: Sha256Hash,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -394,6 +564,36 @@ pub(crate) struct LabManifest {
     pub files: Vec<FileEntry>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MountPolicy {
+    Isolated,
+    SpecificPaths(Vec<String>),
+    AllHostPaths,
+}
+
+impl MountPolicy {
+    pub fn from_flags(mount_host_paths: bool, mount_paths: Vec<String>) -> Self {
+        if mount_host_paths {
+            MountPolicy::AllHostPaths
+        } else if mount_paths.is_empty() {
+            MountPolicy::Isolated
+        } else {
+            MountPolicy::SpecificPaths(mount_paths)
+        }
+    }
+
+    pub fn is_all_host(&self) -> bool {
+        matches!(self, MountPolicy::AllHostPaths)
+    }
+
+    pub fn specific_paths(&self) -> &[String] {
+        match self {
+            MountPolicy::SpecificPaths(paths) => paths,
+            _ => &[],
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -402,7 +602,7 @@ mod tests {
     fn test_runid_from_str_ok() {
         assert_eq!(
             RunId::from_str("my-experiment-run").expect("valid run ID must parse"),
-            RunId("my-experiment-run".to_string())
+            RunId::from("my-experiment-run")
         );
     }
 

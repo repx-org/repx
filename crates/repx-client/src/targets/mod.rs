@@ -204,7 +204,7 @@ pub trait JobRunner: CommandRunner {
             if let Some(repx_dir) = path.parent() {
                 if let Some(job_dir) = repx_dir.parent() {
                     let job_id_str = job_dir.file_name().and_then(|s| s.to_str()).unwrap_or("");
-                    let job_id = JobId(job_id_str.to_string());
+                    let job_id = JobId::from(job_id_str.to_string());
                     let location = self.name().to_string();
 
                     let status = if file_name == markers::SUCCESS {
@@ -283,7 +283,7 @@ fn parse_squeue(output: &str) -> HashMap<JobId, SlurmJobInfo> {
         }
 
         if let Ok(slurm_id) = parts[0].parse::<u32>() {
-            let repx_id = JobId(parts[1].to_string());
+            let repx_id = JobId::from(parts[1].to_string());
             let state = match parts[2] {
                 "PD" => SlurmState::Pending,
                 "R" => SlurmState::Running,
@@ -319,19 +319,19 @@ garbage line to ignore
         assert_eq!(parsed.len(), 4);
 
         let job_one = parsed
-            .get(&JobId("job-one-running".into()))
+            .get(&JobId::from("job-one-running"))
             .expect("job-one-running must be present");
         assert_eq!(job_one.slurm_id, 12345);
         assert_eq!(job_one.state, SlurmState::Running);
 
         let job_two = parsed
-            .get(&JobId("job-two-pending".into()))
+            .get(&JobId::from("job-two-pending"))
             .expect("job-two-pending must be present");
         assert_eq!(job_two.slurm_id, 12346);
         assert_eq!(job_two.state, SlurmState::Pending);
 
         let job_three = parsed
-            .get(&JobId("job-three-other".into()))
+            .get(&JobId::from("job-three-other"))
             .expect("job-three-other must be present");
         assert_eq!(job_three.slurm_id, 12347);
         assert_eq!(job_three.state, SlurmState::Other("CG".into()));

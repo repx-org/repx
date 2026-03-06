@@ -102,7 +102,7 @@ pub fn handle_trace_params(args: TraceParamsArgs, lab_path: &Path) -> Result<(),
     let lab = lab::load_from_path(lab_path)?;
 
     let results: HashMap<JobId, Value> = if let Some(job_id_query) = &args.job_id {
-        let run_id = repx_core::model::RunId(job_id_query.clone());
+        let run_id = repx_core::model::RunId::from(job_id_query.clone());
         let job_id = resolver::resolve_target_job_id(&lab, &run_id)?;
 
         let effective = compute_effective_params(&lab, job_id);
@@ -113,7 +113,10 @@ pub fn handle_trace_params(args: TraceParamsArgs, lab_path: &Path) -> Result<(),
         compute_all_effective_params(&lab)
     };
 
-    let output: HashMap<String, Value> = results.into_iter().map(|(k, v)| (k.0, v)).collect();
+    let output: HashMap<String, Value> = results
+        .into_iter()
+        .map(|(k, v)| (k.into_inner(), v))
+        .collect();
 
     let json_str =
         serde_json::to_string_pretty(&output).map_err(|e| CliError::ExecutionFailed {
