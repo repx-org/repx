@@ -15,7 +15,7 @@ impl ContainerRuntime {
             Runtime::Docker { image_tag } => Ok(("docker", image_tag.as_str())),
             Runtime::Podman { image_tag } => Ok(("podman", image_tag.as_str())),
             _ => Err(ExecutorError::Config(
-                repx_core::errors::ConfigError::UnsupportedValue {
+                repx_core::errors::CoreError::UnsupportedValue {
                     kind: "runtime".to_string(),
                     value: "Must be Docker or Podman for container execution".to_string(),
                 },

@@ -1,7 +1,7 @@
 use colored::Colorize;
 use indicatif::{ProgressBar, ProgressStyle};
 use repx_client::{ClientEvent, SubmitOptions, WorkUnitPhase};
-use repx_core::{config::Resources, errors::ConfigError, model::SchedulerType};
+use repx_core::{config::Resources, errors::CoreError, model::SchedulerType};
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     mpsc, Arc,
@@ -37,7 +37,7 @@ pub fn handle_run(
     let (tx, rx) = mpsc::channel();
     let client = context.client.clone();
     let run_specs = if args.run_specs.is_empty() {
-        return Err(CliError::Config(ConfigError::MissingArgument {
+        return Err(CliError::Config(CoreError::MissingArgument {
             argument: "run_specs".to_string(),
             context: "No run or job specified to run".to_string(),
         }));

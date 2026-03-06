@@ -3,7 +3,7 @@ use crate::error::CliError;
 use repx_core::{
     config::{self, Config},
     constants::{dirs, logs},
-    errors::ConfigError,
+    errors::CoreError,
     lab,
     model::{JobId, RunId},
     resolver,
@@ -34,7 +34,7 @@ fn handle_show_job(
     let job_id = resolver::resolve_target_job_id(&lab, &target_input)?;
 
     let job = lab.jobs.get(job_id).ok_or_else(|| {
-        CliError::Config(ConfigError::InvalidConfig {
+        CliError::Config(CoreError::InvalidConfig {
             detail: format!("Job '{}' not found in lab", job_id),
         })
     })?;
@@ -204,10 +204,10 @@ fn get_store_path(
 ) -> Result<std::path::PathBuf, CliError> {
     let target_name = target_override
         .or(config.submission_target.as_deref())
-        .ok_or(CliError::Config(ConfigError::NoSubmissionTarget))?;
+        .ok_or(CliError::Config(CoreError::NoSubmissionTarget))?;
 
     let target = config.targets.get(target_name).ok_or_else(|| {
-        CliError::Config(ConfigError::TargetNotConfigured {
+        CliError::Config(CoreError::TargetNotConfigured {
             name: target_name.to_string(),
         })
     })?;
@@ -256,7 +256,7 @@ fn list_directory_recursive(base: &Path, dir: &Path, indent: usize) -> Result<()
     let prefix = " ".repeat(indent);
 
     let mut entries: Vec<_> = fs::read_dir(dir)
-        .map_err(|e| CliError::Config(ConfigError::Io(e)))?
+        .map_err(|e| CliError::Config(CoreError::Io(e)))?
         .filter_map(|e| e.ok())
         .collect();
 
@@ -312,7 +312,7 @@ fn handle_show_output(
     let out_dir = output_dir.join(dirs::OUT);
 
     if !out_dir.exists() {
-        return Err(CliError::Config(ConfigError::OutputNotReady {
+        return Err(CliError::Config(CoreError::OutputNotReady {
             path: out_dir.clone(),
         }));
     }
@@ -325,7 +325,7 @@ fn handle_show_output(
                 eprintln!();
                 eprintln!("Available files in {}:", out_dir.display());
                 list_directory_recursive(&out_dir, &out_dir, 2)?;
-                return Err(CliError::Config(ConfigError::InvalidConfig {
+                return Err(CliError::Config(CoreError::InvalidConfig {
                     detail: format!("File '{}' not found in job output", path),
                 }));
             }
@@ -335,7 +335,7 @@ fn handle_show_output(
                 list_directory_recursive(&file_path, &file_path, 2)?;
             } else {
                 let contents = fs::read_to_string(&file_path).map_err(|e| {
-                    CliError::Config(ConfigError::CommandFailed(format!(
+                    CliError::Config(CoreError::CommandFailed(format!(
                         "Failed to read file '{}': {}",
                         file_path.display(),
                         e

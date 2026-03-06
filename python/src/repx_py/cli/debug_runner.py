@@ -14,6 +14,12 @@ logging.basicConfig(
 logger = logging.getLogger("debug-runner")
 
 
+class DebugRunnerError(Exception):
+    """Error raised during debug job execution."""
+
+    pass
+
+
 def find_writable_cache_dir() -> Path:
     """Traverses up from the CWD to find a writable directory for the job output cache."""
     try:
@@ -51,10 +57,9 @@ def generate_logic_manifest(
         dep_job = job._exp.get_job(dep_id)
         value_template = dep_job.outputs.get(source_output)
         if not value_template:
-            logger.error(
+            raise DebugRunnerError(
                 f"Missing source output '{source_output}' for dependency '{dep_id}'."
             )
-            sys.exit(1)
 
         final_path_str = value_template.replace(
             "$out", str(job_cache_dir / dep_id / "out")
@@ -90,15 +95,15 @@ def execute_job(
 
     executable_rel_path = job.executable_path
     if not executable_rel_path:
-        logger.error(
+        raise DebugRunnerError(
             f"Could not find main executable path for job '{job.id}' in metadata."
         )
-        sys.exit(1)
 
     job_executable = lab_path / executable_rel_path
     if not job_executable.is_file():
-        logger.error(f"Job script not found at expected path: '{job_executable}'")
-        sys.exit(1)
+        raise DebugRunnerError(
+            f"Job script not found at expected path: '{job_executable}'"
+        )
 
     command = [
         str(job_executable),
@@ -110,10 +115,11 @@ def execute_job(
     result = subprocess.run(command, capture_output=True, text=True, check=False)
 
     if result.returncode != 0:
-        logger.error(f"Job {job.id} failed with exit code {result.returncode}!")
-        logger.error("--- STDOUT ---\n" + result.stdout)
-        logger.error("--- STDERR ---\n" + result.stderr)
-        sys.exit(1)
+        raise DebugRunnerError(
+            f"Job {job.id} failed with exit code {result.returncode}!\n"
+            f"--- STDOUT ---\n{result.stdout}\n"
+            f"--- STDERR ---\n{result.stderr}"
+        )
 
     (job_repx_dir / "SUCCESS").touch()
 
@@ -178,12 +184,17 @@ def main() -> None:
     logger.info(f"Starting debug run for job: {target_job.id}")
     job_cache_dir.mkdir(exist_ok=True)
 
-    ensure_job_is_run(
-        target_job,
-        exp,
-        lab_path,
-        job_cache_dir,
-    )
+    try:
+        ensure_job_is_run(
+            target_job,
+            exp,
+            lab_path,
+            job_cache_dir,
+        )
+    except DebugRunnerError as e:
+        logger.error(str(e))
+        sys.exit(1)
+
     logger.info("---")
     logger.info("Debug run finished successfully.")
     logger.info(

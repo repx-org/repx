@@ -1,17 +1,13 @@
 use crate::{cli::InternalOrchestrateArgs, error::CliError};
 use repx_client::orchestration::OrchestrationPlan;
-use repx_core::{errors::ConfigError, model::JobId};
+use repx_core::{errors::CoreError, model::JobId};
 use std::collections::{HashMap, HashSet};
 use std::process::Command;
 
 #[allow(clippy::expect_used)]
 pub fn handle_internal_orchestrate(args: InternalOrchestrateArgs) -> Result<(), CliError> {
-    let plan_content = std::fs::read_to_string(&args.plan_file).map_err(|e| {
-        CliError::Config(ConfigError::PathIo {
-            path: args.plan_file.clone(),
-            source: e,
-        })
-    })?;
+    let plan_content = std::fs::read_to_string(&args.plan_file)
+        .map_err(|e| CliError::Config(CoreError::path_io(&args.plan_file, e)))?;
     let plan: OrchestrationPlan = serde_json::from_str(&plan_content)?;
 
     let mut submitted_slurm_ids: HashMap<JobId, u32> = HashMap::new();
@@ -37,7 +33,7 @@ pub fn handle_internal_orchestrate(args: InternalOrchestrateArgs) -> Result<(), 
         current_wave.sort();
 
         if current_wave.is_empty() {
-            return Err(CliError::Config(ConfigError::CycleDetected {
+            return Err(CliError::Config(CoreError::CycleDetected {
                 context: "job dependency graph".to_string(),
             }));
         }

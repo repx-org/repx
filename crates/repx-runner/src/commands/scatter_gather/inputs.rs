@@ -1,5 +1,5 @@
 use crate::error::CliError;
-use repx_core::{constants::dirs, errors::ConfigError};
+use repx_core::{constants::dirs, errors::CoreError};
 use serde_json::Value;
 use std::{collections::HashMap, path::Path};
 
@@ -25,7 +25,7 @@ pub(crate) fn resolve_step_inputs(
                 );
             } else if let Some(dep_name) = source.strip_prefix("step:") {
                 let source_output = mapping.source_output.as_ref().ok_or_else(|| {
-                    CliError::Config(ConfigError::StepError {
+                    CliError::Config(CoreError::StepError {
                         detail: format!(
                             "Step input mapping with source '{}' missing source_output",
                             source
@@ -34,13 +34,13 @@ pub(crate) fn resolve_step_inputs(
                 })?;
 
                 let dep_meta = steps_meta.get(dep_name).ok_or_else(|| {
-                    CliError::Config(ConfigError::StepError {
+                    CliError::Config(CoreError::StepError {
                         detail: format!("Step input references unknown step '{}'", dep_name),
                     })
                 })?;
 
                 let template = dep_meta.outputs.get(source_output).ok_or_else(|| {
-                    CliError::Config(ConfigError::StepError {
+                    CliError::Config(CoreError::StepError {
                         detail: format!(
                             "Step '{}' does not have output '{}'",
                             dep_name, source_output

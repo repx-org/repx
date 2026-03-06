@@ -1,5 +1,5 @@
 use crate::error::CliError;
-use repx_core::{constants::dirs, errors::ConfigError};
+use repx_core::{constants::dirs, errors::CoreError};
 use std::{collections::HashMap, fs};
 use tokio::process::Command as TokioCommand;
 
@@ -256,7 +256,7 @@ pub(crate) async fn submit_slurm_branches(
         if let Some(sink_slurm_id) = step_slurm_ids.get(&steps_meta.sink_step) {
             last_step_slurm_ids.push(sink_slurm_id.clone());
         } else {
-            return Err(CliError::Config(ConfigError::InconsistentMetadata {
+            return Err(CliError::Config(CoreError::InconsistentMetadata {
                 detail: format!(
                     "Sink step '{}' was not submitted for branch #{}",
                     steps_meta.sink_step, branch_idx

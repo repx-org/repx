@@ -8,7 +8,7 @@ use repx_core::{
     config::{Config, Resources},
     constants::{dirs, logs, targets},
     engine,
-    errors::ConfigError,
+    errors::CoreError,
     lab,
     model::{Job, JobId, Lab, RunId, SchedulerType},
 };
@@ -179,15 +179,15 @@ impl Client {
         let local_base_path = if let Some(local_target) = config.targets.get(targets::LOCAL) {
             local_target.base_path.clone()
         } else {
-            return Err(ClientError::Config(ConfigError::MissingLocalTarget));
+            return Err(ClientError::Config(CoreError::MissingLocalTarget));
         };
 
         let client_state_dir = local_base_path.join("repx").join("state");
         let client_temp_dir = local_base_path.join("repx").join("temp");
         fs_err::create_dir_all(&client_state_dir)
-            .map_err(|e| ClientError::Config(ConfigError::Io(e)))?;
+            .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
         fs_err::create_dir_all(&client_temp_dir)
-            .map_err(|e| ClientError::Config(ConfigError::Io(e)))?;
+            .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
 
         let mut targets: HashMap<String, Arc<dyn Target>> = HashMap::new();
         for (name, target_config) in &config.targets {
@@ -207,7 +207,7 @@ impl Client {
                     host_tools_dir_name: lab.host_tools_dir_name.clone(),
                 })
             } else {
-                return Err(ClientError::Config(ConfigError::InvalidConfig {
+                return Err(ClientError::Config(CoreError::InvalidConfig {
                     detail: format!(
                         "Target '{}' is not 'local' and has no 'address' specified.",
                         name
@@ -278,12 +278,12 @@ impl Client {
         let local_base_path = if let Some(local_target) = self.config.targets.get(targets::LOCAL) {
             local_target.base_path.clone()
         } else {
-            return Err(ClientError::Config(ConfigError::MissingLocalTarget));
+            return Err(ClientError::Config(CoreError::MissingLocalTarget));
         };
 
         let client_state_dir = local_base_path.join("repx").join("state");
         fs_err::create_dir_all(&client_state_dir)
-            .map_err(|e| ClientError::Config(ConfigError::Io(e)))?;
+            .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
 
         let lab_path_abs = fs_err::canonicalize(&self.lab_path).unwrap_or(self.lab_path.clone());
         let lab_hash = {
@@ -293,12 +293,22 @@ impl Client {
         };
         let map_filename = format!("slurm_map_{}.json", lab_hash);
 
-        let map_path = client_state_dir.join(map_filename);
-        let data = lock_slurm_map(&self.slurm_map);
-        let json_string = serde_json::to_string_pretty(&*data)
-            .map_err(|e| ClientError::Config(ConfigError::Json(e)))?;
-        fs_err::write(map_path, json_string)
-            .map_err(|e| ClientError::Config(ConfigError::Io(e)))?;
+        let map_path = client_state_dir.join(&map_filename);
+
+        let data_clone = {
+            let guard = lock_slurm_map(&self.slurm_map);
+            guard.clone()
+        };
+
+        let json_string = serde_json::to_string_pretty(&data_clone)
+            .map_err(|e| ClientError::Config(CoreError::Json(e)))?;
+
+        let temp_filename = format!(".slurm_map_{}.json.tmp", lab_hash);
+        let temp_path = client_state_dir.join(&temp_filename);
+        fs_err::write(&temp_path, &json_string)
+            .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
+        fs_err::rename(&temp_path, &map_path).map_err(|e| ClientError::Config(CoreError::Io(e)))?;
+
         Ok(())
     }
 
@@ -400,7 +410,7 @@ impl Client {
             let local_target = self
                 .targets
                 .get(targets::LOCAL)
-                .ok_or(ClientError::Config(ConfigError::MissingLocalTarget))?;
+                .ok_or(ClientError::Config(CoreError::MissingLocalTarget))?;
             submission::sync_images(
                 &self.lab_path,
                 target,
@@ -532,7 +542,7 @@ impl Client {
 
         if let Some(entry) = slurm_info {
             let target = self.targets.get(&entry.target_name).ok_or_else(|| {
-                ClientError::Config(ConfigError::TargetNotConfigured {
+                ClientError::Config(CoreError::TargetNotConfigured {
                     name: entry.target_name.clone(),
                 })
             })?;

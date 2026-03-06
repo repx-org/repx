@@ -1,5 +1,5 @@
 use crate::{
-    errors::ConfigError,
+    errors::CoreError,
     model::{FileEntry, Lab, LabManifest, RootMetadata, Run, RunId, RunMetadataForLoading},
     path_safety::safe_join,
 };
@@ -13,9 +13,9 @@ use std::path::{Path, PathBuf};
 const EXPECTED_REPX_VERSION: &str = env!("CARGO_PKG_VERSION");
 const HASH_BUFFER_SIZE: usize = 8192;
 
-fn reject_external_symlink(path: &Path, lab_root: &Path) -> Result<(), ConfigError> {
+fn reject_external_symlink(path: &Path, lab_root: &Path) -> Result<(), CoreError> {
     let meta = fs::symlink_metadata(path).map_err(|e| {
-        ConfigError::Io(std::io::Error::new(
+        CoreError::Io(std::io::Error::new(
             e.kind(),
             format!(
                 "Failed to read symlink metadata for '{}': {}",
@@ -26,7 +26,7 @@ fn reject_external_symlink(path: &Path, lab_root: &Path) -> Result<(), ConfigErr
     })?;
     if meta.file_type().is_symlink() {
         let target = fs::read_link(path).map_err(|e| {
-            ConfigError::Io(std::io::Error::new(
+            CoreError::Io(std::io::Error::new(
                 e.kind(),
                 format!(
                     "Failed to read symlink target for '{}': {}",
@@ -42,12 +42,12 @@ fn reject_external_symlink(path: &Path, lab_root: &Path) -> Result<(), ConfigErr
         };
         let canonical_target = resolved
             .canonicalize()
-            .map_err(|_| ConfigError::SymlinkEscape {
+            .map_err(|_| CoreError::SymlinkEscape {
                 link: path.to_path_buf(),
                 target: target.clone(),
             })?;
         let canonical_root = lab_root.canonicalize().map_err(|e| {
-            ConfigError::Io(std::io::Error::new(
+            CoreError::Io(std::io::Error::new(
                 e.kind(),
                 format!(
                     "Failed to canonicalize lab root '{}': {}",
@@ -57,7 +57,7 @@ fn reject_external_symlink(path: &Path, lab_root: &Path) -> Result<(), ConfigErr
             ))
         })?;
         if !canonical_target.starts_with(&canonical_root) {
-            return Err(ConfigError::SymlinkEscape {
+            return Err(CoreError::SymlinkEscape {
                 link: path.to_path_buf(),
                 target: canonical_target,
             });
@@ -66,21 +66,21 @@ fn reject_external_symlink(path: &Path, lab_root: &Path) -> Result<(), ConfigErr
     Ok(())
 }
 
-fn verify_file_integrity(lab_path: &Path, files: &[FileEntry]) -> Result<(), ConfigError> {
+fn verify_file_integrity(lab_path: &Path, files: &[FileEntry]) -> Result<(), CoreError> {
     tracing::debug!(
         "Verifying integrity of {} files in parallel...",
         files.len()
     );
 
-    let result: Result<(), ConfigError> = files.par_iter().try_for_each(|entry| {
+    let result: Result<(), CoreError> = files.par_iter().try_for_each(|entry| {
         let file_path = safe_join(lab_path, &entry.path)?;
 
         if !file_path.exists() {
-            return Err(ConfigError::IntegrityFileMissing(entry.path.clone()));
+            return Err(CoreError::IntegrityFileMissing(entry.path.clone()));
         }
 
         let mut file = File::open(&file_path).map_err(|e| {
-            ConfigError::Io(std::io::Error::new(
+            CoreError::Io(std::io::Error::new(
                 e.kind(),
                 format!("Failed to open file for integrity check: {}", entry.path),
             ))
@@ -90,7 +90,7 @@ fn verify_file_integrity(lab_path: &Path, files: &[FileEntry]) -> Result<(), Con
         let mut buffer = [0u8; HASH_BUFFER_SIZE];
         loop {
             let bytes_read = file.read(&mut buffer).map_err(|e| {
-                ConfigError::Io(std::io::Error::new(
+                CoreError::Io(std::io::Error::new(
                     e.kind(),
                     format!("Failed to read file for integrity check: {}", entry.path),
                 ))
@@ -104,7 +104,7 @@ fn verify_file_integrity(lab_path: &Path, files: &[FileEntry]) -> Result<(), Con
         let actual_hash = format!("{:x}", hasher.finalize());
 
         if actual_hash != entry.sha256.as_str() {
-            return Err(ConfigError::IntegrityHashMismatch {
+            return Err(CoreError::IntegrityHashMismatch {
                 path: entry.path.clone(),
                 expected: entry.sha256.to_string(),
                 actual: actual_hash,
@@ -137,15 +137,15 @@ fn find_manifest_path(lab_path: &Path) -> Option<PathBuf> {
     None
 }
 
-pub fn load_from_path_unchecked(initial_path: &Path) -> Result<Lab, ConfigError> {
+pub fn load_from_path_unchecked(initial_path: &Path) -> Result<Lab, CoreError> {
     load_from_path_inner(initial_path, false)
 }
 
-pub fn load_from_path(initial_path: &Path) -> Result<Lab, ConfigError> {
+pub fn load_from_path(initial_path: &Path) -> Result<Lab, CoreError> {
     load_from_path_inner(initial_path, true)
 }
 
-fn load_from_path_inner(initial_path: &Path, verify_integrity: bool) -> Result<Lab, ConfigError> {
+fn load_from_path_inner(initial_path: &Path, verify_integrity: bool) -> Result<Lab, CoreError> {
     tracing::debug!(
         "Attempting to load lab from initial path: '{}'",
         initial_path.display()
@@ -163,7 +163,7 @@ fn load_from_path_inner(initial_path: &Path, verify_integrity: bool) -> Result<L
                 (parent.to_path_buf(), None)
             }
         } else {
-            return Err(ConfigError::InvalidConfig {
+            return Err(CoreError::InvalidConfig {
                 detail: format!("Path '{}' has no parent directory", initial_path.display()),
             });
         }
@@ -177,21 +177,23 @@ fn load_from_path_inner(initial_path: &Path, verify_integrity: bool) -> Result<L
     );
 
     if !lab_path.is_dir() {
-        return Err(ConfigError::LabNotFound(lab_path.to_path_buf()));
+        return Err(CoreError::LabNotFound(lab_path.to_path_buf()));
     }
 
     let manifest_path = if let Some(p) = specific_manifest {
         p
     } else {
         find_manifest_path(&lab_path)
-            .ok_or_else(|| ConfigError::MetadataNotFound(lab_path.to_path_buf()))?
+            .ok_or_else(|| CoreError::MetadataNotFound(lab_path.to_path_buf()))?
     };
 
     tracing::debug!("Found lab manifest at: '{}'", manifest_path.display());
     reject_external_symlink(&manifest_path, &lab_path)?;
 
-    let manifest_content = fs::read_to_string(&manifest_path)?;
-    let manifest: LabManifest = serde_json::from_str(&manifest_content)?;
+    let manifest_content =
+        fs::read_to_string(&manifest_path).map_err(|e| CoreError::path_io(&manifest_path, e))?;
+    let manifest: LabManifest = serde_json::from_str(&manifest_content)
+        .map_err(|e| CoreError::json_path(&manifest_path, e))?;
     let content_hash = manifest.lab_id.clone();
     let lab_version = manifest.lab_version.clone();
 
@@ -204,7 +206,7 @@ fn load_from_path_inner(initial_path: &Path, verify_integrity: bool) -> Result<L
 
     let root_metadata_path = lab_path.join(&manifest.metadata);
     if !root_metadata_path.is_file() {
-        return Err(ConfigError::Io(std::io::Error::new(
+        return Err(CoreError::Io(std::io::Error::new(
             std::io::ErrorKind::NotFound,
             format!(
                 "Root metadata file not found at '{}'",
@@ -218,8 +220,10 @@ fn load_from_path_inner(initial_path: &Path, verify_integrity: bool) -> Result<L
         "Loading root metadata from '{}'",
         root_metadata_path.display()
     );
-    let root_metadata_content = fs::read_to_string(&root_metadata_path)?;
-    let root_meta: RootMetadata = serde_json::from_str(&root_metadata_content)?;
+    let root_metadata_content = fs::read_to_string(&root_metadata_path)
+        .map_err(|e| CoreError::path_io(&root_metadata_path, e))?;
+    let root_meta: RootMetadata = serde_json::from_str(&root_metadata_content)
+        .map_err(|e| CoreError::json_path(&root_metadata_path, e))?;
 
     if root_meta.repx_version != EXPECTED_REPX_VERSION {
         tracing::warn!(
@@ -233,7 +237,7 @@ fn load_from_path_inner(initial_path: &Path, verify_integrity: bool) -> Result<L
 
     let host_tools_root = lab_path.join("host-tools");
     if !host_tools_root.is_dir() {
-        return Err(ConfigError::Io(std::io::Error::new(
+        return Err(CoreError::Io(std::io::Error::new(
             std::io::ErrorKind::NotFound,
             format!(
                 "'host-tools' directory not found in lab at '{}'",
@@ -246,7 +250,7 @@ fn load_from_path_inner(initial_path: &Path, verify_integrity: bool) -> Result<L
         .filter_map(Result::ok)
         .find(|e| e.path().is_dir())
         .ok_or_else(|| {
-            ConfigError::Io(std::io::Error::new(
+            CoreError::Io(std::io::Error::new(
                 std::io::ErrorKind::NotFound,
                 "No tool directory found inside host-tools",
             ))
@@ -312,7 +316,7 @@ fn load_from_path_inner(initial_path: &Path, verify_integrity: bool) -> Result<L
 
         reject_external_symlink(&run_metadata_path, &lab_path)?;
         let run_meta_content = fs::read_to_string(&run_metadata_path).map_err(|e| {
-            ConfigError::Io(std::io::Error::new(
+            CoreError::Io(std::io::Error::new(
                 e.kind(),
                 format!(
                     "Failed to read run metadata at {:?}: {}",
@@ -321,7 +325,8 @@ fn load_from_path_inner(initial_path: &Path, verify_integrity: bool) -> Result<L
             ))
         })?;
 
-        let mut run_meta: RunMetadataForLoading = serde_json::from_str(&run_meta_content)?;
+        let mut run_meta: RunMetadataForLoading = serde_json::from_str(&run_meta_content)
+            .map_err(|e| CoreError::json_path(&run_metadata_path, e))?;
         let run_id = run_meta.name.clone();
 
         let job_ids_for_run: Vec<_> = run_meta.jobs.keys().cloned().collect();
@@ -353,7 +358,7 @@ fn load_from_path_inner(initial_path: &Path, verify_integrity: bool) -> Result<L
 
     let jobs_dir = lab_path.join("jobs");
     if !jobs_dir.is_dir() {
-        return Err(ConfigError::IntegrityError(format!(
+        return Err(CoreError::IntegrityError(format!(
             "'jobs' directory not found in lab at '{}'",
             lab_path.display()
         )));
@@ -363,7 +368,7 @@ fn load_from_path_inner(initial_path: &Path, verify_integrity: bool) -> Result<L
         if let Some(image_rel_path) = &run.image {
             let image_full_path = lab_path.join(image_rel_path);
             if !image_full_path.exists() {
-                return Err(ConfigError::IntegrityError(format!(
+                return Err(CoreError::IntegrityError(format!(
                     "image file '{}' not found for run.",
                     image_full_path.display()
                 )));
@@ -375,7 +380,7 @@ fn load_from_path_inner(initial_path: &Path, verify_integrity: bool) -> Result<L
     for (job_id, job) in &lab.jobs {
         let job_pkg_path = lab_path.join(&job.path_in_lab);
         if !job_pkg_path.is_dir() {
-            return Err(ConfigError::IntegrityError(format!(
+            return Err(CoreError::IntegrityError(format!(
                 "Job package directory not found for job '{}' at '{}'",
                 job_id,
                 job_pkg_path.display()

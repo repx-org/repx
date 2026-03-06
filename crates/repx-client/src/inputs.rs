@@ -1,7 +1,7 @@
 use crate::error::{ClientError, Result};
 use repx_core::{
     constants::dirs,
-    errors::ConfigError,
+    errors::CoreError,
     model::{Job, JobId, Lab},
 };
 use std::path::Path;
@@ -18,7 +18,7 @@ pub fn generate_and_write_inputs_json(
     let mut inputs_map = serde_json::Map::new();
 
     let exe = job.executables.get(executable_name).ok_or_else(|| {
-        ClientError::Config(ConfigError::MissingExecutable {
+        ClientError::Config(CoreError::MissingExecutable {
             job_id: job_id.to_string(),
             executable: executable_name.to_string(),
         })
@@ -27,7 +27,7 @@ pub fn generate_and_write_inputs_json(
     for mapping in &exe.inputs {
         if let (Some(dep_job_id), Some(source_output)) = (&mapping.job_id, &mapping.source_output) {
             let dep_job = lab.jobs.get(dep_job_id).ok_or_else(|| {
-                ClientError::Config(ConfigError::InconsistentMetadata {
+                ClientError::Config(CoreError::InconsistentMetadata {
                     detail: format!(
                         "Dependency job '{}' not found in lab for job '{}'",
                         dep_job_id, job_id
@@ -41,14 +41,14 @@ pub fn generate_and_write_inputs_json(
                 dep_job.executables.get("main")
             }
             .ok_or_else(|| {
-                ClientError::Config(ConfigError::MissingExecutable {
+                ClientError::Config(CoreError::MissingExecutable {
                     job_id: dep_job_id.to_string(),
                     executable: "main/gather".to_string(),
                 })
             })?;
 
             let value_template_val = dep_exe.outputs.get(source_output).ok_or_else(|| {
-                ClientError::Config(ConfigError::InconsistentMetadata {
+                ClientError::Config(CoreError::InconsistentMetadata {
                     detail: format!(
                         "Job '{}' requires output '{}' from dependency '{}', but this output is not defined in the dependency's metadata.",
                         job_id, source_output, dep_job_id
@@ -57,7 +57,7 @@ pub fn generate_and_write_inputs_json(
             })?;
 
             let value_template = value_template_val.as_str().ok_or_else(|| {
-                ClientError::Config(ConfigError::InconsistentMetadata {
+                ClientError::Config(CoreError::InconsistentMetadata {
                     detail: format!(
                         "Job '{}' requires output '{}' from dependency '{}', but this output is not a string path template.",
                         job_id, source_output, dep_job_id
@@ -117,7 +117,7 @@ pub fn generate_and_write_inputs_json(
     }
 
     let json_content = serde_json::to_string_pretty(&serde_json::Value::Object(inputs_map))
-        .map_err(|e| ClientError::Config(ConfigError::Json(e)))?;
+        .map_err(|e| ClientError::Config(CoreError::Json(e)))?;
 
     let inputs_json_path_on_target = target
         .base_path()

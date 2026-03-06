@@ -4,7 +4,7 @@ use crate::{
 };
 use repx_core::{
     constants::{dirs, manifests, markers},
-    errors::ConfigError,
+    errors::CoreError,
     model::{JobId, Memory, MountPolicy, SlurmTime},
 };
 use repx_executor::{CancellationToken, ExecutionRequest, Executor, Runtime};
@@ -203,7 +203,7 @@ impl ScatterGatherOrchestrator {
             let mut outputs = HashMap::new();
             for (name, template) in &last_step_outputs {
                 let template_str = template.as_str().ok_or_else(|| {
-                    CliError::Config(ConfigError::StepError {
+                    CliError::Config(CoreError::StepError {
                         detail: format!(
                             "Last step output template for '{}' must be a string.",
                             name
@@ -334,19 +334,19 @@ async fn handle_phase_step(
 ) -> Result<(), CliError> {
     orch.load_static_inputs()?;
     let branch_idx = args.branch_idx.ok_or_else(|| {
-        CliError::Config(ConfigError::MissingArgument {
+        CliError::Config(CoreError::MissingArgument {
             argument: "--branch-idx".to_string(),
             context: "required for --phase step".to_string(),
         })
     })?;
     let step_name = args.step_name.as_ref().ok_or_else(|| {
-        CliError::Config(ConfigError::MissingArgument {
+        CliError::Config(CoreError::MissingArgument {
             argument: "--step-name".to_string(),
             context: "required for --phase step".to_string(),
         })
     })?;
     let step_meta = steps_meta.steps.get(step_name).ok_or_else(|| {
-        CliError::Config(ConfigError::StepError {
+        CliError::Config(CoreError::StepError {
             detail: format!("Step '{}' not found in steps metadata", step_name),
         })
     })?;
@@ -358,7 +358,7 @@ async fn handle_phase_step(
     let work_items_str = fs::read_to_string(orch.scatter_out_dir.join("work_items.json"))?;
     let work_items: Vec<Value> = serde_json::from_str(&work_items_str)?;
     let item = work_items.get(branch_idx).ok_or_else(|| {
-        CliError::Config(ConfigError::InvalidConfig {
+        CliError::Config(CoreError::InvalidConfig {
             detail: format!(
                 "Branch index {} out of range (only {} work items)",
                 branch_idx,
@@ -517,14 +517,14 @@ async fn async_handle_scatter_gather(
     );
 
     let steps_meta: StepsMetadata = serde_json::from_str(&args.steps_json).map_err(|e| {
-        CliError::Config(ConfigError::SerializationError(format!(
+        CliError::Config(CoreError::SerializationError(format!(
             "Failed to parse --steps-json: {}",
             e
         )))
     })?;
 
     if steps_meta.steps.is_empty() {
-        return Err(CliError::Config(ConfigError::InvalidConfig {
+        return Err(CliError::Config(CoreError::InvalidConfig {
             detail: "No steps defined in --steps-json. At least one step is required.".to_string(),
         }));
     }
@@ -533,7 +533,7 @@ async fn async_handle_scatter_gather(
     let sink_step = &steps_meta.sink_step;
 
     if !steps_meta.steps.contains_key(sink_step) {
-        return Err(CliError::Config(ConfigError::StepError {
+        return Err(CliError::Config(CoreError::StepError {
             detail: format!("Sink step '{}' not found in steps metadata", sink_step),
         }));
     }
@@ -611,7 +611,7 @@ async fn async_handle_scatter_gather(
             );
         }
         other => {
-            return Err(CliError::Config(ConfigError::UnsupportedValue {
+            return Err(CliError::Config(CoreError::UnsupportedValue {
                 kind: "scheduler".to_string(),
                 value: other.to_string(),
             }));

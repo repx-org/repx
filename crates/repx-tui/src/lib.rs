@@ -71,10 +71,7 @@ pub fn run(args: TuiArgs) -> Result<(), TuiError> {
 
     let logging_config = config::load_config().map(|c| c.logging).unwrap_or_default();
 
-    if let Err(e) = repx_core::logging::init_tui_logger(&logging_config) {
-        eprintln!("[ERROR] Failed to initialize TUI logger: {}", e);
-        std::process::exit(1);
-    }
+    repx_core::logging::init_tui_logger(&logging_config)?;
     tracing::info!("--- Repx TUI Started ---");
 
     let lab_path = fs::canonicalize(&args.lab).map_err(|e| TuiError::PathIo {

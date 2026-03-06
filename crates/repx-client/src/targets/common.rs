@@ -1,5 +1,5 @@
 use crate::error::{ClientError, Result};
-use repx_core::errors::ConfigError;
+use repx_core::errors::CoreError;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -80,17 +80,17 @@ pub fn extract_image_to_cache(
             image_extract_dir.display()
         );
 
-        fs_err::create_dir_all(&images_cache).map_err(ConfigError::Io)?;
+        fs_err::create_dir_all(&images_cache).map_err(CoreError::Io)?;
 
         let mut cp_cmd = Command::new("cp");
         cp_cmd.arg("-r").arg(image_path).arg(&image_extract_dir);
 
         repx_core::logging::log_and_print_command(&cp_cmd);
-        let cp_output = cp_cmd.output().map_err(ConfigError::Io)?;
+        let cp_output = cp_cmd.output().map_err(CoreError::Io)?;
 
         if !cp_output.status.success() {
             let stderr = String::from_utf8_lossy(&cp_output.stderr);
-            return Err(ClientError::Config(ConfigError::CommandFailed(format!(
+            return Err(ClientError::Config(CoreError::CommandFailed(format!(
                 "Failed to copy image directory {}: {}",
                 image_path.display(),
                 stderr
@@ -105,7 +105,7 @@ pub fn extract_image_to_cache(
         image_extract_dir.display()
     );
 
-    fs_err::create_dir_all(&image_extract_dir).map_err(ConfigError::Io)?;
+    fs_err::create_dir_all(&image_extract_dir).map_err(CoreError::Io)?;
 
     let mut tar_cmd = Command::new(tar_tool);
     tar_cmd
@@ -115,7 +115,7 @@ pub fn extract_image_to_cache(
         .arg(&image_extract_dir);
 
     repx_core::logging::log_and_print_command(&tar_cmd);
-    let tar_output = tar_cmd.output().map_err(ConfigError::Io)?;
+    let tar_output = tar_cmd.output().map_err(CoreError::Io)?;
 
     if !tar_output.status.success() {
         let stderr = String::from_utf8_lossy(&tar_output.stderr);
@@ -126,7 +126,7 @@ pub fn extract_image_to_cache(
                 e
             );
         }
-        return Err(ClientError::Config(ConfigError::CommandFailed(format!(
+        return Err(ClientError::Config(CoreError::CommandFailed(format!(
             "Failed to extract image tarball {}: {}",
             image_path.display(),
             stderr
@@ -137,10 +137,10 @@ pub fn extract_image_to_cache(
 }
 
 pub fn restructure_layers_for_dedup(image_extract_dir: &Path, layers_cache: &Path) -> Result<()> {
-    fs_err::create_dir_all(layers_cache).map_err(ConfigError::Io)?;
+    fs_err::create_dir_all(layers_cache).map_err(CoreError::Io)?;
 
-    for entry in fs_err::read_dir(image_extract_dir).map_err(ConfigError::Io)? {
-        let entry = entry.map_err(ConfigError::Io)?;
+    for entry in fs_err::read_dir(image_extract_dir).map_err(CoreError::Io)? {
+        let entry = entry.map_err(CoreError::Io)?;
         let path = entry.path();
 
         if path.is_dir() {
@@ -149,13 +149,13 @@ pub fn restructure_layers_for_dedup(image_extract_dir: &Path, layers_cache: &Pat
                 let layer_cache_path = layers_cache.join(&dirname);
 
                 if !layer_cache_path.exists() {
-                    fs_err::rename(&path, &layer_cache_path).map_err(ConfigError::Io)?;
+                    fs_err::rename(&path, &layer_cache_path).map_err(CoreError::Io)?;
                 } else {
-                    fs_err::remove_dir_all(&path).map_err(ConfigError::Io)?;
+                    fs_err::remove_dir_all(&path).map_err(CoreError::Io)?;
                 }
 
                 let relative_target = PathBuf::from("../../layers").join(&dirname);
-                std::os::unix::fs::symlink(&relative_target, &path).map_err(ConfigError::Io)?;
+                std::os::unix::fs::symlink(&relative_target, &path).map_err(CoreError::Io)?;
             }
         }
     }
@@ -235,10 +235,10 @@ pub fn get_image_manifest(image_path: &Path, tar_tool: &Path) -> Result<Vec<Stri
     let mut tar_list_cmd = Command::new(tar_tool);
     tar_list_cmd.arg("-tf").arg(image_path);
 
-    let list_output = tar_list_cmd.output().map_err(ConfigError::Io)?;
+    let list_output = tar_list_cmd.output().map_err(CoreError::Io)?;
 
     if !list_output.status.success() {
-        return Err(ClientError::Config(ConfigError::CommandFailed(format!(
+        return Err(ClientError::Config(CoreError::CommandFailed(format!(
             "Failed to list tar content {}: {}",
             image_path.display(),
             String::from_utf8_lossy(&list_output.stderr)
@@ -250,7 +250,7 @@ pub fn get_image_manifest(image_path: &Path, tar_tool: &Path) -> Result<Vec<Stri
         .lines()
         .find(|line| line.trim() == "manifest.json" || line.trim().ends_with("/manifest.json"))
         .ok_or_else(|| {
-            ClientError::Config(ConfigError::InconsistentMetadata {
+            ClientError::Config(CoreError::InconsistentMetadata {
                 detail: format!(
                     "manifest.json not found in {}: manifest.json missing from tar listing",
                     image_path.display()
@@ -265,10 +265,10 @@ pub fn get_image_manifest(image_path: &Path, tar_tool: &Path) -> Result<Vec<Stri
         .arg(manifest_path)
         .arg("-O");
 
-    let extract_output = tar_extract_cmd.output().map_err(ConfigError::Io)?;
+    let extract_output = tar_extract_cmd.output().map_err(CoreError::Io)?;
 
     if !extract_output.status.success() {
-        return Err(ClientError::Config(ConfigError::CommandFailed(format!(
+        return Err(ClientError::Config(CoreError::CommandFailed(format!(
             "Failed to extract manifest from {}: {}",
             image_path.display(),
             String::from_utf8_lossy(&extract_output.stderr)
@@ -276,10 +276,10 @@ pub fn get_image_manifest(image_path: &Path, tar_tool: &Path) -> Result<Vec<Stri
     }
 
     let manifest: Vec<ManifestEntry> = serde_json::from_slice(&extract_output.stdout)
-        .map_err(|e| ClientError::Config(ConfigError::Json(e)))?;
+        .map_err(|e| ClientError::Config(CoreError::Json(e)))?;
 
     if manifest.is_empty() {
-        return Err(ClientError::Config(ConfigError::InconsistentMetadata {
+        return Err(ClientError::Config(CoreError::InconsistentMetadata {
             detail: format!("Empty manifest in {}", image_path.display()),
         }));
     }
@@ -310,7 +310,7 @@ pub fn extract_layer_to_cache(
             );
         }
     }
-    fs_err::create_dir_all(&temp_extract_dir).map_err(ConfigError::Io)?;
+    fs_err::create_dir_all(&temp_extract_dir).map_err(CoreError::Io)?;
 
     tracing::info!(
         "Extracting layer {} from {} to cache",
@@ -325,7 +325,7 @@ pub fn extract_layer_to_cache(
         .arg(layer_path_in_tar)
         .arg("-O");
 
-    let output = tar_cmd.output().map_err(ConfigError::Io)?;
+    let output = tar_cmd.output().map_err(CoreError::Io)?;
 
     if !output.status.success() {
         if let Err(e) = fs_err::remove_dir_all(&temp_extract_dir) {
@@ -335,7 +335,7 @@ pub fn extract_layer_to_cache(
                 e
             );
         }
-        return Err(ClientError::Config(ConfigError::CommandFailed(format!(
+        return Err(ClientError::Config(CoreError::CommandFailed(format!(
             "Failed to extract layer {} from {}: {}",
             layer_path_in_tar,
             image_path.display(),
@@ -344,9 +344,9 @@ pub fn extract_layer_to_cache(
     }
 
     let layer_tar_path = temp_extract_dir.join("layer.tar");
-    fs_err::write(&layer_tar_path, &output.stdout).map_err(ConfigError::Io)?;
+    fs_err::write(&layer_tar_path, &output.stdout).map_err(CoreError::Io)?;
 
-    fs_err::rename(&temp_extract_dir, &layer_dest_dir).map_err(ConfigError::Io)?;
+    fs_err::rename(&temp_extract_dir, &layer_dest_dir).map_err(CoreError::Io)?;
 
     Ok(())
 }
@@ -389,10 +389,10 @@ pub fn extract_layer_to_flat_store(
         .arg(layer_path_in_tar)
         .arg("-O");
 
-    let output = tar_cmd.output().map_err(ConfigError::Io)?;
+    let output = tar_cmd.output().map_err(CoreError::Io)?;
 
     if !output.status.success() {
-        return Err(ClientError::Config(ConfigError::CommandFailed(format!(
+        return Err(ClientError::Config(CoreError::CommandFailed(format!(
             "Failed to extract layer {} from {}: {}",
             layer_path_in_tar,
             image_path.display(),
@@ -400,8 +400,8 @@ pub fn extract_layer_to_flat_store(
         ))));
     }
 
-    fs_err::write(&temp_path, &output.stdout).map_err(ConfigError::Io)?;
-    fs_err::rename(&temp_path, &layer_dest_path).map_err(ConfigError::Io)?;
+    fs_err::write(&temp_path, &output.stdout).map_err(CoreError::Io)?;
+    fs_err::rename(&temp_path, &layer_dest_path).map_err(CoreError::Io)?;
 
     Ok(())
 }

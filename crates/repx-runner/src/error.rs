@@ -3,7 +3,7 @@ use thiserror::Error;
 #[derive(Error, Debug)]
 pub enum CliError {
     #[error(transparent)]
-    Config(#[from] repx_core::errors::ConfigError),
+    Config(#[from] repx_core::errors::CoreError),
 
     #[error(transparent)]
     Domain(#[from] repx_core::errors::DomainError),

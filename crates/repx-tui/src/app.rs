@@ -18,6 +18,8 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
+const MAX_HISTORY_LEN: usize = 500;
+
 #[derive(Debug, PartialEq, Clone, Copy)]
 pub enum PanelFocus {
     Jobs,
@@ -421,9 +423,15 @@ impl App {
         self.last_completed_count = current_completed_count;
 
         self.status_history.push_back(counts);
+        if self.status_history.len() > MAX_HISTORY_LEN {
+            self.status_history.pop_front();
+        }
 
         self.completion_rate_history
             .push_back(newly_completed as f64);
+        if self.completion_rate_history.len() > MAX_HISTORY_LEN {
+            self.completion_rate_history.pop_front();
+        }
     }
 
     pub fn on_selection_change(&mut self) {

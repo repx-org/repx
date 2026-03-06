@@ -6,7 +6,7 @@ use num_cpus;
 use repx_core::{
     constants::{dirs, targets},
     engine,
-    errors::ConfigError,
+    errors::CoreError,
     model::{Job, JobId},
 };
 use serde_json::Value;
@@ -56,7 +56,7 @@ pub(crate) fn build_steps_json(
         .collect();
 
     if step_entries.is_empty() {
-        return Err(ClientError::Config(ConfigError::InconsistentMetadata {
+        return Err(ClientError::Config(CoreError::InconsistentMetadata {
             detail: "Scatter-gather job has no step executables (expected step-<name> keys)"
                 .to_string(),
         }));
@@ -133,7 +133,7 @@ pub(crate) fn build_steps_json(
         .collect();
 
     if sink_candidates.len() != 1 {
-        return Err(ClientError::Config(ConfigError::InconsistentMetadata {
+        return Err(ClientError::Config(CoreError::InconsistentMetadata {
             detail: format!(
                 "Expected exactly one sink step but found {}: {:?}",
                 sink_candidates.len(),
@@ -145,13 +145,13 @@ pub(crate) fn build_steps_json(
 
     let sink_key = format!("step-{}", sink_step);
     let sink_exe = job.executables.get(&sink_key).ok_or_else(|| {
-        ClientError::Config(ConfigError::MissingExecutable {
+        ClientError::Config(CoreError::MissingExecutable {
             job_id: sink_key.clone(),
             executable: "step".to_string(),
         })
     })?;
     let last_step_outputs_json = serde_json::to_string(&sink_exe.outputs).map_err(|e| {
-        ClientError::Config(ConfigError::SerializationError(format!(
+        ClientError::Config(CoreError::SerializationError(format!(
             "Failed to serialize sink step outputs: {}",
             e
         )))
@@ -162,7 +162,7 @@ pub(crate) fn build_steps_json(
         "sink_step": sink_step
     });
     let steps_json = serde_json::to_string(&steps_metadata).map_err(|e| {
-        ClientError::Config(ConfigError::SerializationError(format!(
+        ClientError::Config(CoreError::SerializationError(format!(
             "Failed to serialize steps metadata: {}",
             e
         )))
@@ -320,13 +320,13 @@ fn build_sg_common_args(
 ) -> std::result::Result<Vec<String>, ClientError> {
     let artifacts_base = target.artifacts_base_path();
     let scatter_exe = job.executables.get("scatter").ok_or_else(|| {
-        ClientError::Config(ConfigError::MissingExecutable {
+        ClientError::Config(CoreError::MissingExecutable {
             job_id: job_id.to_string(),
             executable: "scatter".to_string(),
         })
     })?;
     let gather_exe = job.executables.get("gather").ok_or_else(|| {
-        ClientError::Config(ConfigError::MissingExecutable {
+        ClientError::Config(CoreError::MissingExecutable {
             job_id: job_id.to_string(),
             executable: "gather".to_string(),
         })
@@ -402,7 +402,7 @@ fn build_simple_job_args(
     verbose: repx_core::logging::Verbosity,
 ) -> std::result::Result<Vec<String>, ClientError> {
     let main_exe = job.executables.get("main").ok_or_else(|| {
-        ClientError::Config(ConfigError::MissingExecutable {
+        ClientError::Config(CoreError::MissingExecutable {
             job_id: job_id.to_string(),
             executable: "main".to_string(),
         })
@@ -517,13 +517,13 @@ fn expand_scatter_gather<'a>(
     let job_root = base_path.join(dirs::OUTPUTS).join(job_id.as_str());
     let work_items_path = job_root.join("scatter").join("out").join("work_items.json");
     let work_items_str = target.read_remote_file(&work_items_path).map_err(|e| {
-        ClientError::Config(ConfigError::CommandFailed(format!(
+        ClientError::Config(CoreError::CommandFailed(format!(
             "Failed to read work_items.json after scatter for '{}': {}",
             job_id, e
         )))
     })?;
     let work_items: Vec<Value> = serde_json::from_str(&work_items_str).map_err(|e| {
-        ClientError::Config(ConfigError::SerializationError(format!(
+        ClientError::Config(CoreError::SerializationError(format!(
             "Failed to parse work_items.json for '{}': {}",
             job_id, e
         )))
@@ -594,7 +594,7 @@ fn expand_scatter_gather<'a>(
     let sink_step = sinks
         .first()
         .ok_or_else(|| {
-            ClientError::Config(ConfigError::InconsistentMetadata {
+            ClientError::Config(CoreError::InconsistentMetadata {
                 detail: "No sink step found in scatter-gather step DAG".to_string(),
             })
         })?
@@ -750,7 +750,7 @@ pub fn submit_local_batch_run(
             .get("main")
             .or_else(|| job.executables.get("scatter"))
             .ok_or_else(|| {
-                ClientError::Config(ConfigError::MissingExecutable {
+                ClientError::Config(CoreError::MissingExecutable {
                     job_id: job_id.to_string(),
                     executable: "main or scatter".to_string(),
                 })
@@ -868,7 +868,7 @@ pub fn submit_local_batch_run(
 
             match handle.join() {
                 Ok(output_res) => {
-                    let output = output_res.map_err(|e| ClientError::Config(ConfigError::Io(e)))?;
+                    let output = output_res.map_err(|e| ClientError::Config(CoreError::Io(e)))?;
                     let phase = unit_id.phase();
 
                     if !output.status.success() {
@@ -932,7 +932,7 @@ pub fn submit_local_batch_run(
                                 }
                             }
                         } else {
-                            return Err(ClientError::Config(ConfigError::CommandFailed(format!(
+                            return Err(ClientError::Config(CoreError::CommandFailed(format!(
                                 "Local run failed: {}",
                                 stderr
                             ))));
@@ -1012,7 +1012,7 @@ pub fn submit_local_batch_run(
                             });
                         }
                     } else {
-                        return Err(ClientError::Config(ConfigError::CommandFailed(format!(
+                        return Err(ClientError::Config(CoreError::CommandFailed(format!(
                             "Process panicked: {:?}",
                             e
                         ))));
@@ -1071,7 +1071,7 @@ pub fn submit_local_batch_run(
                 if !failed_units.is_empty() {
                     break;
                 }
-                return Err(ClientError::Config(ConfigError::CycleDetected {
+                return Err(ClientError::Config(CoreError::CycleDetected {
                     context: "dependency graph or missing dependency".to_string(),
                 }));
             }
@@ -1128,7 +1128,7 @@ pub fn submit_local_batch_run(
         for (uid, stderr) in &failed_units {
             error_msg.push_str(&format!("\n=== {} ===\n{}\n", uid, stderr));
         }
-        return Err(ClientError::Config(ConfigError::CommandFailed(error_msg)));
+        return Err(ClientError::Config(CoreError::CommandFailed(error_msg)));
     }
 
     Ok(format!(

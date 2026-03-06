@@ -1,15 +1,15 @@
-use crate::errors::ConfigError;
+use crate::errors::CoreError;
 use std::path::{Component, Path, PathBuf};
 
-pub fn sanitize_relative_path(untrusted: &str) -> Result<PathBuf, ConfigError> {
+pub fn sanitize_relative_path(untrusted: &str) -> Result<PathBuf, CoreError> {
     if untrusted.is_empty() {
-        return Err(ConfigError::PathTraversal {
+        return Err(CoreError::PathTraversal {
             path: "(empty)".to_string(),
         });
     }
 
     if untrusted.contains('\0') {
-        return Err(ConfigError::PathTraversal {
+        return Err(CoreError::PathTraversal {
             path: untrusted.to_string(),
         });
     }
@@ -21,7 +21,7 @@ pub fn sanitize_relative_path(untrusted: &str) -> Result<PathBuf, ConfigError> {
             Component::Normal(_) => {}
             Component::CurDir => {}
             Component::ParentDir | Component::RootDir | Component::Prefix(_) => {
-                return Err(ConfigError::PathTraversal {
+                return Err(CoreError::PathTraversal {
                     path: untrusted.to_string(),
                 });
             }
@@ -31,7 +31,7 @@ pub fn sanitize_relative_path(untrusted: &str) -> Result<PathBuf, ConfigError> {
     Ok(path.to_path_buf())
 }
 
-pub fn safe_join(base: &Path, untrusted: &str) -> Result<PathBuf, ConfigError> {
+pub fn safe_join(base: &Path, untrusted: &str) -> Result<PathBuf, CoreError> {
     let clean = sanitize_relative_path(untrusted)?;
     Ok(base.join(clean))
 }
