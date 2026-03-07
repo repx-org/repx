@@ -70,12 +70,18 @@ def generate_logic_manifest(
         json.dump(final_json, f, indent=2)
 
 
+def generate_parameters_json(job: JobView, output_json_path: Path) -> None:
+    """Generates the parameters.json for a given job."""
+    with open(output_json_path, "w") as f:
+        json.dump(job.params, f, indent=2)
+
+
 def execute_job(
     job: JobView,
     lab_path: Path,
     job_cache_dir: Path,
 ) -> None:
-    """Executes a single job using the simple (out_dir, inputs.json) contract."""
+    """Executes a single job using the (out_dir, inputs.json, parameters.json) contract."""
     if job.stage_type != "simple":
         logger.warning(f"SKIPPING Job: {job.id} (type: {job.stage_type})")
         (job_cache_dir / job.id / "repx").mkdir(parents=True, exist_ok=True)
@@ -88,10 +94,12 @@ def execute_job(
     job_out_dir = job_cache_dir / job.id / "out"
     job_repx_dir = job_cache_dir / job.id / "repx"
     job_logic_manifest_path = job_repx_dir / "logic-manifest.json"
+    job_parameters_path = job_repx_dir / "parameters.json"
     job_out_dir.mkdir(parents=True, exist_ok=True)
     job_repx_dir.mkdir(exist_ok=True)
 
     generate_logic_manifest(job, job_cache_dir, job_logic_manifest_path)
+    generate_parameters_json(job, job_parameters_path)
 
     executable_rel_path = job.executable_path
     if not executable_rel_path:
@@ -109,6 +117,7 @@ def execute_job(
         str(job_executable),
         str(job_out_dir),
         str(job_logic_manifest_path),
+        str(job_parameters_path),
     ]
 
     logger.debug(f"Command: {' '.join(command)}")

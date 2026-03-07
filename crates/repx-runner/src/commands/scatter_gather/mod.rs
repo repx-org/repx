@@ -87,6 +87,7 @@ pub(crate) struct ScatterGatherOrchestrator {
     pub(crate) scatter_out_dir: PathBuf,
     pub(crate) scatter_repx_dir: PathBuf,
     pub(crate) inputs_json_path: PathBuf,
+    pub(crate) parameters_json_path: PathBuf,
     pub(crate) runtime: Runtime,
     pub(crate) job_package_path: PathBuf,
     pub(crate) static_inputs: Value,
@@ -105,6 +106,7 @@ impl ScatterGatherOrchestrator {
         let scatter_out_dir = scatter_root.join(dirs::OUT);
         let scatter_repx_dir = scatter_root.join(dirs::REPX);
         let inputs_json_path = repx_dir.join("inputs.json");
+        let parameters_json_path = repx_dir.join("parameters.json");
 
         let runtime = super::parse_runtime(args.runtime, args.image_tag.clone())?;
         let host_tools_root = args.base_path.join("artifacts").join("host-tools");
@@ -119,6 +121,7 @@ impl ScatterGatherOrchestrator {
             scatter_out_dir,
             scatter_repx_dir,
             inputs_json_path,
+            parameters_json_path,
             runtime,
             job_package_path: args.job_package_path.clone(),
             static_inputs: Value::Object(Default::default()),
@@ -174,6 +177,7 @@ impl ScatterGatherOrchestrator {
         let args = vec![
             self.scatter_out_dir.to_string_lossy().to_string(),
             self.inputs_json_path.to_string_lossy().to_string(),
+            self.parameters_json_path.to_string_lossy().to_string(),
         ];
         let cancel = CancellationToken::new();
         executor
@@ -238,6 +242,7 @@ impl ScatterGatherOrchestrator {
         let args = vec![
             self.user_out_dir.to_string_lossy().to_string(),
             gather_inputs_json_path.to_string_lossy().to_string(),
+            self.parameters_json_path.to_string_lossy().to_string(),
         ];
 
         let cancel = CancellationToken::new();
@@ -403,6 +408,7 @@ async fn handle_phase_step(
     let exec_args = vec![
         step_out.to_string_lossy().to_string(),
         step_inputs_path.to_string_lossy().to_string(),
+        orch.parameters_json_path.to_string_lossy().to_string(),
     ];
 
     let cancel = CancellationToken::new();

@@ -185,6 +185,7 @@ pub(crate) async fn submit_slurm_branches(
             let exe_args = vec![
                 step_out.to_string_lossy().to_string(),
                 inputs_path.to_string_lossy().to_string(),
+                orch.parameters_json_path.to_string_lossy().to_string(),
             ];
             let cmd = executor
                 .build_command_for_script(&step_meta.exe_path, &exe_args)

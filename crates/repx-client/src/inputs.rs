@@ -7,6 +7,35 @@ use repx_core::{
 use std::path::Path;
 use std::sync::Arc;
 
+pub fn generate_and_write_parameters_json(
+    job: &Job,
+    job_id: &JobId,
+    target: Arc<dyn crate::targets::Target>,
+) -> Result<()> {
+    let json_content = serde_json::to_string_pretty(&job.params)
+        .map_err(|e| ClientError::Config(CoreError::Json(e)))?;
+
+    let parameters_json_path = target
+        .base_path()
+        .join(dirs::OUTPUTS)
+        .join(job_id.as_str())
+        .join(dirs::REPX)
+        .join("parameters.json");
+
+    tracing::info!(
+        "Generating parameters.json for job '{}' on target '{}'",
+        job_id,
+        target.name()
+    );
+    tracing::debug!(
+        "Writing parameters.json to '{}' with content:\n{}",
+        parameters_json_path.display(),
+        json_content
+    );
+
+    target.write_remote_file(&parameters_json_path, &json_content)
+}
+
 pub fn generate_and_write_inputs_json(
     lab: &Lab,
     local_lab_path: &Path,
