@@ -63,7 +63,7 @@ let
           jobDrv:
           let
             jobNameWithHash = builtins.baseNameOf (builtins.unsafeDiscardStringContext (toString jobDrv));
-            inherit (jobDrv) pname;
+            pname = jobDrv.pname or jobDrv.passthru.pname or jobDrv.name;
             stageType = jobDrv.passthru.repxStageType or "simple";
           in
           mkJobMetadata jobDrv stageType pname jobNameWithHash

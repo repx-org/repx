@@ -33,7 +33,7 @@ let
         parameters_json_content=$(cat "$parameters_json")
         while read -r key value; do
             parameters["$key"]="$value"
-        done < <(echo "$parameters_json_content" | ${pkgs.jq}/bin/jq -r 'to_entries[] | .key + " " + (.value | tostring)')
+        done < <(echo "$parameters_json_content" | ${pkgs.jq}/bin/jq -r 'to_entries[] | .key + " " + (if (.value | type) == "array" then (.value | map(tostring) | join(" ")) else (.value | tostring) end)')
     fi
 
     if [[ -n "$parameters_json_content" ]] && [[ "$parameters_json_content" != "{}" ]]; then
