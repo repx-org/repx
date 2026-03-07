@@ -12,6 +12,10 @@ in
 
   params = {
     offset = utils.range 1 2;
+    mode = utils.list [
+      "fast"
+      "slow"
+    ];
     template_dir = utils.dirs ../pkgs/headers;
     config_file = utils.scan {
       src = ../pkgs/configs;
@@ -19,13 +23,10 @@ in
       type = "file";
     };
     config = utils.zip {
-      mode = [
-        "fast"
-        "slow"
-      ];
-      multiplier = [
-        2
-        3
+      multiplier = utils.range 2 3;
+      scale = [
+        10
+        100
       ];
     };
   };
