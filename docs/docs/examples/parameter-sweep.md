@@ -47,6 +47,29 @@ _: {
 }
 ```
 
+:::tip Pairing parameters with `utils.zip`
+If you need certain parameters to vary **in lockstep** instead of as a Cartesian product, use `utils.zip`. For example, to pair each slope with a specific label:
+
+```nix
+{ repx-lib, ... }:
+let inherit (repx-lib) utils; in
+{
+  name = "sweep-run";
+  pipelines = [ ./pipe-sweep.nix ];
+  params = {
+    offset = [ 0 10 ];  # cartesian: crossed with the zip group
+    config = utils.zip {
+      slope = [ 1 2 5 ];
+      label = [ "gentle" "moderate" "steep" ];
+    };
+  };
+}
+# 2 offsets × 3 zipped configs = 6 jobs
+# slope=1 always pairs with label="gentle", etc.
+```
+See [Advanced Patterns](./advanced-patterns.md#zipped-parameters) for more details.
+:::
+
 ## Topology Visualization
 
 <div align="center">

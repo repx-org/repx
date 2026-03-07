@@ -52,6 +52,38 @@ repx-lib.mkRun {
 
 RepX automatically generates the **Cartesian Product** of all parameter lists. In the example above, `3` learning rates * `2` optimizers = `6` distinct jobs will be created.
 
+### Zipped Parameters
+
+Sometimes you need parameters to vary **in lockstep** rather than as a Cartesian product. For example, if each optimizer has a specific learning rate that must stay paired with it, a Cartesian product would produce nonsensical combinations.
+
+Use `utils.zip` to group parameters that must stay paired:
+
+```nix
+{ repx-lib, ... }:
+let
+  inherit (repx-lib) utils;
+in
+{
+  name = "hyperparam-sweep";
+  pipelines = [ ./pipe-train.nix ];
+
+  params = {
+    seed = [ 1 2 3 ];  # normal cartesian dimension
+
+    # optimizer and learning_rate are paired: adam↔0.001, sgd↔0.01.
+    # Without zip: 2×2 = 4 combos including adam×0.01 and sgd×0.001.
+    # With zip: exactly 2 combos.
+    config = utils.zip {
+      "train-model.optimizer"     = [ "adam" "sgd" ];
+      "train-model.learning_rate" = [ 0.001  0.01 ];
+    };
+  };
+}
+# Total: 3 seeds × 2 zipped configs = 6 jobs
+```
+
+Zipped parameters are accessed in stages exactly the same way as any other parameter -- no changes needed in stage definitions. See the [API reference](/reference/nix-functions#utilszip) for details.
+
 ## 3. Dynamic Parameters (Advanced)
 
 Sometimes you need to set parameters based on the output of a previous stage (e.g., hyperparameter optimization). This is handled via **Scatter-Gather** stages where the `scatter` phase generates the dynamic configuration for the per-branch `steps` DAG.

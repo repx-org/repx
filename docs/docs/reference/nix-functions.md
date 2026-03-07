@@ -138,7 +138,7 @@ A **run definition file** (e.g., `runs/simulation.nix`) returns an attribute set
 |-----------|------|----------|---------|-------------|
 | `name` | String | Yes | | Unique name for this run. |
 | `pipelines` | List of Paths | Yes | | Paths to pipeline definition files. |
-| `params` | Attribute Set | Yes | | Parameter lists for sweeping. RepX generates the Cartesian product. |
+| `params` | Attribute Set | Yes | | Parameter lists for sweeping. RepX generates the Cartesian product. Use [`utils.zip`](#utilszip) to pair parameters in lockstep instead. |
 | `containerized` | Boolean | No | `true` | When `false`, skips Docker/OCI image generation entirely. Use for native-only execution. |
 | `paramsDependencies` | List | No | `[]` | Additional Nix derivations that parameter values depend on (beyond auto-detection). |
 
@@ -152,6 +152,17 @@ params = {
   model = [ "A" "B" ];    # 2 values
 };
 # Produces 3 x 2 = 6 parameter combinations
+```
+
+To pair parameters in lockstep instead of crossing them, use [`utils.zip`](#utilszip):
+
+```nix
+params = {
+  seed = [ 1 2 3 ];                                     # cartesian
+  config = utils.zip { model = [ "A" "B" ]; lr = [ 0.1 0.01 ]; };  # zipped
+};
+# Produces 3 seeds x 2 zipped configs = 6 combinations
+# model="A" is always paired with lr=0.1, never with lr=0.01
 ```
 
 The run definition file receives `{ pkgs, repx-lib, ... }` as arguments (via `callPackage`). You can access `repx-lib.utils` for parameter helpers -- see [mkUtils](#repx-libmkutils).
@@ -431,6 +442,40 @@ Scans a source for files only. Shorthand for `scan { type = "file"; ... }`.
 params = {
   config = repx-lib.utils.files ./configs;
 };
+```
+
+### `utils.zip`
+
+Groups multiple parameter lists so they sweep **in lockstep** (element-wise) instead of as a Cartesian product. All lists must have the same length.
+
+```nix
+params = {
+  workload = [ "a" "b" "c" ];  # normal cartesian dimension
+
+  # mode and multiplier are paired: fast↔2, slow↔3.
+  # Without zip: 2×2 = 4 combos (fast×2, fast×3, slow×2, slow×3).
+  # With zip: exactly 2 combos (fast×2, slow×3).
+  config = utils.zip {
+    mode       = [ "fast" "slow" ];
+    multiplier = [ 2      3      ];
+  };
+};
+# Total combinations: 3 workloads × 2 zipped configs = 6
+```
+
+**Arguments:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| (positional) | Attrset of lists | Each attribute is a parameter name and its list of values. All lists must have the same length. |
+
+**Returns:** A RepX zip marker (`{ _repx_zip = true; groups = {...}; length = N; }`). The individual parameter names inside the zip group become normal parameters in each job combination -- stages declare and access them the same way as any other parameter.
+
+**Error handling:** If lists have different lengths, evaluation fails with a message showing each parameter's length:
+
+```
+error: utils.zip: all parameter lists must have the same length,
+       but 'config_label' has 2 items, 'mode' has 3 items, 'vf_enable' has 3 items
 ```
 
 ---

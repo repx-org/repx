@@ -139,4 +139,24 @@ rec {
       inherit src;
       type = "file";
     };
+
+  zip =
+    group:
+    let
+      namedLengths = pkgs.lib.mapAttrs (_: v: builtins.length v) group;
+      lengths = builtins.attrValues namedLengths;
+      uniqueLengths = pkgs.lib.unique lengths;
+      groupLen = builtins.head lengths;
+      detail = pkgs.lib.concatStringsSep ", " (
+        pkgs.lib.mapAttrsToList (name: len: "'${name}' has ${toString len} items") namedLengths
+      );
+    in
+    assert pkgs.lib.assertMsg (
+      builtins.length uniqueLengths == 1
+    ) "utils.zip: all parameter lists must have the same length, but ${detail}";
+    {
+      _repx_zip = true;
+      groups = group;
+      length = groupLen;
+    };
 }

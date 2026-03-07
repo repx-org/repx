@@ -28,9 +28,107 @@ let
   actualKeys = builtins.attrNames args;
   invalidKeys = pkgs.lib.subtractLists validKeys actualKeys;
 
-  allParamsRaw = params // {
-    pipeline = pipelines;
-  };
+  zipGroupEntries = pkgs.lib.filterAttrs (
+    _: val: builtins.isAttrs val && (val._repx_zip or false)
+  ) params;
+
+  normalParams = pkgs.lib.filterAttrs (
+    _: val: !(builtins.isAttrs val && (val._repx_zip or false))
+  ) params;
+
+  normalParamNames = builtins.attrNames normalParams;
+
+  allZipMembers = pkgs.lib.concatLists (
+    pkgs.lib.mapAttrsToList (
+      anchor: zipGroup:
+      map (member: {
+        inherit anchor member;
+      }) (builtins.attrNames zipGroup.groups)
+    ) zipGroupEntries
+  );
+
+  zipVsNormalCollisions = builtins.filter (m: builtins.elem m.member normalParamNames) allZipMembers;
+
+  zipVsZipCollisions =
+    let
+      byName = builtins.groupBy (m: m.member) allZipMembers;
+    in
+    pkgs.lib.filterAttrs (_: entries: builtins.length entries > 1) byName;
+
+  anchorVsMemberCollisions = pkgs.lib.filter (m: m.anchor == m.member) allZipMembers;
+
+  zipCollisionAsserts =
+    if zipVsNormalCollisions != [ ] then
+      let
+        first = builtins.head zipVsNormalCollisions;
+      in
+      throw ''
+        Parameter collision in run "${name}".
+        '${first.member}' is defined both as a normal parameter and inside utils.zip (anchor '${first.anchor}').
+        A parameter name can only appear once -- either as a normal parameter or inside a zip group, not both.
+      ''
+    else if zipVsZipCollisions != { } then
+      let
+        collName = builtins.head (builtins.attrNames zipVsZipCollisions);
+        entries = zipVsZipCollisions.${collName};
+        anchors = pkgs.lib.concatStringsSep ", " (map (e: "'${e.anchor}'") entries);
+      in
+      throw ''
+        Parameter collision in run "${name}".
+        '${collName}' appears in multiple utils.zip groups: ${anchors}.
+        A parameter name can only appear in one zip group.
+      ''
+    else if anchorVsMemberCollisions != [ ] then
+      let
+        first = builtins.head anchorVsMemberCollisions;
+      in
+      throw ''
+        Parameter collision in run "${name}".
+        '${first.anchor}' is used as both the zip anchor key and a member name inside it.
+        Use a different anchor key name for the utils.zip group.
+      ''
+    else
+      true;
+
+  zipGroupToList =
+    zipGroup:
+    let
+      keys = builtins.attrNames zipGroup.groups;
+      len = zipGroup.length;
+      indices = pkgs.lib.range 0 (len - 1);
+    in
+    map (
+      i:
+      builtins.listToAttrs (
+        map (k: {
+          name = k;
+          value = builtins.elemAt zipGroup.groups.${k} i;
+        }) keys
+      )
+    ) indices;
+
+  zipDimensions = pkgs.lib.imap0 (
+    i: _name:
+    let
+      zipGroup = zipGroupEntries.${_name};
+      zippedList = zipGroupToList zipGroup;
+    in
+    {
+      name = "_repx_zip_${toString i}";
+      value = zippedList;
+    }
+  ) (builtins.attrNames zipGroupEntries);
+
+  zipDimensionsAttrs = builtins.listToAttrs zipDimensions;
+  zipSyntheticKeys = map (d: d.name) zipDimensions;
+
+  allParamsRaw =
+    assert zipCollisionAsserts;
+    normalParams
+    // zipDimensionsAttrs
+    // {
+      pipeline = pipelines;
+    };
 
   processedParams = pkgs.lib.mapAttrs (
     _: val:
@@ -95,8 +193,9 @@ let
       ''
     else
       let
+        nonZipParams = pkgs.lib.filterAttrs (n: _: !(builtins.elem n zipSyntheticKeys)) allParams;
         paramsWithNulls = pkgs.lib.filter (param: builtins.any (elem: elem == null) param.value) (
-          pkgs.lib.mapAttrsToList (name: value: { inherit name value; }) allParams
+          pkgs.lib.mapAttrsToList (name: value: { inherit name value; }) nonZipParams
         );
       in
       if paramsWithNulls != [ ] then
@@ -110,7 +209,16 @@ let
           Null values in parameter lists are not allowed. Please remove them or replace with valid values.
         ''
       else
-        pkgs.lib.cartesianProduct allParams;
+        let
+          rawCombinations = pkgs.lib.cartesianProduct allParams;
+        in
+        map (
+          combo:
+          let
+            zipAttrs = pkgs.lib.foldl' (acc: key: acc // (combo.${key} or { })) { } zipSyntheticKeys;
+          in
+          (pkgs.lib.removeAttrs combo zipSyntheticKeys) // zipAttrs
+        ) rawCombinations;
 
   repxForDiscovery = repx-lib.mkPipelineHelpers {
     inherit pkgs repx-lib interRunDepTypes;
