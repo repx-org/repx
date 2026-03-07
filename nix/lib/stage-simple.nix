@@ -43,46 +43,32 @@ let
   inherit (depMeta) dependencyManifestJson dependencyHash parametersJson;
 
 in
-pkgs.stdenv.mkDerivation rec {
-  inherit pname version;
-  dontUnpack = true;
-
-  phases = [ "installPhase" ];
-
-  passthru = (stageDef.passthru or { }) // {
-    inherit resolvedParameters;
-    repxStageType = "simple";
-    executables = {
-      main = {
-        inputs = stageDef.inputMappings or [ ];
-        outputs = outputsDef;
+pkgs.runCommand "${pname}-${version}"
+  {
+    inherit parametersJson dependencyManifestJson dependencyHash;
+    passAsFile = [
+      "parametersJson"
+      "dependencyManifestJson"
+    ];
+    passthru = (stageDef.passthru or { }) // {
+      inherit pname resolvedParameters;
+      repxStageType = "simple";
+      executables = {
+        main = {
+          inputs = stageDef.inputMappings or [ ];
+          outputs = outputsDef;
+        };
       };
+      outputMetadata = outputsDef;
+      stageInputs = stageDef.stageInputs or { };
+      inherit scriptDrv;
+      resources = stageDef.resources or null;
     };
-    outputMetadata = outputsDef;
-    stageInputs = stageDef.stageInputs or { };
-    inherit scriptDrv;
-    resources = stageDef.resources or null;
-  };
-
-  inherit parametersJson dependencyManifestJson dependencyHash;
-  passAsFile = [
-    "parametersJson"
-    "dependencyManifestJson"
-  ];
-
-  nativeBuildInputs = [ scriptDrv ];
-
-  installPhase = ''
-    runHook preInstall
+  }
+  ''
     mkdir -p $out/bin
-
     cp ${scriptDrv}/bin/${pname} $out/bin/${pname}
     chmod +x $out/bin/${pname}
-
     cp "$parametersJsonPath" $out/${pname}-parameters.json
-
     cp "$dependencyManifestJsonPath" $out/nix-input-dependencies.json
-
-    runHook postInstall
-  '';
-}
+  ''

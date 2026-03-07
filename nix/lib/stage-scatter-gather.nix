@@ -343,8 +343,6 @@ else
     };
     inherit (depMeta) dependencyManifestJson dependencyHash parametersJson;
 
-    stepDrvsList = builtins.attrValues stepDrvs;
-
   in
   assert
     rootStepsWithWorkerItem != [ ]
@@ -354,52 +352,34 @@ else
       to receive the work item from the scatter phase.
       Root steps: ${builtins.toJSON rootStepNames}
     '';
-  pkgs.stdenv.mkDerivation rec {
-    inherit version;
-    pname = groupPname;
-
-    dontUnpack = true;
-
-    nativeBuildInputs = [
-      scatterDrv
-    ]
-    ++ stepDrvsList
-    ++ [
-      gatherDrv
-    ];
-
-    passthru = {
-      repxStageType = "scatter-gather";
-      inherit resolvedParameters executables;
-      outputMetadata = gatherDef.outputs or { };
-      inherit scatterDrv gatherDrv stepDrvs;
-      resources = stageDef.resources or null;
-    };
-
-    inherit parametersJson dependencyManifestJson dependencyHash;
-    passAsFile = [
-      "parametersJson"
-      "dependencyManifestJson"
-    ];
-
-    installPhase =
-      let
-        stepCopyCommands = pkgs.lib.concatStrings (
-          pkgs.lib.mapAttrsToList (
-            name: drv: "cp ${drv}/bin/* $out/bin/${groupPname}-step-${name}\n"
-          ) stepDrvs
-        );
-      in
-      ''
-        runHook preInstall
-        mkdir -p $out/bin
-        cp ${scatterDrv}/bin/* $out/bin/${groupPname}-scatter
-        ${stepCopyCommands}cp ${gatherDrv}/bin/* $out/bin/${groupPname}-gather
-        chmod +x $out/bin/*
-
-        cp "$parametersJsonPath" $out/${pname}-parameters.json
-        cp "$dependencyManifestJsonPath" $out/nix-input-dependencies.json
-
-        runHook postInstall
-      '';
-  }
+  let
+    stepCopyCommands = pkgs.lib.concatStrings (
+      pkgs.lib.mapAttrsToList (
+        name: drv: "cp ${drv}/bin/* $out/bin/${groupPname}-step-${name}\n"
+      ) stepDrvs
+    );
+  in
+  pkgs.runCommand "${groupPname}-${version}"
+    {
+      inherit parametersJson dependencyManifestJson dependencyHash;
+      passAsFile = [
+        "parametersJson"
+        "dependencyManifestJson"
+      ];
+      passthru = {
+        pname = groupPname;
+        repxStageType = "scatter-gather";
+        inherit resolvedParameters executables;
+        outputMetadata = gatherDef.outputs or { };
+        inherit scatterDrv gatherDrv stepDrvs;
+        resources = stageDef.resources or null;
+      };
+    }
+    ''
+      mkdir -p $out/bin
+      cp ${scatterDrv}/bin/* $out/bin/${groupPname}-scatter
+      ${stepCopyCommands}cp ${gatherDrv}/bin/* $out/bin/${groupPname}-gather
+      chmod +x $out/bin/*
+      cp "$parametersJsonPath" $out/${groupPname}-parameters.json
+      cp "$dependencyManifestJsonPath" $out/nix-input-dependencies.json
+    ''
