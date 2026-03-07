@@ -17,7 +17,7 @@ let
     { pkgs }:
     {
       pname = "bad-sig-2";
-      outputs = { params, pkgs }: { "out" = "$out/res"; };
+      outputs = { parameters, pkgs }: { "out" = "$out/res"; };
       run = { ... }: "touch $out/res";
     }
   '';
@@ -38,8 +38,8 @@ let
   result3 = tryCall badSig3;
 
 in
-pkgs.runCommand "check-dynamic-params-validation" { } ''
-  echo "Testing Dynamic Params Validation Logic..."
+pkgs.runCommand "check-dynamic-parameters-validation" { } ''
+  echo "Testing Dynamic Parameters Validation Logic..."
 
   check_failure() {
     name="$1"
@@ -53,7 +53,7 @@ pkgs.runCommand "check-dynamic-params-validation" { } ''
   }
 
   check_failure "Case 1 ({ pkgs })" "${toString result1.success}"
-  check_failure "Case 2 ({ params, pkgs })" "${toString result2.success}"
+  check_failure "Case 2 ({ parameters, pkgs })" "${toString result2.success}"
   check_failure "Case 3 ({ })" "${toString result3.success}"
 
   touch $out

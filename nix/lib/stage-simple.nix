@@ -3,38 +3,28 @@ stageDef:
 let
   mkStageScript = import ./internal/mk-stage-script.nix { inherit pkgs; };
   common = import ./internal/common.nix;
-  utils = import ./utils.nix { inherit pkgs; };
-  inherit (utils) sanitize;
 
-  paramsDef = stageDef.paramInputs or { };
+  resolvedParameters = stageDef.resolvedParameters or { };
   dependencyDerivations = stageDef.dependencyDerivations or [ ];
   runDependencies = stageDef.runDependencies or [ ];
 
-  resolveWithParams = common.mkResolveWithParams paramsDef (stageDef.pname or "unknown");
+  resolveWithParameters = common.mkResolveWithParameters resolvedParameters (
+    stageDef.pname or "unknown"
+  );
 
-  pname = resolveWithParams "pname" (stageDef.pname or (throw "Stage must have a pname"));
+  pname = resolveWithParameters "pname" (stageDef.pname or (throw "Stage must have a pname"));
   version = stageDef.version or "1.1";
-  inputsDef = resolveWithParams "inputs" (stageDef.inputs or { });
-  outputsDef = resolveWithParams "outputs" (stageDef.outputs or { });
+  inputsDef = resolveWithParameters "inputs" (stageDef.inputs or { });
+  outputsDef = resolveWithParameters "outputs" (stageDef.outputs or { });
 
   bashInputs = pkgs.lib.mapAttrs (name: _: "\${inputs[\"${name}\"]}") inputsDef;
+  bashParameters = pkgs.lib.mapAttrs (name: _: "\${parameters[\"${name}\"]}") resolvedParameters;
   bashOutputs = outputsDef;
-
-  escapeParamValue =
-    value:
-    if value == null then
-      ""
-    else if builtins.isList value then
-      builtins.concatStringsSep " " (map (v: pkgs.lib.escapeShellArg (sanitize v)) value)
-    else
-      pkgs.lib.escapeShellArg (sanitize value);
-
-  bashParams = pkgs.lib.mapAttrs (_: escapeParamValue) paramsDef;
 
   userScript = stageDef.run {
     inputs = bashInputs;
     outputs = bashOutputs;
-    params = bashParams;
+    parameters = bashParameters;
     inherit pkgs;
   };
 
@@ -45,14 +35,12 @@ let
       userScript
       runDependencies
       ;
-    paramInputs = paramsDef;
   };
 
   depMeta = common.mkDependencyMeta {
-    inherit dependencyDerivations;
-    paramInputs = paramsDef;
+    inherit dependencyDerivations resolvedParameters;
   };
-  inherit (depMeta) dependencyManifestJson dependencyHash paramsJson;
+  inherit (depMeta) dependencyManifestJson dependencyHash parametersJson;
 
 in
 pkgs.stdenv.mkDerivation rec {
@@ -62,7 +50,7 @@ pkgs.stdenv.mkDerivation rec {
   phases = [ "installPhase" ];
 
   passthru = (stageDef.passthru or { }) // {
-    paramInputs = paramsDef;
+    inherit resolvedParameters;
     repxStageType = "simple";
     executables = {
       main = {
@@ -76,9 +64,9 @@ pkgs.stdenv.mkDerivation rec {
     resources = stageDef.resources or null;
   };
 
-  inherit paramsJson dependencyManifestJson dependencyHash;
+  inherit parametersJson dependencyManifestJson dependencyHash;
   passAsFile = [
-    "paramsJson"
+    "parametersJson"
     "dependencyManifestJson"
   ];
 
@@ -91,7 +79,7 @@ pkgs.stdenv.mkDerivation rec {
     cp ${scriptDrv}/bin/${pname} $out/bin/${pname}
     chmod +x $out/bin/${pname}
 
-    cp ${scriptDrv}/${pname}-params.json $out/${pname}-params.json
+    cp "$parametersJsonPath" $out/${pname}-parameters.json
 
     cp "$dependencyManifestJsonPath" $out/nix-input-dependencies.json
 

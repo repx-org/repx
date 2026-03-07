@@ -42,7 +42,7 @@ let
     name: def: validateSubStage "step '${name}'" subStageKeys def
   ) stepsAttrs;
 
-  paramInputs = stageDef.paramInputs or { };
+  resolvedParameters = stageDef.resolvedParameters or { };
 
   allStepDeps = pkgs.lib.mapAttrs (_: def: def.deps or [ ]) stepsDefs;
 
@@ -119,7 +119,7 @@ else
         (pkgs.lib.removeAttrs subStageDef [ "deps" ])
         // subStageArgs
         // {
-          inherit paramInputs;
+          inherit resolvedParameters;
           dependencyDerivations = [ ];
         }
       );
@@ -339,9 +339,9 @@ else
 
     dependencyDerivations = stageDef.dependencyDerivations or [ ];
     depMeta = common.mkDependencyMeta {
-      inherit dependencyDerivations paramInputs;
+      inherit dependencyDerivations resolvedParameters;
     };
-    inherit (depMeta) dependencyManifestJson dependencyHash paramsJson;
+    inherit (depMeta) dependencyManifestJson dependencyHash parametersJson;
 
     stepDrvsList = builtins.attrValues stepDrvs;
 
@@ -370,15 +370,15 @@ else
 
     passthru = {
       repxStageType = "scatter-gather";
-      inherit paramInputs executables;
+      inherit resolvedParameters executables;
       outputMetadata = gatherDef.outputs or { };
       inherit scatterDrv gatherDrv stepDrvs;
       resources = stageDef.resources or null;
     };
 
-    inherit paramsJson dependencyManifestJson dependencyHash;
+    inherit parametersJson dependencyManifestJson dependencyHash;
     passAsFile = [
-      "paramsJson"
+      "parametersJson"
       "dependencyManifestJson"
     ];
 
@@ -397,7 +397,7 @@ else
         ${stepCopyCommands}cp ${gatherDrv}/bin/* $out/bin/${groupPname}-gather
         chmod +x $out/bin/*
 
-        cp "$paramsJsonPath" $out/${pname}-params.json
+        cp "$parametersJsonPath" $out/${pname}-parameters.json
         cp "$dependencyManifestJsonPath" $out/nix-input-dependencies.json
 
         runHook postInstall

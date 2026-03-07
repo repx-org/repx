@@ -5,5 +5,5 @@ _: {
     ./pipe-analysis.nix
   ];
 
-  params = { };
+  parameters = { };
 }

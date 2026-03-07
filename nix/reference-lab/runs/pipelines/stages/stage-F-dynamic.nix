@@ -1,29 +1,29 @@
 _: {
-  pname = { params }: "stage-F-dynamic-${params.mode}";
+  pname = { parameters }: "stage-F-dynamic-${parameters.mode}";
 
-  params = {
+  parameters = {
     mode = "default";
     multiplier = 1;
   };
 
   resources =
-    { params }:
+    { parameters }:
     {
-      mem = if params.mode == "slow" then "1G" else "512M";
-      cpus = if params.multiplier > 5 then 4 else 1;
-      time = if params.mode == "slow" then "01:00:00" else "00:10:00";
+      mem = if parameters.mode == "slow" then "1G" else "512M";
+      cpus = if parameters.multiplier > 5 then 4 else 1;
+      time = if parameters.mode == "slow" then "01:00:00" else "00:10:00";
     };
 
   inputs =
-    { params }:
+    { parameters }:
     {
-      "source_data" = if params.mode != null then "" else "";
+      "source_data" = if parameters.mode != null then "" else "";
     };
 
   outputs =
-    { params }:
+    { parameters }:
     {
-      result = "$out/result-${params.mode}.txt";
+      result = "$out/result-${parameters.mode}.txt";
       summary = "$out/summary.txt";
     };
 
@@ -31,22 +31,23 @@ _: {
     {
       inputs,
       outputs,
-      params,
+      parameters,
       ...
     }:
     ''
-      echo "Dynamic stage running in mode: ${params.mode}"
-      echo "Multiplier: ${params.multiplier}"
+      echo "Dynamic stage running in mode: ${parameters.mode}"
+      echo "Multiplier: ${parameters.multiplier}"
 
       input_file="${inputs.source_data}"
+      multiplier="${parameters.multiplier}"
       if [[ -f "$input_file" ]]; then
         value=$(cat "$input_file" | head -1)
-        result=$((value * ${params.multiplier}))
+        result=$((value * multiplier))
         echo "$result" > "${outputs.result}"
       else
         echo "0" > "${outputs.result}"
       fi
 
-      echo "Processed with mode=${params.mode}, multiplier=${params.multiplier}" > "${outputs.summary}"
+      echo "Processed with mode=${parameters.mode}, multiplier=${parameters.multiplier}" > "${outputs.summary}"
     '';
 }

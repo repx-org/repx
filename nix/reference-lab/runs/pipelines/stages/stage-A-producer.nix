@@ -1,6 +1,6 @@
 _: {
   pname = "stage-A-producer";
-  params = {
+  parameters = {
     offset = 0;
     template_dir = "";
   };
@@ -16,12 +16,13 @@ _: {
   };
 
   run =
-    { outputs, params, ... }:
+    { outputs, parameters, ... }:
     ''
-      echo "Stage A: Offset ${toString params.offset}, Template ${params.template_dir}"
+      echo "Stage A: Offset ${parameters.offset}, Template ${parameters.template_dir}"
 
+      offset="${parameters.offset}"
       for i in {1..5}; do
-        echo $((i + ${toString params.offset}))
+        echo $((i + offset))
       done > "${outputs."data_a"}"
     '';
 }

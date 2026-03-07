@@ -51,7 +51,7 @@ in
     );
 
   mkDependencyMeta =
-    { dependencyDerivations, paramInputs }:
+    { dependencyDerivations, resolvedParameters }:
     let
       depders = dependencyDerivations;
       dependencyPaths = map toString depders;
@@ -60,7 +60,7 @@ in
       inherit dependencyPaths;
       dependencyManifestJson = builtins.toJSON (map builtins.unsafeDiscardStringContext dependencyPaths);
       dependencyHash = builtins.hashString "sha256" (builtins.concatStringsSep ":" dependencyPaths);
-      paramsJson = builtins.toJSON paramInputs;
+      parametersJson = builtins.toJSON resolvedParameters;
     };
 
   inherit validResourceHintKeys;
@@ -87,18 +87,18 @@ in
       else
         resources;
 
-  mkResolveWithParams =
-    params: contextStr: attrName: value:
+  mkResolveWithParameters =
+    parameters: contextStr: attrName: value:
     if builtins.isFunction value then
       let
         argSet = builtins.functionArgs value;
       in
-      if argSet == { params = false; } || argSet == { params = true; } then
-        value { inherit params; }
+      if argSet == { parameters = false; } || argSet == { parameters = true; } then
+        value { inherit parameters; }
       else
         throw ''
           Stage definition error in '${contextStr}':
-          The '${attrName}' attribute is a function, but it must take exactly { params } as argument.
+          The '${attrName}' attribute is a function, but it must take exactly { parameters } as argument.
           Got function with arguments: ${builtins.toJSON (builtins.attrNames argSet)}
         ''
     else

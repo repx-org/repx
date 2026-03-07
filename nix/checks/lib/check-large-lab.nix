@@ -5,7 +5,7 @@ let
 
   simpleStage = _: {
     pname = "simple-stage";
-    params = {
+    parameters = {
       param_a = 0;
       param_b = 0;
       param_c = 0;
@@ -16,9 +16,9 @@ let
     };
 
     run =
-      { outputs, params, ... }:
+      { outputs, parameters, ... }:
       ''
-        echo "${toString params.param_a}-${toString params.param_b}" > "${outputs.result}"
+        echo "${parameters.param_a}-${parameters.param_b}" > "${outputs.result}"
       '';
   };
 
@@ -36,7 +36,7 @@ let
     {
       name = "large-lab-run";
       pipelines = [ pipeline ];
-      params = {
+      parameters = {
         param_a = utils.range 1 20;
         param_b = utils.range 1 20;
       };

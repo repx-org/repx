@@ -3,16 +3,13 @@ let
   mkSimpleStage = import ../../lib/stage-simple.nix { inherit pkgs; };
 
   testStage = mkSimpleStage {
-    pname = "test-params-list-behavior";
+    pname = "test-parameters-types";
     version = "0.0.1";
 
-    paramInputs = {
-      p_list = [
-        "-f"
-        "/path/to file.txt"
-      ];
-      p_single = [ "single" ];
-      p_empty_list = [ ];
+    resolvedParameters = {
+      p_int = 42;
+      p_string = "hello";
+      p_path = "/some/path/to file.txt";
     };
 
     outputs = {
@@ -20,39 +17,39 @@ let
     };
 
     run =
-      { params, outputs, ... }:
+      { parameters, outputs, ... }:
       ''
-        echo "Running List Parameter Expansion Tests..."
+        echo "Running Parameter Type Tests..."
 
-        check_count() {
-          echo "$#"
-        }
-
-        cnt=$(check_count ${params.p_list})
-        if [[ "$cnt" != "2" ]]; then
-          echo "[FAIL] List parameter resulted in $cnt arguments (expected 2)."
+        if [[ "${parameters.p_int}" != "42" ]]; then
+          echo "[FAIL] Integer parameter mismatch. Got: '${parameters.p_int}'"
           exit 1
         fi
 
-        cnt=$(check_count ${params.p_single})
-        if [[ "$cnt" != "1" ]]; then
-          echo "[FAIL] Single element list resulted in $cnt arguments (expected 1)."
+        if [[ "${parameters.p_string}" != "hello" ]]; then
+          echo "[FAIL] String parameter mismatch. Got: '${parameters.p_string}'"
           exit 1
         fi
 
-        cnt=$(check_count ${params.p_empty_list})
-        if [[ "$cnt" != "0" ]]; then
-          echo "[FAIL] Empty list resulted in $cnt arguments (expected 0)."
+        if [[ "${parameters.p_path}" != "/some/path/to file.txt" ]]; then
+          echo "[FAIL] Path parameter mismatch. Got: '${parameters.p_path}'"
           exit 1
         fi
 
         touch "${outputs.out}"
-        echo "[PASS] All list parameter checks passed."
+        echo "[PASS] All parameter type checks passed."
       '';
   };
 in
-pkgs.runCommand "check-params-list" { } ''
+pkgs.runCommand "check-parameters-types" { } ''
   mkdir -p $out
   echo "{}" > inputs.json
-  ${testStage}/bin/test-params-list-behavior "$out" inputs.json
+  echo '${
+    builtins.toJSON {
+      p_int = 42;
+      p_string = "hello";
+      p_path = "/some/path/to file.txt";
+    }
+  }' > parameters.json
+  ${testStage}/bin/test-parameters-types "$out" inputs.json parameters.json
 ''

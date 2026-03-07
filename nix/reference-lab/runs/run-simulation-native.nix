@@ -10,7 +10,7 @@ in
   containerized = false;
   pipelines = [ ./pipelines/pipe-simulation.nix ];
 
-  params = {
+  parameters = {
     offset = utils.range 1 2;
     mode = utils.list [
       "fast"

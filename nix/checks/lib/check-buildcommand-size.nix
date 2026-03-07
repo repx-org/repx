@@ -5,7 +5,7 @@ let
 
   simpleStage = _: {
     pname = "stage";
-    params = {
+    parameters = {
       run_id = 0;
       stage_id = 0;
     };
@@ -15,9 +15,9 @@ let
     };
 
     run =
-      { outputs, params, ... }:
+      { outputs, parameters, ... }:
       ''
-        echo "run=${toString params.run_id} stage=${toString params.stage_id}" > "${outputs.result}"
+        echo "run=${parameters.run_id} stage=${parameters.stage_id}" > "${outputs.result}"
       '';
   };
 
@@ -36,7 +36,7 @@ let
     {
       name = "run-${toString runIndex}";
       pipelines = [ pipeline ];
-      params = {
+      parameters = {
         run_id = [ runIndex ];
         stage_id = utils.range 1 8;
       };

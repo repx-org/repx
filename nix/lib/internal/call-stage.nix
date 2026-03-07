@@ -13,7 +13,7 @@ let
       baseKeys = [
         "pname"
         "version"
-        "params"
+        "parameters"
         "passthru"
         "resources"
         "override"
@@ -41,21 +41,21 @@ let
       contextStr = "(Type: ${if isScatterGather then "scatter-gather" else "simple"})";
     };
 
-  declaredParams = stageDef.params or { };
-  globalParams = args.paramInputs or { };
-  resolvedParams = pkgs.lib.mapAttrs (
-    name: default: if builtins.hasAttr name globalParams then globalParams.${name} else default
-  ) declaredParams;
+  declaredParameters = stageDef.parameters or { };
+  globalParameters = args.resolvedParameters or { };
+  resolvedParameters = pkgs.lib.mapAttrs (
+    name: default: if builtins.hasAttr name globalParameters then globalParameters.${name} else default
+  ) declaredParameters;
 
-  resolveWithParams = common.mkResolveWithParams resolvedParams (toString stageFile);
+  resolveWithParameters = common.mkResolveWithParameters resolvedParameters (toString stageFile);
 
-  resolvedPname = resolveWithParams "pname" (stageDef.pname or (throw "Stage must have a pname"));
-  resolvedInputs = resolveWithParams "inputs" (
+  resolvedPname = resolveWithParameters "pname" (stageDef.pname or (throw "Stage must have a pname"));
+  resolvedInputs = resolveWithParameters "inputs" (
     if stageDef ? "scatter" then stageDef.scatter.inputs or { } else stageDef.inputs or { }
   );
-  resolvedOutputs = resolveWithParams "outputs" (stageDef.outputs or { });
+  resolvedOutputs = resolveWithParameters "outputs" (stageDef.outputs or { });
 
-  resolvedStageResources = resolveWithParams "resources" (stageDef.resources or null);
+  resolvedStageResources = resolveWithParameters "resources" (stageDef.resources or null);
 
   finalResources = common.validateResourceHints {
     inherit pkgs;
@@ -85,7 +85,7 @@ let
           pname = resolvedPname;
           inputs = resolvedInputs;
           outputs = resolvedOutputs;
-          paramInputs = resolvedParams;
+          inherit resolvedParameters;
           dependencyDerivations = common.uniqueDrvs processed.dependencyDerivations;
           stageInputs = processed.finalFlatInputs;
           inherit (processed) inputMappings;

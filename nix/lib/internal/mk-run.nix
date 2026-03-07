@@ -4,8 +4,8 @@
   name,
   containerized ? true,
   pipelines,
-  params,
-  paramsDependencies ? [ ],
+  parameters,
+  parametersDependencies ? [ ],
   dependencyJobs ? { },
   interRunDepTypes ? { },
   ...
@@ -17,8 +17,8 @@ let
     "name"
     "containerized"
     "pipelines"
-    "params"
-    "paramsDependencies"
+    "parameters"
+    "parametersDependencies"
     "dependencyJobs"
     "interRunDepTypes"
     "override"
@@ -30,13 +30,13 @@ let
 
   zipGroupEntries = pkgs.lib.filterAttrs (
     _: val: builtins.isAttrs val && (val._repx_zip or false)
-  ) params;
+  ) parameters;
 
-  normalParams = pkgs.lib.filterAttrs (
+  normalParameters = pkgs.lib.filterAttrs (
     _: val: !(builtins.isAttrs val && (val._repx_zip or false))
-  ) params;
+  ) parameters;
 
-  normalParamNames = builtins.attrNames normalParams;
+  normalParameterNames = builtins.attrNames normalParameters;
 
   allZipMembers = pkgs.lib.concatLists (
     pkgs.lib.mapAttrsToList (
@@ -47,7 +47,9 @@ let
     ) zipGroupEntries
   );
 
-  zipVsNormalCollisions = builtins.filter (m: builtins.elem m.member normalParamNames) allZipMembers;
+  zipVsNormalCollisions = builtins.filter (
+    m: builtins.elem m.member normalParameterNames
+  ) allZipMembers;
 
   zipVsZipCollisions =
     let
@@ -122,15 +124,15 @@ let
   zipDimensionsAttrs = builtins.listToAttrs zipDimensions;
   zipSyntheticKeys = map (d: d.name) zipDimensions;
 
-  allParamsRaw =
+  allParametersRaw =
     assert zipCollisionAsserts;
-    normalParams
+    normalParameters
     // zipDimensionsAttrs
     // {
       pipeline = pipelines;
     };
 
-  processedParams = pkgs.lib.mapAttrs (
+  processedParameters = pkgs.lib.mapAttrs (
     _: val:
     if (builtins.isAttrs val) && (val._repx_param or false) then
       {
@@ -149,14 +151,16 @@ let
             val;
         context = [ ];
       }
-  ) allParamsRaw;
+  ) allParametersRaw;
 
-  allParams = pkgs.lib.mapAttrs (_: p: p.values) processedParams;
-  smartParamContext = pkgs.lib.flatten (pkgs.lib.mapAttrsToList (_: p: p.context) processedParams);
+  allParameters = pkgs.lib.mapAttrs (_: p: p.values) processedParameters;
+  smartParameterContext = pkgs.lib.flatten (
+    pkgs.lib.mapAttrsToList (_: p: p.context) processedParameters
+  );
 
   common = import ./common.nix;
 
-  autoParamsDependencies =
+  autoParametersDependencies =
     let
       extractDeps =
         val:
@@ -169,19 +173,19 @@ let
         else
           [ ];
 
-      flatParams = builtins.attrValues allParams;
+      flatParameters = builtins.attrValues allParameters;
     in
-    common.uniqueDrvs ((pkgs.lib.flatten (map extractDeps flatParams)) ++ smartParamContext);
+    common.uniqueDrvs ((pkgs.lib.flatten (map extractDeps flatParameters)) ++ smartParameterContext);
 
   allCombinations =
     let
-      invalidParams = pkgs.lib.filter (param: !pkgs.lib.isList param.value) (
-        pkgs.lib.mapAttrsToList (name: value: { inherit name value; }) allParams
+      invalidParameters = pkgs.lib.filter (param: !pkgs.lib.isList param.value) (
+        pkgs.lib.mapAttrsToList (name: value: { inherit name value; }) allParameters
       );
     in
-    if invalidParams != [ ] then
+    if invalidParameters != [ ] then
       let
-        paramNames = pkgs.lib.map (p: p.name) invalidParams;
+        paramNames = pkgs.lib.map (p: p.name) invalidParameters;
         formattedNames = pkgs.lib.concatStringsSep ", " (map (n: ''"${n}"'') paramNames);
       in
       throw ''
@@ -193,14 +197,14 @@ let
       ''
     else
       let
-        nonZipParams = pkgs.lib.filterAttrs (n: _: !(builtins.elem n zipSyntheticKeys)) allParams;
-        paramsWithNulls = pkgs.lib.filter (param: builtins.any (elem: elem == null) param.value) (
-          pkgs.lib.mapAttrsToList (name: value: { inherit name value; }) nonZipParams
+        nonZipParameters = pkgs.lib.filterAttrs (n: _: !(builtins.elem n zipSyntheticKeys)) allParameters;
+        parametersWithNulls = pkgs.lib.filter (param: builtins.any (elem: elem == null) param.value) (
+          pkgs.lib.mapAttrsToList (name: value: { inherit name value; }) nonZipParameters
         );
       in
-      if paramsWithNulls != [ ] then
+      if parametersWithNulls != [ ] then
         let
-          nullParamNames = pkgs.lib.map (p: p.name) paramsWithNulls;
+          nullParamNames = pkgs.lib.map (p: p.name) parametersWithNulls;
           formattedNullNames = pkgs.lib.concatStringsSep ", " (map (n: ''"${n}"'') nullParamNames);
         in
         throw ''
@@ -210,7 +214,7 @@ let
         ''
       else
         let
-          rawCombinations = pkgs.lib.cartesianProduct allParams;
+          rawCombinations = pkgs.lib.cartesianProduct allParameters;
         in
         map (
           combo:
@@ -258,7 +262,7 @@ else if allCombinations == [ ] then
   throw ''
     Error in 'mkRun' for run "${name}":
     The resulting parameter sweep is empty.
-    This happens if the 'pipelines' list is empty, or if any parameter in 'params' is an empty list.
+    This happens if the 'pipelines' list is empty, or if any parameter in 'parameters' is an empty list.
     'pkgs.lib.cartesianProduct' produces no combinations if *any* input list is empty.
   ''
 else
@@ -269,7 +273,7 @@ else
       if containerized then
         let
           paramDepsClosure = pkgs.writeTextDir "share/repx/param-dependencies" (
-            builtins.toJSON (paramsDependencies ++ autoParamsDependencies)
+            builtins.toJSON (parametersDependencies ++ autoParametersDependencies)
           );
         in
         pkgs.dockerTools.buildLayeredImage {
@@ -291,12 +295,12 @@ else
       combo:
       let
         pipelinePath = combo.pipeline;
-        paramInputs = pkgs.lib.removeAttrs combo [ "pipeline" ];
+        resolvedParameters = pkgs.lib.removeAttrs combo [ "pipeline" ];
         repxForPipeline = repx-lib.mkPipelineHelpers {
           inherit
             pkgs
             repx-lib
-            paramInputs
+            resolvedParameters
             dependencyJobs
             interRunDepTypes
             ;

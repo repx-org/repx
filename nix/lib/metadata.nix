@@ -34,7 +34,7 @@ let
     {
       name = jobNameWithHash;
       value = removeNulls {
-        params = jobDrv.passthru.paramInputs or { };
+        params = jobDrv.passthru.resolvedParameters or { };
         name = jobDrv.name or null;
         stage_type = stageType;
         executables = addPathToExecutables (jobDrv.passthru.executables or { });
