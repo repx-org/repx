@@ -3,7 +3,7 @@ let
   utils = repx-lib.mkUtils { inherit pkgs; };
 
   mkTestRun =
-    params:
+    parameters:
     repx-lib.mkRun {
       inherit pkgs;
       repx-lib = repx-lib // {
@@ -14,7 +14,7 @@ let
       pipelines = [
         ({ repx }: repx.mkPipe { })
       ];
-      inherit params;
+      inherit parameters;
     };
 
   happyRun = mkTestRun {
@@ -161,7 +161,7 @@ let
   );
 
 in
-pkgs.runCommand "check-zip-params" { } ''
+pkgs.runCommand "check-zip-parameters" { } ''
   echo "Testing utils.zip parameter behavior..."
   fail=0
 
@@ -190,7 +190,7 @@ pkgs.runCommand "check-zip-params" { } ''
   check_eq "zip-only count" "${toString zipOnlyCount}" "3"
   check_eq "no-zip backwards compat" "${toString noZipCount}" "6"
 
-  check_fail "zip member vs normal param" "${toString collisionZipVsNormal.success}"
+  check_fail "zip member vs normal parameter" "${toString collisionZipVsNormal.success}"
   check_fail "zip member vs zip member" "${toString collisionZipVsZip.success}"
   check_fail "anchor key vs member" "${toString collisionAnchorVsMember.success}"
   check_fail "mismatched zip lengths" "${toString mismatchedLengths.success}"

@@ -3,7 +3,7 @@ _: {
 
   pipelines = [ ./pipe-sweep.nix ];
 
-  params = {
+  parameters = {
     slope = [
       1
       2

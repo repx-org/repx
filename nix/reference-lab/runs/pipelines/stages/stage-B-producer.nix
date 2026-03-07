@@ -1,7 +1,7 @@
 _: {
   pname = "stage-B-producer";
 
-  params = {
+  parameters = {
     mode = "default";
     config_file = "";
   };
@@ -17,9 +17,9 @@ _: {
   };
 
   run =
-    { outputs, params, ... }:
+    { outputs, parameters, ... }:
     ''
-      echo "Stage B: Mode ${params.mode}, Config ${params.config_file}"
+      echo "Stage B: Mode ${parameters.mode}, Config ${parameters.config_file}"
 
       printf "6\n7\n8\n9\n10\n" > "${outputs."raw_output"}"
     '';

@@ -71,10 +71,11 @@ Validation of the `repx-lib` Nix functions:
 |-------|-------------|
 | `integration` | Full Lab build validation |
 | `invalidation` | Cache invalidation behavior |
-| `params` | Parameter handling |
-| `params_list` | Parameter list processing |
+| `parameters` | Parameter handling |
+| `parameters_types` | Parameter type handling |
 | `pipeline_logic` | Pipeline DAG construction |
-| `dynamic_params_validation` | Dynamic parameter validation |
+| `dynamic_parameters_validation` | Dynamic parameter validation |
+| `zip_parameters` | Zip parameter sweep behavior |
 | `pass_valid` | Dependency check (valid case) |
 | `pass_complex` | Complex dependency scenarios |
 | `fail_missing` | Missing dependency detection |

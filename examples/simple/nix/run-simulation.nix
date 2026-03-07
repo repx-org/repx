@@ -3,5 +3,5 @@ _: {
   pipelines = [
     ./pipe-sim.nix
   ];
-  params = { };
+  parameters = { };
 }

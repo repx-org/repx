@@ -66,10 +66,10 @@ let
   libChecks = {
     integration = pkgs.callPackage ./checks/lib/check-integration.nix { };
     invalidation = pkgs.callPackage ./checks/lib/check-invalidation.nix { inherit repx-lib; };
-    params = pkgs.callPackage ./checks/lib/check-params.nix { };
-    params_list = pkgs.callPackage ./checks/lib/check-params-list.nix { };
+    parameters = pkgs.callPackage ./checks/lib/check-params.nix { };
+    parameters_types = pkgs.callPackage ./checks/lib/check-params-list.nix { };
     pipeline_logic = pkgs.callPackage ./checks/lib/check-pipeline-logic.nix { inherit repx-lib; };
-    dynamic_params_validation = pkgs.callPackage ./checks/lib/check-dynamic-params-validation.nix {
+    dynamic_parameters_validation = pkgs.callPackage ./checks/lib/check-dynamic-params-validation.nix {
       inherit repx-lib;
     };
     large_lab = pkgs.callPackage ./checks/lib/check-large-lab.nix { };
@@ -78,7 +78,7 @@ let
     resource_hints = pkgs.callPackage ./checks/lib/check-resource-hints.nix {
       inherit repx-lib;
     };
-    zip_params = pkgs.callPackage ./checks/lib/check-zip-params.nix {
+    zip_parameters = pkgs.callPackage ./checks/lib/check-zip-params.nix {
       inherit repx-lib;
     };
   }

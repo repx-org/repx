@@ -2,7 +2,6 @@
 {
   pname,
   version ? "1.1",
-  paramInputs ? { },
   userScript,
   runDependencies ? [ ],
 }:
@@ -17,6 +16,7 @@ let
     set -euxo pipefail
     export out="$1"
     export inputs_json="$2"
+    export parameters_json="$3"
 
     declare -A inputs
     json_content=""
@@ -26,6 +26,20 @@ let
             inputs["$key"]="$value"
         done < <(echo "$json_content" | ${pkgs.jq}/bin/jq -r 'to_entries[] | .key + " " + .value')
     fi
+
+    declare -A parameters
+    parameters_json_content=""
+    if [[ -f "$parameters_json" ]]; then
+        parameters_json_content=$(cat "$parameters_json")
+        while read -r key value; do
+            parameters["$key"]="$value"
+        done < <(echo "$parameters_json_content" | ${pkgs.jq}/bin/jq -r 'to_entries[] | .key + " " + (.value | tostring)')
+    fi
+
+    echo "Parameters (''${#parameters[@]}):" >&2
+    for key in "''${!parameters[@]}"; do
+        echo "  $key = ''${parameters[$key]}" >&2
+    done
 
     if [[ -n "$json_content" ]] && [[ "$json_content" != "{}" ]]; then
       echo "Verifying all stage inputs are ready..." >&2
@@ -71,7 +85,6 @@ let
     ${userScript}
   '';
 
-  paramsJson = builtins.toJSON paramInputs;
   analyzerScript = ./analyze_deps.py;
 
 in
@@ -85,15 +98,11 @@ pkgs.stdenv.mkDerivation {
     "installPhase"
   ];
 
-  inherit paramsJson;
-  passAsFile = [ "paramsJson" ];
-
   installPhase = ''
     runHook preInstall
     mkdir -p $out/bin
     cp ${fullScript} $out/bin/${pname}
     chmod +x $out/bin/${pname}
-    cp "$paramsJsonPath" $out/${pname}-params.json
     runHook postInstall
   '';
 

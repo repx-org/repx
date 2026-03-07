@@ -43,9 +43,9 @@ jobs:
           - integration
           - invalidation
           - pipeline_logic
-          - dynamic_params_validation
-          - params
-          - params_list
+          - dynamic_parameters_validation
+          - parameters
+          - parameters_types
           - e2e-local
           - e2e-remote-local
           - e2e-remote-slurm
@@ -66,7 +66,7 @@ jobs:
           - buildcommand_size
           - stage_env_size
           - resource_hints
-          - zip_params
+          - zip_parameters
           - e2e-bwrap-overlay-fallback
           - e2e-gc-local
           - e2e-gc-remote
