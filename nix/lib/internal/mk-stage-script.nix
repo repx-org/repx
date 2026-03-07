@@ -36,10 +36,14 @@ let
         done < <(echo "$parameters_json_content" | ${pkgs.jq}/bin/jq -r 'to_entries[] | .key + " " + (.value | tostring)')
     fi
 
-    echo "Parameters (''${#parameters[@]}):" >&2
-    for key in "''${!parameters[@]}"; do
-        echo "  $key = ''${parameters[$key]}" >&2
-    done
+    if [[ -n "$parameters_json_content" ]] && [[ "$parameters_json_content" != "{}" ]]; then
+        echo "Parameters (''${#parameters[@]}):" >&2
+        for key in "''${!parameters[@]}"; do
+            echo "  $key = ''${parameters[$key]}" >&2
+        done
+    else
+        echo "Parameters (0):" >&2
+    fi
 
     if [[ -n "$json_content" ]] && [[ "$json_content" != "{}" ]]; then
       echo "Verifying all stage inputs are ready..." >&2
