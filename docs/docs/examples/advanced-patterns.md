@@ -119,6 +119,41 @@ in
 }
 ```
 
+### Zipped Parameters
+
+By default, all parameter lists form a Cartesian product. Use `utils.zip` when parameters must vary **in lockstep** -- each i-th element is paired with the i-th element of every other list in the group.
+
+```nix
+{ repx-lib, ... }:
+let
+  inherit (repx-lib) utils;
+in
+{
+  name = "arch-sweep";
+  pipelines = [ ./pipelines/train.nix ];
+  params = {
+    seed = [ 1 2 3 ];  # cartesian: crossed with everything
+
+    # architecture and learning rate are paired.
+    # resnet↔0.001, transformer↔0.0001 -- never resnet↔0.0001.
+    config = utils.zip {
+      model = [ "resnet"  "transformer" ];
+      lr    = [ 0.001     0.0001        ];
+    };
+  };
+}
+# 3 seeds × 2 zipped configs = 6 total jobs
+```
+
+Stages don't need any changes -- `model` and `lr` appear as normal parameters. Only the sweep logic differs: zip produces element-wise pairs instead of a cross product.
+
+All lists inside a `utils.zip` group must have the same length. If they don't, evaluation fails with a clear error:
+
+```
+error: utils.zip: all parameter lists must have the same length,
+       but 'lr' has 3 items, 'model' has 2 items
+```
+
 ## Run Groups
 
 Groups let you organize runs into named collections without affecting execution. Useful for large experiments with many runs.

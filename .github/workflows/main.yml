@@ -63,6 +63,10 @@ jobs:
           - e2e-mount-paths-docker
           - incremental-sync
           - large_lab
+          - buildcommand_size
+          - stage_env_size
+          - resource_hints
+          - zip_params
           - e2e-bwrap-overlay-fallback
           - e2e-gc-local
           - e2e-gc-remote

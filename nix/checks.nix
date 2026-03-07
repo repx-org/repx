@@ -78,6 +78,9 @@ let
     resource_hints = pkgs.callPackage ./checks/lib/check-resource-hints.nix {
       inherit repx-lib;
     };
+    zip_params = pkgs.callPackage ./checks/lib/check-zip-params.nix {
+      inherit repx-lib;
+    };
   }
   // (import ./checks/lib/check-deps.nix { inherit pkgs; });
 
