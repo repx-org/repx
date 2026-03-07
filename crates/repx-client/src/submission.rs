@@ -147,6 +147,7 @@ pub fn generate_inputs_for_jobs(
             target.clone(),
             exe_name,
         )?;
+        crate::inputs::generate_and_write_parameters_json(job, job_id, target.clone())?;
     }
     Ok(())
 }

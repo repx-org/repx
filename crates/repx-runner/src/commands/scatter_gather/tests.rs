@@ -617,6 +617,7 @@ async fn test_scatter_skipped_on_rerun_if_already_succeeded() {
         scatter_out_dir: scatter_out.clone(),
         scatter_repx_dir: scatter_repx.clone(),
         inputs_json_path: job_root.join(dirs::REPX).join("inputs.json"),
+        parameters_json_path: job_root.join(dirs::REPX).join("parameters.json"),
         runtime: Runtime::Native,
         job_package_path: scripts.clone(),
         static_inputs: Value::Object(Default::default()),

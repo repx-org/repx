@@ -38,6 +38,7 @@ async fn async_handle_execute(args: InternalExecuteArgs) -> Result<(), CliError>
         })?
         .to_path_buf();
     let inputs_json_path = repx_dir.join("inputs.json");
+    let parameters_json_path = repx_dir.join("parameters.json");
 
     let runtime = super::parse_runtime(args.runtime, args.image_tag)?;
     let host_tools_root = args.base_path.join("artifacts").join("host-tools");
@@ -60,6 +61,7 @@ async fn async_handle_execute(args: InternalExecuteArgs) -> Result<(), CliError>
     let exec_args = vec![
         job_root.join("out").to_string_lossy().to_string(),
         inputs_json_path.to_string_lossy().to_string(),
+        parameters_json_path.to_string_lossy().to_string(),
     ];
 
     let cancel = CancellationToken::new();
