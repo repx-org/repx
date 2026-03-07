@@ -202,6 +202,18 @@ local_concurrency = 2
         let job_out_path = self.job_output_path(job_id);
         fs::create_dir_all(job_out_path.join("out")).expect("failed to create job out dir");
         fs::create_dir_all(job_out_path.join("repx")).expect("failed to create job repx dir");
+
+        let params = self
+            .metadata
+            .get("jobs")
+            .and_then(|jobs| jobs.get(job_id))
+            .and_then(|job| job.get("params"))
+            .cloned()
+            .unwrap_or(Value::Object(Default::default()));
+        let params_json =
+            serde_json::to_string_pretty(&params).expect("failed to serialize parameters");
+        fs::write(job_out_path.join("repx/parameters.json"), params_json)
+            .expect("failed to write parameters.json");
     }
 
     pub fn job_id_by_name(&self, name_substring: &str) -> String {
