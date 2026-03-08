@@ -697,7 +697,11 @@ pub fn submit_local_batch_run(
     send: impl Fn(ClientEvent),
 ) -> Result<String> {
     let total_jobs = jobs_in_batch.len();
-    send(ClientEvent::SubmittingJobs { total: total_jobs });
+    let concurrency = options.num_jobs.unwrap_or_else(num_cpus::get);
+    send(ClientEvent::SubmittingJobs {
+        total: total_jobs,
+        concurrency: Some(concurrency),
+    });
     let mut succeeded_work_units: usize = 0;
 
     let all_deps: HashSet<JobId> = jobs_in_batch
@@ -728,7 +732,6 @@ pub fn submit_local_batch_run(
     let mut work_units: HashMap<WorkUnitId, WorkUnit> = HashMap::new();
     let mut units_left: HashSet<WorkUnitId> = HashSet::new();
     let mut completed: HashSet<WorkUnitId> = HashSet::new();
-    let concurrency = options.num_jobs.unwrap_or_else(num_cpus::get);
 
     for (job_id_ref, &job) in &jobs_in_batch {
         let job_id = job_id_ref.clone();

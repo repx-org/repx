@@ -117,16 +117,25 @@ pub fn handle_run(
                 }
                 pb = None;
             }
-            ClientEvent::SubmittingJobs { total } => {
-                println!(
-                    "- Scheduling {} jobs via {}...",
-                    total.to_string().bold(),
-                    if scheduler == SchedulerType::Slurm {
-                        "SLURM"
-                    } else {
-                        "local executor"
-                    }
-                );
+            ClientEvent::SubmittingJobs { total, concurrency } => {
+                let executor = if scheduler == SchedulerType::Slurm {
+                    "SLURM"
+                } else {
+                    "local executor"
+                };
+                match concurrency {
+                    Some(c) => println!(
+                        "- Scheduling {} jobs via {} ({} parallel)...",
+                        total.to_string().bold(),
+                        executor,
+                        c.to_string().bold()
+                    ),
+                    None => println!(
+                        "- Scheduling {} jobs via {}...",
+                        total.to_string().bold(),
+                        executor
+                    ),
+                }
             }
             ClientEvent::JobSubmitted {
                 job_id,

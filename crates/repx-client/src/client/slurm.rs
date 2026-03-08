@@ -284,6 +284,7 @@ pub fn submit_slurm_batch_run(
     send(ClientEvent::ExecutingOrchestrator);
     send(ClientEvent::SubmittingJobs {
         total: jobs_to_submit.len(),
+        concurrency: None,
     });
 
     let submission_dir_on_target = target

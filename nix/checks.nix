@@ -61,6 +61,10 @@ let
     e2e-scatter-gather-cancel = import ./checks/runtime/e2e-scatter-gather-cancel.nix {
       inherit pkgs repx referenceLab;
     };
+    e2e-init = import ./checks/runtime/e2e-init.nix {
+      inherit pkgs repx repx-lib;
+      gitHash = "check";
+    };
   };
 
   libChecks = {

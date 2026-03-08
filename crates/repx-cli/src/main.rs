@@ -3,9 +3,11 @@ use clap_complete::{generate, Shell};
 use colored::Colorize;
 use repx_core::model::SchedulerType;
 use repx_runner::cli::Commands as RunnerCommands;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use which::which;
+
+mod init;
 
 #[derive(Parser)]
 #[command(name = "repx")]
@@ -60,6 +62,9 @@ enum Commands {
     #[command(about = "Debug/Run a job locally with interactive shell")]
     DebugRun(DebugRunArgs),
 
+    #[command(about = "Initialize a new repx experiment project")]
+    Init(InitArgs),
+
     #[command(about = "Generate shell completions")]
     Completions(CompletionsArgs),
 }
@@ -80,6 +85,15 @@ struct DebugRunArgs {
 
     #[arg(short, long, help = "Command to run (defaults to shell)")]
     command: Option<String>,
+}
+
+#[derive(Args)]
+struct InitArgs {
+    #[arg(default_value = ".")]
+    path: PathBuf,
+
+    #[arg(long)]
+    name: Option<String>,
 }
 
 #[derive(Args)]
@@ -224,6 +238,25 @@ fn main() {
                     cmd.arg("--command").arg(c);
                 }
             });
+        }
+        Commands::Init(args) => {
+            let path = &args.path;
+            let name = args.name.unwrap_or_else(|| {
+                if path == Path::new(".") {
+                    std::env::current_dir()
+                        .ok()
+                        .and_then(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()))
+                        .unwrap_or_else(|| "my-experiment".to_string())
+                } else {
+                    path.file_name()
+                        .map(|n| n.to_string_lossy().into_owned())
+                        .unwrap_or_else(|| "my-experiment".to_string())
+                }
+            });
+            if let Err(e) = init::handle_init(path, &name) {
+                eprintln!("{}", format!("[ERROR] {}", e).red());
+                std::process::exit(1);
+            }
         }
         Commands::Completions(args) => {
             let mut cmd = Cli::command();
