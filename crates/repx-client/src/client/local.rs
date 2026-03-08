@@ -189,7 +189,8 @@ struct ResourceTracker {
 
 impl ResourceTracker {
     fn new() -> Self {
-        let sys = System::new();
+        let mut sys = System::new();
+        sys.refresh_memory();
         let total_mem_bytes = sys.total_memory();
         let total_cpus = num_cpus::get();
 
