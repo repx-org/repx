@@ -89,13 +89,27 @@ let
             pipelinesForRun = runDefinition.runs;
             nestedJobs = pkgs.lib.map (pipeline: pkgs.lib.attrValues pipeline) pipelinesForRun;
             allStageResults = pkgs.lib.flatten nestedJobs;
-            allJobDerivations = pkgs.lib.filter pkgs.lib.isDerivation allStageResults;
+            allVirtualJobs = pkgs.lib.filter common.isVirtualJob allStageResults;
           in
-          common.uniqueDrvs allJobDerivations;
+          common.uniqueJobs allVirtualJobs;
       };
 
-      allJobDerivations = common.uniqueDrvs (
+      allVirtualJobs = common.uniqueJobs (
         pkgs.lib.flatten (pkgs.lib.map (run: lib-run-internal.run2Jobs run) runs)
+      );
+
+      allScriptDrvs = common.uniqueDrvs (
+        pkgs.lib.concatMap (
+          job:
+          if job.repxStageType == "scatter-gather" then
+            [
+              job.scatterDrv
+              job.gatherDrv
+            ]
+            ++ (builtins.attrValues job.stepDrvs)
+          else
+            [ job.scriptDrv ]
+        ) allVirtualJobs
       );
 
       imageDerivations = common.uniqueDrvs (
@@ -158,6 +172,42 @@ let
       };
       rootMetadataFilename = builtins.baseNameOf (toString rootMetadata);
 
+      jobManifestJson = builtins.toJSON (
+        map (
+          job:
+          if job.repxStageType == "scatter-gather" then
+            {
+              inherit (job)
+                jobDirName
+                pname
+                parametersJson
+                dependencyManifestJson
+                ;
+              type = "scatter-gather";
+              scripts = {
+                scatter = toString job.scatterDrv;
+                gather = toString job.gatherDrv;
+              }
+              // (pkgs.lib.mapAttrs' (
+                name: drv: pkgs.lib.nameValuePair "step-${name}" (toString drv)
+              ) job.stepDrvs);
+            }
+          else
+            {
+              inherit (job)
+                jobDirName
+                pname
+                parametersJson
+                dependencyManifestJson
+                ;
+              type = "simple";
+              scriptDrv = toString job.scriptDrv;
+            }
+        ) allVirtualJobs
+      );
+
+      jobManifestFile = pkgs.writeText "job-manifest.json" jobManifestJson;
+
       labCoreBuildScript = ''
         mkdir -p $out/store $out/revision $out/jobs $out/host-tools/${hostToolsHash}/bin
 
@@ -195,15 +245,31 @@ let
             ) toolSpec.bins
         ) hostToolBinaries}
 
-        ${pkgs.lib.concatMapStringsSep "\n" (
-          jobDrv:
-          let
-            jobBasename = builtins.baseNameOf (toString jobDrv);
-          in
-          ''
-            cp -rL ${jobDrv} $out/jobs/${jobBasename}
-          ''
-        ) allJobDerivations}
+        echo "Assembling job directories from manifest..."
+        ${pkgs.jq}/bin/jq -c '.[]' ${jobManifestFile} | while IFS= read -r entry; do
+          jobDir=$(echo "$entry" | ${pkgs.jq}/bin/jq -r '.jobDirName')
+          jobType=$(echo "$entry" | ${pkgs.jq}/bin/jq -r '.type')
+          pname=$(echo "$entry" | ${pkgs.jq}/bin/jq -r '.pname')
+          paramsJson=$(echo "$entry" | ${pkgs.jq}/bin/jq -r '.parametersJson')
+          depManifest=$(echo "$entry" | ${pkgs.jq}/bin/jq -r '.dependencyManifestJson')
+
+          mkdir -p "$out/jobs/$jobDir/bin"
+
+          if [ "$jobType" = "simple" ]; then
+            scriptPath=$(echo "$entry" | ${pkgs.jq}/bin/jq -r '.scriptDrv')
+            cp "$scriptPath/bin/$pname" "$out/jobs/$jobDir/bin/$pname"
+            chmod +x "$out/jobs/$jobDir/bin/$pname"
+          elif [ "$jobType" = "scatter-gather" ]; then
+            echo "$entry" | ${pkgs.jq}/bin/jq -r '.scripts | to_entries[] | "\(.key)\t\(.value)"' | while IFS=$'\t' read -r scriptName scriptPath; do
+              cp "$scriptPath/bin/"* "$out/jobs/$jobDir/bin/$pname-$scriptName"
+              chmod +x "$out/jobs/$jobDir/bin/$pname-$scriptName"
+            done
+          fi
+
+          echo "$paramsJson" > "$out/jobs/$jobDir/$pname-parameters.json"
+          echo "$depManifest" > "$out/jobs/$jobDir/nix-input-dependencies.json"
+        done
+        echo "Assembled $(${pkgs.jq}/bin/jq 'length' ${jobManifestFile}) job directories."
 
         cp ${rootMetadata} "$out/revision/${rootMetadataFilename}"
 
@@ -265,7 +331,8 @@ let
 
         nativeBuildInputs = [
           pkgs.jq
-        ];
+        ]
+        ++ allScriptDrvs;
 
         inherit labCoreBuildScript;
         passAsFile = [ "labCoreBuildScript" ];
@@ -285,7 +352,7 @@ let
 
       allReadmeParts = (import ./readme.nix) {
         inherit pkgs;
-        jobDerivations = allJobDerivations;
+        virtualJobs = allVirtualJobs;
       };
 
     in
@@ -294,7 +361,7 @@ let
         labCore
         labManifest
         allReadmeParts
-        allJobDerivations
+        allVirtualJobs
         ;
     };
   runs2Lab =
@@ -324,7 +391,7 @@ let
         ];
 
         passthru = {
-          inherit (artifacts) allJobDerivations;
+          inherit (artifacts) allVirtualJobs;
         };
 
         buildCommand = ''

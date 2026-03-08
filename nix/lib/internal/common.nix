@@ -39,6 +39,8 @@ in
     else
       args;
 
+  isVirtualJob = x: builtins.isAttrs x && (x._repx_virtual_job or false);
+
   uniqueDrvs =
     drvs:
     builtins.attrValues (
@@ -50,16 +52,46 @@ in
       )
     );
 
-  mkDependencyMeta =
-    { dependencyDerivations, resolvedParameters }:
+  uniqueJobs =
+    jobs:
+    builtins.attrValues (
+      builtins.listToAttrs (
+        map (job: {
+          name = job.jobDirName;
+          value = job;
+        }) jobs
+      )
+    );
+
+  mkJobId =
+    hashInputs:
     let
-      depders = dependencyDerivations;
-      dependencyPaths = map toString depders;
+      rawHash = builtins.hashString "sha256" (builtins.concatStringsSep "\x00" hashInputs);
+      nix32 = builtins.convertHash {
+        hash = rawHash;
+        hashAlgo = "sha256";
+        toHashFormat = "nix32";
+      };
+    in
+    builtins.substring 0 32 nix32;
+
+  mkDependencyMeta =
+    {
+      upstreamJobIds ? [ ],
+      dependencyDerivations ? [ ],
+      resolvedParameters,
+    }:
+    let
+      dependencyIds =
+        if upstreamJobIds != [ ] then
+          upstreamJobIds
+        else
+          map (d: builtins.unsafeDiscardStringContext (toString d)) dependencyDerivations;
     in
     {
-      inherit dependencyPaths;
-      dependencyManifestJson = builtins.toJSON (map builtins.unsafeDiscardStringContext dependencyPaths);
-      dependencyHash = builtins.hashString "sha256" (builtins.concatStringsSep ":" dependencyPaths);
+      inherit dependencyIds;
+      dependencyManifestJson = builtins.toJSON dependencyIds;
+      dependencyHash = builtins.hashString "sha256" (builtins.concatStringsSep ":" dependencyIds);
       parametersJson = builtins.toJSON resolvedParameters;
     };
 

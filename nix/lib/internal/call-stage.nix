@@ -87,6 +87,7 @@ let
           outputs = resolvedOutputs;
           inherit resolvedParameters;
           dependencyDerivations = common.uniqueDrvs processed.dependencyDerivations;
+          inherit (processed) upstreamJobs;
           stageInputs = processed.finalFlatInputs;
           inherit (processed) inputMappings;
           resources = if finalResources == { } then null else finalResources;

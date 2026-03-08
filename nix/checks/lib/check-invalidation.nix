@@ -44,11 +44,11 @@ let
   getHashes =
     jobsList: pname:
     let
-      matches = pkgs.lib.filter (d: d.pname == pname) jobsList;
+      matches = pkgs.lib.filter (j: j.pname == pname) jobsList;
     in
-    pkgs.lib.sort (a: b: a < b) (map (d: builtins.baseNameOf (toString d)) matches);
+    pkgs.lib.sort (a: b: a < b) (map (j: j.jobDirName) matches);
 
-  baselineHashes = pname: getHashes baselineLab.passthru.allJobDerivations pname;
+  baselineHashes = pname: getHashes baselineLab.passthru.allVirtualJobs pname;
 
   allChanged = old: new: (pkgs.lib.intersectLists old new) == [ ];
 
@@ -71,7 +71,7 @@ let
             };
           };
         };
-        hashes = pname: getHashes lab.passthru.allJobDerivations pname;
+        hashes = pname: getHashes lab.passthru.allVirtualJobs pname;
       in
       {
         name = "Modify Analysis Stage";
@@ -90,7 +90,7 @@ let
             };
           };
         };
-        hashes = pname: getHashes lab.passthru.allJobDerivations pname;
+        hashes = pname: getHashes lab.passthru.allVirtualJobs pname;
       in
       {
         name = "Modify Upstream Stage D";
@@ -148,7 +148,7 @@ let
 
         labBase = mkLab headerA_orig headerB_orig;
         labMod = mkLab headerA_mod headerB_orig;
-        hashes = lab: pname: getHashes lab.passthru.allJobDerivations pname;
+        hashes = lab: pname: getHashes lab.passthru.allVirtualJobs pname;
       in
       {
         name = "Modify Utils Dirs (Granular Invalidation)";
@@ -175,7 +175,7 @@ let
             };
           };
         };
-        hashes = pname: getHashes lab.passthru.allJobDerivations pname;
+        hashes = pname: getHashes lab.passthru.allVirtualJobs pname;
       in
       {
         name = "Modify Resources (No Hash Invalidation)";

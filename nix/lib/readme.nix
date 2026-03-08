@@ -1,16 +1,15 @@
 {
   pkgs,
-  jobDerivations,
+  virtualJobs,
 }:
 
 let
-  exampleJobDrv = if jobDerivations != [ ] then pkgs.lib.head jobDerivations else null;
-  exampleJobId =
-    if exampleJobDrv != null then builtins.baseNameOf (toString exampleJobDrv) else "your-job-id-here";
+  exampleJob = if virtualJobs != [ ] then pkgs.lib.head virtualJobs else null;
+  exampleJobId = if exampleJob != null then exampleJob.jobDirName else "your-job-id-here";
 
   ifJobs =
     content:
-    if exampleJobDrv != null then
+    if exampleJob != null then
       content
     else
       ''
