@@ -65,6 +65,7 @@ pub enum ClientEvent {
     SyncingFinished,
     SubmittingJobs {
         total: usize,
+        concurrency: Option<usize>,
     },
     JobSubmitted {
         job_id: JobId,

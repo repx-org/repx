@@ -16,8 +16,6 @@ let
 
         Please run:
           nix run --impure .
-          OR
-          nix build .#lab-impure --impure --option sandbox false
         -----------------------------------------------------------------------
       ''
     else if builtins.pathExists possiblePath then

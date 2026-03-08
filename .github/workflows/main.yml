@@ -71,6 +71,7 @@ jobs:
           - e2e-gc-local
           - e2e-gc-remote
           - e2e-scatter-gather-cancel
+          - e2e-init
     steps:
       - uses: actions/checkout@v4
       - uses: DeterminateSystems/nix-installer-action@main
