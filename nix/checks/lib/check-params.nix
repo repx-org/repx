@@ -52,5 +52,5 @@ pkgs.runCommand "check-parameters" { } ''
       p_space = "foo bar";
     }
   }' > parameters.json
-  ${testStage}/bin/test-parameters-behavior "$out" inputs.json parameters.json
+  ${testStage.scriptDrv}/bin/test-parameters-behavior "$out" inputs.json parameters.json
 ''

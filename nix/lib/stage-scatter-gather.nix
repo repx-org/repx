@@ -133,25 +133,29 @@ else
       "gather"
     ];
 
-    scatterDrv = mkSubStage scatterDef (
+    scatterSubJob = mkSubStage scatterDef (
       commonStageDef
       // {
         pname = "${groupPname}-scatter";
       }
     );
 
-    stepDrvs = pkgs.lib.mapAttrs (
+    stepSubJobs = pkgs.lib.mapAttrs (
       name: def:
       mkSubStage def {
         pname = "${groupPname}-step-${name}";
       }
     ) stepsDefs;
 
-    gatherDrv = mkSubStage gatherDef {
+    gatherSubJob = mkSubStage gatherDef {
       pname = "${groupPname}-gather";
     };
 
-    externalInputMappings = scatterDrv.passthru.executables.main.inputs;
+    scatterDrv = scatterSubJob.scriptDrv;
+    stepDrvs = pkgs.lib.mapAttrs (_: subJob: subJob.scriptDrv) stepSubJobs;
+    gatherDrv = gatherSubJob.scriptDrv;
+
+    externalInputMappings = scatterSubJob.executables.main.inputs;
 
     scatterResources = common.validateResourceHints {
       inherit pkgs;
@@ -338,10 +342,32 @@ else
     };
 
     dependencyDerivations = stageDef.dependencyDerivations or [ ];
+    upstreamJobIds = map (j: j.jobDirName) (stageDef.upstreamJobs or [ ]);
     depMeta = common.mkDependencyMeta {
-      inherit dependencyDerivations resolvedParameters;
+      inherit upstreamJobIds dependencyDerivations resolvedParameters;
     };
     inherit (depMeta) dependencyManifestJson dependencyHash parametersJson;
+
+    allSubScriptPaths = [
+      (toString scatterDrv)
+    ]
+    ++ (pkgs.lib.mapAttrsToList (_: toString) stepDrvs)
+    ++ [
+      (toString gatherDrv)
+    ];
+
+    jobId = common.mkJobId (
+      allSubScriptPaths
+      ++ [
+        parametersJson
+        dependencyManifestJson
+        dependencyHash
+        (builtins.toJSON (stageDef.inputMappings or [ ]))
+      ]
+    );
+
+    jobName = "${groupPname}-${version}";
+    jobDirName = "${jobId}-${jobName}";
 
   in
   assert
@@ -352,34 +378,20 @@ else
       to receive the work item from the scatter phase.
       Root steps: ${builtins.toJSON rootStepNames}
     '';
-  let
-    stepCopyCommands = pkgs.lib.concatStrings (
-      pkgs.lib.mapAttrsToList (
-        name: drv: "cp ${drv}/bin/* $out/bin/${groupPname}-step-${name}\n"
-      ) stepDrvs
-    );
-  in
-  pkgs.runCommand "${groupPname}-${version}"
-    {
-      inherit parametersJson dependencyManifestJson dependencyHash;
-      passAsFile = [
-        "parametersJson"
-        "dependencyManifestJson"
-      ];
-      passthru = {
-        pname = groupPname;
-        repxStageType = "scatter-gather";
-        inherit resolvedParameters executables;
-        outputMetadata = gatherDef.outputs or { };
-        inherit scatterDrv gatherDrv stepDrvs;
-        resources = stageDef.resources or null;
-      };
-    }
-    ''
-      mkdir -p $out/bin
-      cp ${scatterDrv}/bin/* $out/bin/${groupPname}-scatter
-      ${stepCopyCommands}cp ${gatherDrv}/bin/* $out/bin/${groupPname}-gather
-      chmod +x $out/bin/*
-      cp "$parametersJsonPath" $out/${groupPname}-parameters.json
-      cp "$dependencyManifestJsonPath" $out/nix-input-dependencies.json
-    ''
+  {
+    _repx_virtual_job = true;
+    inherit
+      jobId
+      jobName
+      jobDirName
+      parametersJson
+      dependencyManifestJson
+      ;
+    pname = groupPname;
+    repxStageType = "scatter-gather";
+    inherit resolvedParameters executables;
+    outputMetadata = gatherDef.outputs or { };
+    inherit scatterDrv gatherDrv stepDrvs;
+    resources = stageDef.resources or null;
+    scriptDrv = null;
+  }

@@ -1,13 +1,29 @@
 { pkgs, repx-lib }:
 let
-  producer = pkgs.runCommand "mock-producer" {
-    passthru = {
-      pname = "mock-producer";
-      outputMetadata = {
-        "out_src" = "$out/src";
+  producer = {
+    _repx_virtual_job = true;
+    jobId = "mock-producer-hash";
+    jobName = "mock-producer-1.1";
+    jobDirName = "mock-producer-hash-mock-producer-1.1";
+    pname = "mock-producer";
+    repxStageType = "simple";
+    resolvedParameters = { };
+    outputMetadata = {
+      "out_src" = "$out/src";
+    };
+    executables = {
+      main = {
+        inputs = [ ];
+        outputs = {
+          "out_src" = "$out/src";
+        };
       };
     };
-  } "touch $out";
+    scriptDrv = pkgs.writeTextDir "bin/mock-producer" "#!/bin/bash\ntrue";
+    resources = null;
+    parametersJson = "{}";
+    dependencyManifestJson = "[]";
+  };
 
   consumerDefFile = pkgs.writeText "stage-consumer.nix" ''
     { pkgs }:
@@ -44,14 +60,30 @@ let
     }
   '';
 
-  producer2 = pkgs.runCommand "mock-producer-2" {
-    passthru = {
-      pname = "mock-producer-2";
-      outputMetadata = {
-        "common" = "$out/common";
+  producer2 = {
+    _repx_virtual_job = true;
+    jobId = "mock-producer2-hash";
+    jobName = "mock-producer-2-1.1";
+    jobDirName = "mock-producer2-hash-mock-producer-2-1.1";
+    pname = "mock-producer-2";
+    repxStageType = "simple";
+    resolvedParameters = { };
+    outputMetadata = {
+      "common" = "$out/common";
+    };
+    executables = {
+      main = {
+        inputs = [ ];
+        outputs = {
+          "common" = "$out/common";
+        };
       };
     };
-  } "touch $out";
+    scriptDrv = pkgs.writeTextDir "bin/mock-producer-2" "#!/bin/bash\ntrue";
+    resources = null;
+    parametersJson = "{}";
+    dependencyManifestJson = "[]";
+  };
 
   attemptUnresolved = helpers.callStage consumerDefFile2 [ producer2 ];
   result2 = builtins.tryEval attemptUnresolved;

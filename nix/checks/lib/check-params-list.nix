@@ -51,5 +51,5 @@ pkgs.runCommand "check-parameters-types" { } ''
       p_path = "/some/path/to file.txt";
     }
   }' > parameters.json
-  ${testStage}/bin/test-parameters-types "$out" inputs.json parameters.json
+  ${testStage.scriptDrv}/bin/test-parameters-types "$out" inputs.json parameters.json
 ''

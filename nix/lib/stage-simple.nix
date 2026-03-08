@@ -37,38 +37,46 @@ let
       ;
   };
 
+  upstreamJobIds = map (j: j.jobDirName) (stageDef.upstreamJobs or [ ]);
+
   depMeta = common.mkDependencyMeta {
-    inherit dependencyDerivations resolvedParameters;
+    inherit upstreamJobIds resolvedParameters;
+    inherit dependencyDerivations;
   };
   inherit (depMeta) dependencyManifestJson dependencyHash parametersJson;
 
+  jobId = common.mkJobId [
+    (toString scriptDrv)
+    parametersJson
+    dependencyManifestJson
+    dependencyHash
+    (builtins.toJSON (stageDef.inputMappings or [ ]))
+  ];
+
+  jobName = "${pname}-${version}";
+  jobDirName = "${jobId}-${jobName}";
+
 in
-pkgs.runCommand "${pname}-${version}"
-  {
-    inherit parametersJson dependencyManifestJson dependencyHash;
-    passAsFile = [
-      "parametersJson"
-      "dependencyManifestJson"
-    ];
-    passthru = (stageDef.passthru or { }) // {
-      inherit pname resolvedParameters;
-      repxStageType = "simple";
-      executables = {
-        main = {
-          inputs = stageDef.inputMappings or [ ];
-          outputs = outputsDef;
-        };
-      };
-      outputMetadata = outputsDef;
-      stageInputs = stageDef.stageInputs or { };
-      inherit scriptDrv;
-      resources = stageDef.resources or null;
+{
+  _repx_virtual_job = true;
+  inherit
+    jobId
+    jobName
+    jobDirName
+    pname
+    resolvedParameters
+    parametersJson
+    dependencyManifestJson
+    scriptDrv
+    ;
+  repxStageType = "simple";
+  executables = {
+    main = {
+      inputs = stageDef.inputMappings or [ ];
+      outputs = outputsDef;
     };
-  }
-  ''
-    mkdir -p $out/bin
-    cp ${scriptDrv}/bin/${pname} $out/bin/${pname}
-    chmod +x $out/bin/${pname}
-    cp "$parametersJsonPath" $out/${pname}-parameters.json
-    cp "$dependencyManifestJsonPath" $out/nix-input-dependencies.json
-  ''
+  };
+  outputMetadata = outputsDef;
+  stageInputs = stageDef.stageInputs or { };
+  resources = stageDef.resources or null;
+}

@@ -8,7 +8,7 @@ let
   removeNulls = attrs: pkgs.lib.filterAttrs (_: v: v != null) attrs;
 
   mkJobMetadata =
-    jobDrv: stageType: pname: jobNameWithHash:
+    job: stageType: pname: jobNameWithHash:
     let
       addPathToExecutables = pkgs.lib.mapAttrs (
         exeName: exeDef:
@@ -29,15 +29,15 @@ let
         withResources
       );
 
-      jobResourceHints = jobDrv.passthru.resources or null;
+      jobResourceHints = job.resources or null;
     in
     {
       name = jobNameWithHash;
       value = removeNulls {
-        params = jobDrv.passthru.resolvedParameters or { };
-        name = jobDrv.name or null;
+        params = job.resolvedParameters or { };
+        name = job.jobName or null;
         stage_type = stageType;
-        executables = addPathToExecutables (jobDrv.passthru.executables or { });
+        executables = addPathToExecutables (job.executables or { });
         resource_hints = jobResourceHints;
       };
     };
@@ -60,13 +60,13 @@ let
 
       jobsAttrSet = pkgs.lib.listToAttrs (
         map (
-          jobDrv:
+          job:
           let
-            jobNameWithHash = builtins.baseNameOf (builtins.unsafeDiscardStringContext (toString jobDrv));
-            pname = jobDrv.pname or jobDrv.passthru.pname or jobDrv.name;
-            stageType = jobDrv.passthru.repxStageType or "simple";
+            jobNameWithHash = job.jobDirName;
+            inherit (job) pname;
+            stageType = job.repxStageType or "simple";
           in
-          mkJobMetadata jobDrv stageType pname jobNameWithHash
+          mkJobMetadata job stageType pname jobNameWithHash
         ) jobs
       );
 

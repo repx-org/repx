@@ -230,11 +230,21 @@ let
 
   getDrvsFromPipeline =
     pipeline:
-    pkgs.lib.flatten (
-      pkgs.lib.map (stageResult: if pkgs.lib.isDerivation stageResult then stageResult else [ ]) (
-        pkgs.lib.attrValues pipeline
-      )
-    );
+    let
+      jobs = pkgs.lib.filter common.isVirtualJob (pkgs.lib.attrValues pipeline);
+      scriptDrvs = pkgs.lib.concatMap (
+        job:
+        if job.repxStageType == "scatter-gather" then
+          [
+            job.scatterDrv
+            job.gatherDrv
+          ]
+          ++ (builtins.attrValues job.stepDrvs)
+        else
+          [ job.scriptDrv ]
+      ) jobs;
+    in
+    scriptDrvs;
 
   loadedPipelines = pkgs.lib.map (
     p:

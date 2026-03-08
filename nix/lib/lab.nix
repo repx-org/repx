@@ -133,7 +133,7 @@ let
           nestedJobs = pkgs.lib.map (pipeline: pkgs.lib.attrValues pipeline) pipelinesForRun;
           allStageResults = pkgs.lib.flatten nestedJobs;
         in
-        common.uniqueDrvs (pkgs.lib.filter pkgs.lib.isDerivation allStageResults);
+        common.uniqueJobs (pkgs.lib.filter common.isVirtualJob allStageResults);
     in
     acc
     // {

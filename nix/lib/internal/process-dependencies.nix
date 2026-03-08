@@ -8,6 +8,7 @@
   ...
 }:
 let
+  common = import ./common.nix;
   isFirstStage = dependencies == [ ];
   explicitDeps =
     pkgs.lib.foldl'
@@ -15,10 +16,10 @@ let
         acc: item:
         let
           result =
-            if pkgs.lib.isDerivation item then
+            if common.isVirtualJob item then
               let
-                producerDrv = item;
-                bashOutputs = producerDrv.passthru.outputMetadata or { };
+                producerJob = item;
+                bashOutputs = producerJob.outputMetadata or { };
                 validMappings = pkgs.lib.filterAttrs (name: _: pkgs.lib.hasAttr name consumerInputs) bashOutputs;
               in
               if validMappings == { } then
@@ -28,12 +29,12 @@ let
                 in
                 throw ''
                   Pipeline connection error: Implicit dependency resolution failed.
-                  Stage "${producerPname}" depends on "${producerDrv.pname}", but they share no matching input/output names.
+                  Stage "${producerPname}" depends on "${producerJob.pname}", but they share no matching input/output names.
 
                   When passing a stage derivation directly (implicit mapping), at least one output name from the producer
                   must match an input name in the consumer.
 
-                  Producer "${producerDrv.pname}" outputs: ${builtins.toJSON producerOutputs}
+                  Producer "${producerJob.pname}" outputs: ${builtins.toJSON producerOutputs}
                   Consumer "${producerPname}" inputs:  ${builtins.toJSON consumerInputNames}
 
                   If the names differ, use the explicit mapping syntax: [ producer "source_output" "target_input" ]
@@ -42,7 +43,7 @@ let
                 let
                   newMappings = pkgs.lib.mapAttrsToList (name: _: {
                     type = "intra-pipeline";
-                    job_id = builtins.baseNameOf (toString producerDrv);
+                    job_id = producerJob.jobDirName;
                     source_output = name;
                     target_input = name;
                   }) validMappings;
@@ -51,7 +52,7 @@ let
                   ) validMappings;
                 in
                 {
-                  dependencyDerivations = [ item ];
+                  upstreamJobs = [ item ];
                   finalFlatInputs = newInputs;
                   inputMappings = newMappings;
                 }
@@ -61,10 +62,10 @@ let
                 strings = pkgs.lib.tail item;
                 sourceName = pkgs.lib.elemAt strings 0;
                 targetName = if pkgs.lib.length strings == 2 then pkgs.lib.elemAt strings 1 else sourceName;
-                producerOutputs = dep.passthru.outputMetadata or { };
+                producerOutputs = dep.outputMetadata or { };
               in
-              if !(pkgs.lib.isDerivation dep) then
-                throw "In [dep, ...], the first element must be a derivation, but got: ${toString dep}"
+              if !(common.isVirtualJob dep) then
+                throw "In [dep, ...], the first element must be a virtual job, but got: ${builtins.typeOf dep}"
               else if !(pkgs.lib.all pkgs.lib.isString strings) then
                 throw "In [dep, ...], all elements after the first must be strings."
               else if
@@ -95,30 +96,30 @@ let
                 ''
               else
                 {
-                  dependencyDerivations = [ dep ];
+                  upstreamJobs = [ dep ];
                   finalFlatInputs = {
                     ${targetName} = "\${inputs[\"${targetName}\"]}";
                   };
                   inputMappings = [
                     {
                       type = "intra-pipeline";
-                      job_id = builtins.baseNameOf (toString dep);
+                      job_id = dep.jobDirName;
                       source_output = sourceName;
                       target_input = targetName;
                     }
                   ];
                 }
             else
-              throw "Dependency item in '${producerPname}' must be a derivation or a list. found: ${builtins.typeOf item}";
+              throw "Dependency item in '${producerPname}' must be a virtual job or a list. found: ${builtins.typeOf item}";
         in
         {
-          dependencyDerivations = acc.dependencyDerivations ++ result.dependencyDerivations;
+          upstreamJobs = acc.upstreamJobs ++ result.upstreamJobs;
           finalFlatInputs = pkgs.lib.attrsets.unionOfDisjoint acc.finalFlatInputs result.finalFlatInputs;
           inputMappings = acc.inputMappings ++ result.inputMappings;
         }
       )
       {
-        dependencyDerivations = [ ];
+        upstreamJobs = [ ];
         finalFlatInputs = { };
         inputMappings = [ ];
       }
@@ -126,7 +127,7 @@ let
 
   requiredRunNames = builtins.attrNames interRunDepTypes;
 
-  upstreamJobDerivations =
+  upstreamInterRunJobs =
     if isFirstStage then
       pkgs.lib.flatten (map (name: dependencyJobs.${name} or [ ]) requiredRunNames)
     else
@@ -220,7 +221,36 @@ if missingInputNames != [ ] then
   ''
 else
   {
-    dependencyDerivations = explicitDeps.dependencyDerivations ++ upstreamJobDerivations;
+    upstreamJobs = explicitDeps.upstreamJobs ++ upstreamInterRunJobs;
+    dependencyDerivations =
+      let
+        drvsFromJobs = pkgs.lib.concatMap (
+          job:
+          if job.repxStageType == "scatter-gather" then
+            [
+              job.scatterDrv
+              job.gatherDrv
+            ]
+            ++ (builtins.attrValues job.stepDrvs)
+          else
+            [ job.scriptDrv ]
+        ) explicitDeps.upstreamJobs;
+        interRunDrvs = pkgs.lib.concatMap (
+          job:
+          if common.isVirtualJob job then
+            if job.repxStageType == "scatter-gather" then
+              [
+                job.scatterDrv
+                job.gatherDrv
+              ]
+              ++ (builtins.attrValues job.stepDrvs)
+            else
+              [ job.scriptDrv ]
+          else
+            [ ]
+        ) upstreamInterRunJobs;
+      in
+      common.uniqueDrvs (drvsFromJobs ++ interRunDrvs);
     finalFlatInputs = allSatisfiedInputs;
     inputMappings = explicitDeps.inputMappings ++ uniqueImplicitMappings;
   }
