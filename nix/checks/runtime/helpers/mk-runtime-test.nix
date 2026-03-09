@@ -17,8 +17,10 @@ let
   mountConfig =
     if mountMode == "impure" then
       "mount_host_paths = true"
+    else if mountMode == "mount-paths" then
+      ''mount_paths = ["/tmp/specific-secret"]''
     else
-      ''mount_paths = ["/tmp/specific-secret"]'';
+      "";
 
   runtimeBinary =
     if isBwrap then

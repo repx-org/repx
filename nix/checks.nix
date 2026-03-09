@@ -18,7 +18,8 @@ let
   };
 
   runtimeChecks = {
-    e2e-local = import ./checks/runtime/e2e-local.nix { inherit pkgs repx referenceLab; };
+    e2e-local-docker = import ./checks/runtime/e2e-local-docker.nix { inherit pkgs repx referenceLab; };
+    e2e-local-podman = import ./checks/runtime/e2e-local-podman.nix { inherit pkgs repx referenceLab; };
     e2e-remote-local = import ./checks/runtime/e2e-remote-local.nix {
       inherit pkgs repx referenceLab;
     };
