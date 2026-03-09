@@ -46,7 +46,8 @@ jobs:
           - lib-dynamic-params-validation
           - lib-parameters
           - lib-parameters-types
-          - e2e-local
+          - e2e-local-docker
+          - e2e-local-podman
           - e2e-remote-local
           - e2e-remote-slurm
           - static-analysis
