@@ -246,21 +246,20 @@ let
         ) hostToolBinaries}
 
         echo "Assembling job directories from manifest..."
-        ${pkgs.jq}/bin/jq -c '.[]' ${jobManifestFile} | while IFS= read -r entry; do
-          jobDir=$(echo "$entry" | ${pkgs.jq}/bin/jq -r '.jobDirName')
-          jobType=$(echo "$entry" | ${pkgs.jq}/bin/jq -r '.type')
-          pname=$(echo "$entry" | ${pkgs.jq}/bin/jq -r '.pname')
-          paramsJson=$(echo "$entry" | ${pkgs.jq}/bin/jq -r '.parametersJson')
-          depManifest=$(echo "$entry" | ${pkgs.jq}/bin/jq -r '.dependencyManifestJson')
+        jobCount=$(${pkgs.jq}/bin/jq -r 'length' ${jobManifestFile})
 
+        assemble_job() {
+          IFS=$'\t' read -r jobDir jobType pname paramsJson depManifest scriptInfo <<< "$1"
           mkdir -p "$out/jobs/$jobDir/bin"
 
           if [ "$jobType" = "simple" ]; then
-            scriptPath=$(echo "$entry" | ${pkgs.jq}/bin/jq -r '.scriptDrv')
-            cp "$scriptPath/bin/$pname" "$out/jobs/$jobDir/bin/$pname"
+            cp "$scriptInfo/bin/$pname" "$out/jobs/$jobDir/bin/$pname"
             chmod +x "$out/jobs/$jobDir/bin/$pname"
           elif [ "$jobType" = "scatter-gather" ]; then
-            echo "$entry" | ${pkgs.jq}/bin/jq -r '.scripts | to_entries[] | "\(.key)\t\(.value)"' | while IFS=$'\t' read -r scriptName scriptPath; do
+            IFS='|' read -ra scriptEntries <<< "$scriptInfo"
+            for scriptEntry in "''${scriptEntries[@]}"; do
+              scriptName="''${scriptEntry%%=*}"
+              scriptPath="''${scriptEntry#*=}"
               cp "$scriptPath/bin/"* "$out/jobs/$jobDir/bin/$pname-$scriptName"
               chmod +x "$out/jobs/$jobDir/bin/$pname-$scriptName"
             done
@@ -268,8 +267,14 @@ let
 
           echo "$paramsJson" > "$out/jobs/$jobDir/$pname-parameters.json"
           echo "$depManifest" > "$out/jobs/$jobDir/nix-input-dependencies.json"
-        done
-        echo "Assembled $(${pkgs.jq}/bin/jq 'length' ${jobManifestFile}) job directories."
+        }
+        export -f assemble_job
+        export out
+
+        ${pkgs.jq}/bin/jq -r '.[] | [.jobDirName, .type, .pname, .parametersJson, .dependencyManifestJson, (if .type == "simple" then .scriptDrv else (.scripts | to_entries | map("\(.key)=\(.value)") | join("|")) end)] | @tsv' ${jobManifestFile} \
+          | ${pkgs.parallel}/bin/parallel --pipe -L 1 -j+0 'while read -r line; do assemble_job "$line"; done'
+
+        echo "Assembled $jobCount job directories."
 
         cp ${rootMetadata} "$out/revision/${rootMetadataFilename}"
 
@@ -331,6 +336,7 @@ let
 
         nativeBuildInputs = [
           pkgs.jq
+          pkgs.parallel
         ]
         ++ allScriptDrvs;
 
