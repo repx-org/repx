@@ -32,5 +32,8 @@ in
       "10 20 30"
       "5 15 25"
     ];
+    env = [
+      (utils.env { OMP_NUM_THREADS = "1"; })
+    ];
   };
 }

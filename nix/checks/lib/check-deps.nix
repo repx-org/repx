@@ -58,18 +58,18 @@ let
       '';
 in
 {
-  fail_missing = mkTest "fail-missing" ''
+  "lib-deps-fail-missing" = mkTest "fail-missing" ''
     echo "starting"
     missing_command "some args"
   '' true;
 
-  pass_valid = mkTest "pass-valid" ''
+  "lib-deps-pass-valid" = mkTest "pass-valid" ''
     mkdir -p /tmp/foo
     ls -la
     echo "done"
   '' false;
 
-  pass_complex = mkTest "pass-complex" ''
+  "lib-deps-pass-complex" = mkTest "pass-complex" ''
     my_var="some_val"
     echo "$my_var"
 

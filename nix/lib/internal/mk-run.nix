@@ -197,7 +197,9 @@ let
       ''
     else
       let
+        internalKeys = zipSyntheticKeys ++ [ "pipeline" ];
         nonZipParameters = pkgs.lib.filterAttrs (n: _: !(builtins.elem n zipSyntheticKeys)) allParameters;
+        userParameters = pkgs.lib.filterAttrs (n: _: !(builtins.elem n internalKeys)) allParameters;
         parametersWithNulls = pkgs.lib.filter (param: builtins.any (elem: elem == null) param.value) (
           pkgs.lib.mapAttrsToList (name: value: { inherit name value; }) nonZipParameters
         );
@@ -214,15 +216,50 @@ let
         ''
       else
         let
-          rawCombinations = pkgs.lib.cartesianProduct allParameters;
+          isScalar =
+            v:
+            builtins.isString v
+            || builtins.isInt v
+            || builtins.isFloat v
+            || builtins.isBool v
+            || builtins.isPath v;
+
+          parametersWithNonScalars = pkgs.lib.filter (
+            param: builtins.any (elem: !isScalar elem) param.value
+          ) (pkgs.lib.mapAttrsToList (name: value: { inherit name value; }) userParameters);
         in
-        map (
-          combo:
+        if parametersWithNonScalars != [ ] then
           let
-            zipAttrs = pkgs.lib.foldl' (acc: key: acc // (combo.${key} or { })) { } zipSyntheticKeys;
+            formatParam =
+              p:
+              let
+                badElems = builtins.filter (elem: !isScalar elem) p.value;
+                badTypes = pkgs.lib.concatStringsSep ", " (map (e: builtins.typeOf e) badElems);
+              in
+              "  - \"${p.name}\": contains element(s) of type ${badTypes}; value = ${builtins.toJSON p.value}";
+            details = pkgs.lib.concatStringsSep "\n" (map formatParam parametersWithNonScalars);
           in
-          (pkgs.lib.removeAttrs combo zipSyntheticKeys) // zipAttrs
-        ) rawCombinations;
+          throw ''
+            Type error in 'mkRun' parameters for run "${name}".
+            Parameter sweep lists must contain only scalar values (string, int, float, bool, path).
+            The following parameters contain non-scalar elements (e.g., nested lists or attrsets):
+            ${details}
+
+            Each element in a parameter list becomes one resolved value after cartesian product.
+            If you need to pass multiple arguments, join them into a space-separated string:
+              workload_args = [ (builtins.concatStringsSep " " ["arg1" "arg2"]) ];
+          ''
+        else
+          let
+            rawCombinations = pkgs.lib.cartesianProduct allParameters;
+          in
+          map (
+            combo:
+            let
+              zipAttrs = pkgs.lib.foldl' (acc: key: acc // (combo.${key} or { })) { } zipSyntheticKeys;
+            in
+            (pkgs.lib.removeAttrs combo zipSyntheticKeys) // zipAttrs
+          ) rawCombinations;
 
   repxForDiscovery = repx-lib.mkPipelineHelpers {
     inherit pkgs repx-lib interRunDepTypes;

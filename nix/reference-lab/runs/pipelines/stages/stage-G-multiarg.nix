@@ -4,6 +4,7 @@ _: {
   parameters = {
     workload_args = "";
     offset = 0;
+    env = "";
   };
 
   inputs = {
@@ -29,6 +30,11 @@ _: {
     }:
     ''
       echo "Stage G: Demonstrating multi-arg parameter expansion"
+
+      if [ -n "${parameters.env}" ]; then
+        ${parameters.env}
+      fi
+
       read -ra ARGS <<< "${parameters.workload_args}"
 
       echo "Received ''${#ARGS[@]} arguments:"

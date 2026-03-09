@@ -11,6 +11,16 @@ rec {
       p;
   range = start: end: pkgs.lib.range start end;
 
+  env =
+    envAttrs:
+    let
+      pairs = builtins.attrNames envAttrs;
+    in
+    if pairs == [ ] then
+      ""
+    else
+      "export " + builtins.concatStringsSep " " (map (k: "${k}=${envAttrs.${k}}") pairs);
+
   list = l: {
     _repx_param = true;
     values = l;
