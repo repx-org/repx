@@ -32,4 +32,12 @@ repx.mkPipe rec {
       "source_data"
     ]
   ];
+
+  multiarg = repx.callStage ./stages/stage-G-multiarg.nix [
+    [
+      dynamic_stage
+      "result"
+      "source_data"
+    ]
+  ];
 }
