@@ -8,13 +8,13 @@
 
 let
   lintChecks = {
-    deadnix = (import ./checks/lint/deadnix.nix { inherit pkgs; }).lint;
-    statix = (import ./checks/lint/statix.nix { inherit pkgs; }).lint;
-    formatting = (import ./checks/lint/formatting.nix { inherit pkgs; }).fmt;
-    shebang = (import ./checks/lint/shebangs.nix { inherit pkgs; }).check;
-    shellcheck = (import ./checks/lint/shellcheck.nix { inherit pkgs; }).lint;
-    clippy = (import ./checks/lint/clippy.nix { inherit pkgs; }).lint;
-    machete = (import ./checks/lint/machete.nix { inherit pkgs; }).lint;
+    "lint-deadnix" = (import ./checks/lint/deadnix.nix { inherit pkgs; }).lint;
+    "lint-statix" = (import ./checks/lint/statix.nix { inherit pkgs; }).lint;
+    "lint-formatting" = (import ./checks/lint/formatting.nix { inherit pkgs; }).fmt;
+    "lint-shebang" = (import ./checks/lint/shebangs.nix { inherit pkgs; }).check;
+    "lint-shellcheck" = (import ./checks/lint/shellcheck.nix { inherit pkgs; }).lint;
+    "lint-clippy" = (import ./checks/lint/clippy.nix { inherit pkgs; }).lint;
+    "lint-machete" = (import ./checks/lint/machete.nix { inherit pkgs; }).lint;
   };
 
   runtimeChecks = {
@@ -68,21 +68,26 @@ let
   };
 
   libChecks = {
-    integration = pkgs.callPackage ./checks/lib/check-integration.nix { };
-    invalidation = pkgs.callPackage ./checks/lib/check-invalidation.nix { inherit repx-lib; };
-    parameters = pkgs.callPackage ./checks/lib/check-params.nix { };
-    parameters_types = pkgs.callPackage ./checks/lib/check-params-list.nix { };
-    pipeline_logic = pkgs.callPackage ./checks/lib/check-pipeline-logic.nix { inherit repx-lib; };
-    dynamic_parameters_validation = pkgs.callPackage ./checks/lib/check-dynamic-params-validation.nix {
+    "lib-integration" = pkgs.callPackage ./checks/lib/check-integration.nix { };
+    "lib-invalidation" = pkgs.callPackage ./checks/lib/check-invalidation.nix { inherit repx-lib; };
+    "lib-parameters" = pkgs.callPackage ./checks/lib/check-params.nix { };
+    "lib-parameters-types" = pkgs.callPackage ./checks/lib/check-params-list.nix { };
+    "lib-pipeline-logic" = pkgs.callPackage ./checks/lib/check-pipeline-logic.nix { inherit repx-lib; };
+    "lib-dynamic-params-validation" =
+      pkgs.callPackage ./checks/lib/check-dynamic-params-validation.nix
+        {
+          inherit repx-lib;
+        };
+    "lib-large-lab" = pkgs.callPackage ./checks/lib/check-large-lab.nix { };
+    "lib-buildcommand-size" = pkgs.callPackage ./checks/lib/check-buildcommand-size.nix { };
+    "lib-stage-env-size" = pkgs.callPackage ./checks/lib/check-stage-env-size.nix { };
+    "lib-resource-hints" = pkgs.callPackage ./checks/lib/check-resource-hints.nix {
       inherit repx-lib;
     };
-    large_lab = pkgs.callPackage ./checks/lib/check-large-lab.nix { };
-    buildcommand_size = pkgs.callPackage ./checks/lib/check-buildcommand-size.nix { };
-    stage_env_size = pkgs.callPackage ./checks/lib/check-stage-env-size.nix { };
-    resource_hints = pkgs.callPackage ./checks/lib/check-resource-hints.nix {
+    "lib-zip-params" = pkgs.callPackage ./checks/lib/check-zip-params.nix {
       inherit repx-lib;
     };
-    zip_parameters = pkgs.callPackage ./checks/lib/check-zip-params.nix {
+    "lib-non-scalar-params" = pkgs.callPackage ./checks/lib/check-non-scalar-params.nix {
       inherit repx-lib;
     };
   }

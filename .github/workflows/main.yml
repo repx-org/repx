@@ -16,13 +16,13 @@ jobs:
       - name: Run Fast Checks
         run: |
           nix build -L \
-            .#checks.x86_64-linux.deadnix \
-            .#checks.x86_64-linux.statix \
-            .#checks.x86_64-linux.formatting \
-            .#checks.x86_64-linux.shebang \
-            .#checks.x86_64-linux.shellcheck \
-            .#checks.x86_64-linux.machete \
-            .#checks.x86_64-linux.clippy
+            .#checks.x86_64-linux.lint-deadnix \
+            .#checks.x86_64-linux.lint-statix \
+            .#checks.x86_64-linux.lint-formatting \
+            .#checks.x86_64-linux.lint-shebang \
+            .#checks.x86_64-linux.lint-shellcheck \
+            .#checks.x86_64-linux.lint-machete \
+            .#checks.x86_64-linux.lint-clippy
 
   checks:
     name: Check ${{ matrix.check }}
@@ -40,21 +40,21 @@ jobs:
           - rs-integration
           - rs-containers
           - rs-executor
-          - integration
-          - invalidation
-          - pipeline_logic
-          - dynamic_parameters_validation
-          - parameters
-          - parameters_types
+          - lib-integration
+          - lib-invalidation
+          - lib-pipeline-logic
+          - lib-dynamic-params-validation
+          - lib-parameters
+          - lib-parameters-types
           - e2e-local
           - e2e-remote-local
           - e2e-remote-slurm
           - static-analysis
           - non-nixos-standalone
           - non-nixos-remote
-          - fail_missing
-          - pass_complex
-          - pass_valid
+          - lib-deps-fail-missing
+          - lib-deps-pass-complex
+          - lib-deps-pass-valid
           - e2e-impure
           - e2e-mount-paths
           - e2e-impure-podman
@@ -62,11 +62,12 @@ jobs:
           - e2e-impure-docker
           - e2e-mount-paths-docker
           - incremental-sync
-          - large_lab
-          - buildcommand_size
-          - stage_env_size
-          - resource_hints
-          - zip_parameters
+          - lib-large-lab
+          - lib-buildcommand-size
+          - lib-stage-env-size
+          - lib-resource-hints
+          - lib-zip-params
+          - lib-non-scalar-params
           - e2e-bwrap-overlay-fallback
           - e2e-gc-local
           - e2e-gc-remote
