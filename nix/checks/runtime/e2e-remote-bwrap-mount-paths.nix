@@ -4,10 +4,10 @@
   referenceLab,
 }:
 
-import ./helpers/mk-non-nixos-remote-test.nix {
+import ./helpers/mk-remote-test.nix {
   inherit pkgs repx referenceLab;
-  testName = "non-nixos-remote-docker-mount-paths";
-  runtime = "docker";
+  testName = "e2e-remote-bwrap-mount-paths";
+  runtime = "bwrap";
   mountMode = "mount-paths";
   runName = "mount-paths-run";
   extraValidation = ''
@@ -16,5 +16,5 @@ import ./helpers/mk-non-nixos-remote-test.nix {
         raise Exception(f"Mount path check failed! Expected 'HOST_SECRET_DATA', got '{mount_check}'")
     print(f"Mount path validation passed: job read '{mount_check}' from mounted path")
   '';
-  bannerText = "NON-NIXOS REMOTE DOCKER MOUNT-PATHS TEST COMPLETED";
+  bannerText = "E2E REMOTE BWRAP MOUNT-PATHS TEST COMPLETED";
 }

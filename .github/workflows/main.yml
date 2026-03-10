@@ -56,23 +56,26 @@ jobs:
           - e2e-local-podman-impure
           - e2e-local-podman-mount-paths
           - e2e-local-bwrap-node-local-path
+          - e2e-remote-bwrap-pure
+          - e2e-remote-bwrap-impure
+          - e2e-remote-bwrap-mount-paths
+          - e2e-remote-docker-pure
+          - e2e-remote-docker-impure
+          - e2e-remote-docker-mount-paths
+          - e2e-remote-podman-pure
+          - e2e-remote-podman-impure
+          - e2e-remote-podman-mount-paths
           - e2e-remote-slurm
-          - non-nixos-standalone
+          - non-nixos-local-bwrap-impure
           - non-nixos-remote-slurm
           - non-nixos-remote-bwrap-pure
           - non-nixos-remote-bwrap-impure
           - non-nixos-remote-bwrap-mount-paths
-          - non-nixos-remote-docker-pure
-          - non-nixos-remote-docker-impure
-          - non-nixos-remote-docker-mount-paths
-          - non-nixos-remote-podman-pure
-          - non-nixos-remote-podman-impure
-          - non-nixos-remote-podman-mount-paths
           - static-analysis
           - lib-deps-fail-missing
           - lib-deps-pass-complex
           - lib-deps-pass-valid
-          - incremental-sync
+          - e2e-incremental-sync
           - lib-large-lab
           - lib-buildcommand-size
           - lib-stage-env-size
