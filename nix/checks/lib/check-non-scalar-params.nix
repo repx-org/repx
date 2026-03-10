@@ -90,7 +90,7 @@ pkgs.runCommand "check-non-scalar-parameters" { } ''
   check_fail "nested list in parameter" "${toString nestedList.success}"
   check_fail "attrset in parameter list" "${toString attrsetInList.success}"
   check_fail "mixed scalar and non-scalar" "${toString mixedParams.success}"
-  check_eq  "all-scalar params succeed" "${toString allScalar.success}" "true"
+  check_eq  "all-scalar params succeed" "${toString allScalar.success}" "1"
   check_eq  "all-scalar combination count" "${toString allScalarCount}" "6"
 
   if [ "$fail" -ne 0 ]; then
