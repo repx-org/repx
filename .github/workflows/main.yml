@@ -46,22 +46,32 @@ jobs:
           - lib-dynamic-params-validation
           - lib-parameters
           - lib-parameters-types
-          - e2e-local-docker
-          - e2e-local-podman
-          - e2e-remote-local
+          - e2e-local-bwrap-pure
+          - e2e-local-bwrap-impure
+          - e2e-local-bwrap-mount-paths
+          - e2e-local-docker-pure
+          - e2e-local-docker-impure
+          - e2e-local-docker-mount-paths
+          - e2e-local-podman-pure
+          - e2e-local-podman-impure
+          - e2e-local-podman-mount-paths
+          - e2e-local-bwrap-node-local-path
           - e2e-remote-slurm
-          - static-analysis
           - non-nixos-standalone
-          - non-nixos-remote
+          - non-nixos-remote-slurm
+          - non-nixos-remote-bwrap-pure
+          - non-nixos-remote-bwrap-impure
+          - non-nixos-remote-bwrap-mount-paths
+          - non-nixos-remote-docker-pure
+          - non-nixos-remote-docker-impure
+          - non-nixos-remote-docker-mount-paths
+          - non-nixos-remote-podman-pure
+          - non-nixos-remote-podman-impure
+          - non-nixos-remote-podman-mount-paths
+          - static-analysis
           - lib-deps-fail-missing
           - lib-deps-pass-complex
           - lib-deps-pass-valid
-          - e2e-impure
-          - e2e-mount-paths
-          - e2e-impure-podman
-          - e2e-mount-paths-podman
-          - e2e-impure-docker
-          - e2e-mount-paths-docker
           - incremental-sync
           - lib-large-lab
           - lib-buildcommand-size

@@ -3,6 +3,7 @@
   repx,
   referenceLab,
   referenceLabNative,
+  referenceLabMountPaths,
   repx-lib,
 }:
 
@@ -18,35 +19,86 @@ let
   };
 
   runtimeChecks = {
-    e2e-local-docker = import ./checks/runtime/e2e-local-docker.nix { inherit pkgs repx referenceLab; };
-    e2e-local-podman = import ./checks/runtime/e2e-local-podman.nix { inherit pkgs repx referenceLab; };
-    e2e-remote-local = import ./checks/runtime/e2e-remote-local.nix {
+    e2e-local-bwrap-pure = import ./checks/runtime/e2e-local-bwrap-pure.nix {
       inherit pkgs repx referenceLab;
     };
-    e2e-remote-slurm = import ./checks/runtime/e2e-remote-slurm.nix {
+    e2e-local-bwrap-impure = import ./checks/runtime/e2e-local-bwrap-impure.nix {
       inherit pkgs repx referenceLab;
     };
-    static-analysis = import ./checks/runtime/static-analysis.nix { inherit pkgs repx; };
+    e2e-local-bwrap-mount-paths = import ./checks/runtime/e2e-local-bwrap-mount-paths.nix {
+      inherit pkgs repx;
+      referenceLab = referenceLabMountPaths;
+    };
+    e2e-local-docker-pure = import ./checks/runtime/e2e-local-docker-pure.nix {
+      inherit pkgs repx referenceLab;
+    };
+    e2e-local-docker-impure = import ./checks/runtime/e2e-local-docker-impure.nix {
+      inherit pkgs repx referenceLab;
+    };
+    e2e-local-docker-mount-paths = import ./checks/runtime/e2e-local-docker-mount-paths.nix {
+      inherit pkgs repx;
+      referenceLab = referenceLabMountPaths;
+    };
+    e2e-local-podman-pure = import ./checks/runtime/e2e-local-podman-pure.nix {
+      inherit pkgs repx referenceLab;
+    };
+    e2e-local-podman-impure = import ./checks/runtime/e2e-local-podman-impure.nix {
+      inherit pkgs repx referenceLab;
+    };
+    e2e-local-podman-mount-paths = import ./checks/runtime/e2e-local-podman-mount-paths.nix {
+      inherit pkgs repx;
+      referenceLab = referenceLabMountPaths;
+    };
+    e2e-local-bwrap-node-local-path = import ./checks/runtime/e2e-local-bwrap-node-local-path.nix {
+      inherit pkgs repx referenceLab;
+    };
+
+    e2e-remote-slurm = import ./checks/runtime/e2e-remote-slurm.nix { inherit pkgs repx referenceLab; };
+
     non-nixos-standalone = import ./checks/runtime/non-nixos-standalone.nix {
       inherit pkgs repx referenceLab;
     };
-    non-nixos-remote = import ./checks/runtime/non-nixos-remote.nix {
+    non-nixos-remote-slurm = import ./checks/runtime/non-nixos-remote-slurm.nix {
       inherit pkgs repx referenceLab;
     };
-    e2e-impure = import ./checks/runtime/e2e-impure.nix { inherit pkgs repx referenceLab; };
-    e2e-mount-paths = import ./checks/runtime/e2e-mount-paths.nix { inherit pkgs repx referenceLab; };
-    e2e-impure-podman = import ./checks/runtime/e2e-impure-podman.nix {
+    non-nixos-remote-bwrap-pure = import ./checks/runtime/non-nixos-remote-bwrap-pure.nix {
       inherit pkgs repx referenceLab;
     };
-    e2e-mount-paths-podman = import ./checks/runtime/e2e-mount-paths-podman.nix {
+    non-nixos-remote-bwrap-impure = import ./checks/runtime/non-nixos-remote-bwrap-impure.nix {
       inherit pkgs repx referenceLab;
     };
-    e2e-impure-docker = import ./checks/runtime/e2e-impure-docker.nix {
+    non-nixos-remote-bwrap-mount-paths =
+      import ./checks/runtime/non-nixos-remote-bwrap-mount-paths.nix
+        {
+          inherit pkgs repx;
+          referenceLab = referenceLabMountPaths;
+        };
+    non-nixos-remote-docker-pure = import ./checks/runtime/non-nixos-remote-docker-pure.nix {
       inherit pkgs repx referenceLab;
     };
-    e2e-mount-paths-docker = import ./checks/runtime/e2e-mount-paths-docker.nix {
+    non-nixos-remote-docker-impure = import ./checks/runtime/non-nixos-remote-docker-impure.nix {
       inherit pkgs repx referenceLab;
     };
+    non-nixos-remote-docker-mount-paths =
+      import ./checks/runtime/non-nixos-remote-docker-mount-paths.nix
+        {
+          inherit pkgs repx;
+          referenceLab = referenceLabMountPaths;
+        };
+    non-nixos-remote-podman-pure = import ./checks/runtime/non-nixos-remote-podman-pure.nix {
+      inherit pkgs repx referenceLab;
+    };
+    non-nixos-remote-podman-impure = import ./checks/runtime/non-nixos-remote-podman-impure.nix {
+      inherit pkgs repx referenceLab;
+    };
+    non-nixos-remote-podman-mount-paths =
+      import ./checks/runtime/non-nixos-remote-podman-mount-paths.nix
+        {
+          inherit pkgs repx;
+          referenceLab = referenceLabMountPaths;
+        };
+
+    static-analysis = import ./checks/runtime/static-analysis.nix { inherit pkgs repx; };
     incremental-sync = import ./checks/runtime/incremental-sync-test.nix {
       inherit pkgs repx referenceLab;
     };

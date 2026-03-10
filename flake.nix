@@ -41,7 +41,7 @@
         packages = {
           default = pkgs.repx;
           inherit (pkgs) repx repx-py;
-          inherit (labs) reference-lab reference-lab-native;
+          inherit (labs) reference-lab reference-lab-native reference-lab-mount-paths;
           inherit (docsOutputs) docs logo;
 
           repx-static = pkgs.pkgsStatic.callPackage ./default.nix { };
@@ -58,6 +58,7 @@
           inherit (pkgs) repx;
           referenceLab = labs.reference-lab;
           referenceLabNative = labs.reference-lab-native;
+          referenceLabMountPaths = labs.reference-lab-mount-paths;
         };
 
         formatter = import ./nix/formatters.nix { inherit pkgs; };

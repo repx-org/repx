@@ -47,6 +47,37 @@ impl SshTarget {
             .to_string()
     }
 
+    fn ssh_upload_file(&self, local_path: &Path, remote_path: &Path) -> Result<()> {
+        let local_file =
+            std::fs::File::open(local_path).map_err(|e| ClientError::Config(CoreError::Io(e)))?;
+
+        let remote_cmd = format!("cat > {}", shell_quote(&remote_path.to_string_lossy()));
+
+        let mut cmd = Command::new(self.local_tool("ssh"));
+        cmd.arg(&self.address)
+            .arg(&remote_cmd)
+            .stdin(local_file)
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped());
+
+        logging::log_and_print_command(&cmd);
+        let output = cmd
+            .output()
+            .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(ClientError::Config(CoreError::CommandFailed(format!(
+                "ssh upload failed for {} to {}: {}",
+                local_path.display(),
+                self.address,
+                stderr
+            ))));
+        }
+
+        Ok(())
+    }
+
     fn deploy_rsync_binary(&self) -> Result<String> {
         let rsync_local_path = self.local_tool("rsync");
         let hash = super::compute_file_hash(&rsync_local_path)?;
@@ -72,25 +103,7 @@ impl SshTarget {
 
         self.run_command("sh", &["-c", &mkdir_cmd.to_shell_string()])?;
 
-        let mut scp_cmd = Command::new(self.local_tool("scp"));
-        scp_cmd.arg(&rsync_local_path).arg(format!(
-            "{}:{}",
-            self.address,
-            remote_dest_path.display()
-        ));
-
-        logging::log_and_print_command(&scp_cmd);
-        let output = scp_cmd
-            .output()
-            .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
-
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(ClientError::Config(CoreError::CommandFailed(format!(
-                "scp failed for rsync binary to {}: {}",
-                self.address, stderr
-            ))));
-        }
+        self.ssh_upload_file(&rsync_local_path, &remote_dest_path)?;
 
         let chmod_cmd = RemoteCommand::new("chmod").arg("755").arg(&remote_dest_str);
         if let Err(e) = self.run_command("sh", &["-c", &chmod_cmd.to_shell_string()]) {
@@ -368,7 +381,6 @@ impl ArtifactSync for SshTarget {
 
     fn sync_artifact(&self, local_path: &Path, relative_path: &Path) -> Result<()> {
         let dest = self.artifacts_base_path().join(relative_path);
-        let dest_str = format!("{}:{}", self.address, dest.display());
 
         if let Some(parent) = dest.parent() {
             let mkdir_cmd = RemoteCommand::new("mkdir")
@@ -377,27 +389,11 @@ impl ArtifactSync for SshTarget {
             self.run_command("sh", &["-c", &mkdir_cmd.to_shell_string()])?;
         }
 
-        let mut scp_cmd = Command::new(self.local_tool("scp"));
         if local_path.is_dir() {
-            scp_cmd.arg("-r");
-        }
-        scp_cmd.arg(local_path).arg(&dest_str);
+            self.sync_directory_impl(local_path, &dest, true)?;
+        } else {
+            self.ssh_upload_file(local_path, &dest)?;
 
-        logging::log_and_print_command(&scp_cmd);
-        let output = scp_cmd
-            .output()
-            .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
-
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(ClientError::Config(CoreError::CommandFailed(format!(
-                "scp failed for {}: {}",
-                relative_path.display(),
-                stderr
-            ))));
-        }
-
-        if !local_path.is_dir() {
             if let Ok(meta) = std::fs::metadata(local_path) {
                 use std::os::unix::fs::MetadataExt;
                 let is_executable = (meta.mode() & 0o111) != 0;
@@ -774,25 +770,7 @@ impl JobRunner for SshTarget {
             .arg(&remote_versioned_dir.to_string_lossy());
         self.run_command("sh", &["-c", &mkdir_cmd.to_shell_string()])?;
 
-        let mut scp_cmd = Command::new(self.local_tool("scp"));
-        scp_cmd.arg(&runner_exe_path).arg(format!(
-            "{}:{}",
-            self.address,
-            remote_dest_path.display()
-        ));
-
-        logging::log_and_print_command(&scp_cmd);
-        let output = scp_cmd
-            .output()
-            .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
-
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(ClientError::Config(CoreError::CommandFailed(format!(
-                "scp failed for repx binary to {}: {}",
-                self.address, stderr
-            ))));
-        }
+        self.ssh_upload_file(&runner_exe_path, &remote_dest_path)?;
 
         let chmod_cmd = RemoteCommand::new("chmod")
             .arg("755")

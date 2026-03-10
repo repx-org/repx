@@ -6,8 +6,9 @@
 
 import ./helpers/mk-runtime-test.nix {
   inherit pkgs repx referenceLab;
-  testName = "repx-impure-mode-docker";
+  testName = "e2e-local-docker-impure";
   runtime = "docker";
   mountMode = "impure";
-  bannerText = "E2E IMPURE DOCKER TEST COMPLETED";
+  useSubset = true;
+  bannerText = "E2E LOCAL DOCKER IMPURE TEST COMPLETED";
 }
