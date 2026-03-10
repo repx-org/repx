@@ -4,9 +4,9 @@
   referenceLab,
 }:
 
-import ./helpers/mk-non-nixos-remote-test.nix {
+import ./helpers/mk-remote-test.nix {
   inherit pkgs repx referenceLab;
-  testName = "non-nixos-remote-podman-mount-paths";
+  testName = "e2e-remote-podman-mount-paths";
   runtime = "podman";
   mountMode = "mount-paths";
   runName = "mount-paths-run";
@@ -16,5 +16,5 @@ import ./helpers/mk-non-nixos-remote-test.nix {
         raise Exception(f"Mount path check failed! Expected 'HOST_SECRET_DATA', got '{mount_check}'")
     print(f"Mount path validation passed: job read '{mount_check}' from mounted path")
   '';
-  bannerText = "NON-NIXOS REMOTE PODMAN MOUNT-PATHS TEST COMPLETED";
+  bannerText = "E2E REMOTE PODMAN MOUNT-PATHS TEST COMPLETED";
 }

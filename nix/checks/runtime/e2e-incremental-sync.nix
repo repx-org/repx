@@ -9,7 +9,7 @@ let
 in
 
 pkgs.testers.runNixOSTest {
-  name = "repx-incremental-sync-test";
+  name = "e2e-incremental-sync";
 
   extraPythonPackages = _: [ getSubsetJobs ];
 

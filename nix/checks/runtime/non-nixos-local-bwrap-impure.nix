@@ -10,7 +10,7 @@ let
   repxBinary = "${repx}/bin/repx";
 in
 pkgs.testers.runNixOSTest {
-  name = "non-nixos-standalone";
+  name = "non-nixos-local-bwrap-impure";
 
   nodes.machine =
     { pkgs, ... }:
