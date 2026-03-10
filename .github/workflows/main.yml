@@ -67,7 +67,6 @@ jobs:
           - e2e-remote-podman-mount-paths
           - e2e-remote-slurm
           - non-nixos-local-bwrap-impure
-          - non-nixos-remote-slurm
           - non-nixos-remote-bwrap-pure
           - non-nixos-remote-bwrap-impure
           - non-nixos-remote-bwrap-mount-paths

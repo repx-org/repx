@@ -60,13 +60,15 @@ Validation of `repx-lib` Nix functions. Checks are prefixed with `lib-` and cove
 Full execution tests in NixOS VMs. These follow naming conventions that encode the test dimensions:
 
 - **`e2e-local-{runtime}-{mode}`** -- Local execution with a given runtime (`bwrap`, `docker`, `podman`) and sandbox mode (`pure`, `impure`, `mount-paths`).
-- **`non-nixos-remote-{runtime}-{mode}`** -- Remote SSH execution to a simulated non-NixOS target (no `/nix` on the remote). Same runtime/mode matrix.
-- **`e2e-remote-slurm`** / **`non-nixos-remote-slurm`** -- SLURM scheduler variants.
+- **`e2e-remote-{runtime}-{mode}`** -- Remote SSH execution to a NixOS target. Same runtime/mode matrix as local.
+- **`non-nixos-remote-bwrap-{mode}`** -- Remote SSH execution to a simulated non-NixOS target (no `/nix` on the remote), bwrap runtime only.
+- **`non-nixos-local-bwrap-impure`** -- Local execution on a simulated non-NixOS environment (no `/nix`).
+- **`e2e-remote-slurm`** -- SLURM scheduler over SSH.
 - Additional tests for GC, incremental sync, overlay fallback, scatter-gather, static analysis, and `node_local_path`.
 
 ```bash
 nix build .#checks.x86_64-linux.e2e-local-bwrap-pure
-nix build .#checks.x86_64-linux.non-nixos-remote-docker-impure
+nix build .#checks.x86_64-linux.e2e-remote-docker-impure
 ```
 
 ### Reference Labs

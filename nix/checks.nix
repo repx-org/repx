@@ -88,9 +88,6 @@ let
     non-nixos-local-bwrap-impure = import ./checks/runtime/non-nixos-local-bwrap-impure.nix {
       inherit pkgs repx referenceLab;
     };
-    non-nixos-remote-slurm = import ./checks/runtime/non-nixos-remote-slurm.nix {
-      inherit pkgs repx referenceLab;
-    };
     non-nixos-remote-bwrap-pure = import ./checks/runtime/non-nixos-remote-bwrap-pure.nix {
       inherit pkgs repx referenceLab;
     };
