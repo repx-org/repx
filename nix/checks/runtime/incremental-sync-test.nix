@@ -4,8 +4,14 @@
   referenceLab,
 }:
 
+let
+  getSubsetJobs = pkgs.python3Packages.callPackage ./helpers/get-subset-jobs { };
+in
+
 pkgs.testers.runNixOSTest {
   name = "repx-incremental-sync-test";
+
+  extraPythonPackages = _: [ getSubsetJobs ];
 
   nodes = {
     client =
@@ -64,6 +70,7 @@ pkgs.testers.runNixOSTest {
   };
 
   testScript = ''
+    from get_subset_jobs import get_subset_jobs
     start_all()
 
     client.succeed("mkdir -p /root/.ssh")
@@ -91,17 +98,25 @@ pkgs.testers.runNixOSTest {
     default_execution_type = "docker"
     [targets.remote.local]
     execution_types = ["docker"]
-    local_concurrency = 2
+    local_concurrency = 4
     """
     client.succeed("mkdir -p /root/.config/repx")
     client.succeed(f"cat <<EOF > /root/.config/repx/config.toml\n{config}\nEOF")
 
-    print("--- 3. First Sync & Run ---")
-    client.succeed("repx run simulation-run --lab ${referenceLab}")
+    subset_jobs = get_subset_jobs("${referenceLab}")
+    if not subset_jobs:
+        raise Exception("get_subset_jobs returned empty list for incremental-sync")
+    run_args = " ".join(subset_jobs)
+    print(f"Running subset: {run_args}")
+
+    server.wait_for_unit("docker.service")
+
+    print("--- First Sync & Run ---")
+    client.succeed(f"repx run {run_args} --lab ${referenceLab}")
 
     server.succeed("ls -R /home/repxuser/repx-store/artifacts/images")
 
-    print("--- 4. Sabotage: Deleting a layer ---")
+    print("--- Sabotage: Deleting a layer ---")
     layers = server.succeed("find /home/repxuser/repx-store/artifacts/images -name 'layer.tar'").splitlines()
     if not layers:
         raise Exception("No layers found on server!")
@@ -109,16 +124,14 @@ pkgs.testers.runNixOSTest {
     print(f"Deleting layer: {victim_layer}")
     server.succeed(f"rm {victim_layer}")
 
-
     server.succeed("rm -rf /home/repxuser/repx-store/outputs/*")
     server.succeed("rm -rf /home/repxuser/repx-store/cache/*")
 
-    print("--- 5. Second Sync & Run ---")
-    client.succeed("repx run simulation-run --lab ${referenceLab}")
+    print("--- Second Sync & Run ---")
+    client.succeed(f"repx run {run_args} --lab ${referenceLab}")
 
-    print("--- 6. Verify Restoration ---")
+    print("--- Verify Restoration ---")
     server.succeed(f"test -f {victim_layer}")
     print("Layer was successfully restored!")
-
   '';
 }

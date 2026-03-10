@@ -20,37 +20,25 @@ Build and run a specific check:
 nix build .#checks.x86_64-linux.<check-name>
 ```
 
+List all available checks:
+
+```bash
+nix flake show --json | jq -r '.checks."x86_64-linux" | keys[]'
+```
+
 ## Check Categories
 
 ### Lint Checks
 
-Static analysis and code quality:
+Static analysis and code quality checks prefixed with `lint-`. Covers Rust (clippy, machete), Nix (deadnix, statix), shell scripts (shellcheck, shebang), and formatting.
 
-| Check | Description |
-|-------|-------------|
-| `clippy` | Rust linter warnings |
-| `formatting` | Code style validation |
-| `machete` | Unused Cargo dependencies |
-| `deadnix` | Dead Nix code |
-| `statix` | Nix anti-patterns |
-| `shellcheck` | Shell script analysis |
-| `shebang` | Script interpreter validation |
+```bash
+nix build .#checks.x86_64-linux.lint-clippy
+```
 
 ### Rust Unit Tests
 
-Rust tests run inside NixOS VMs with the reference Lab available:
-
-| Check | Scope |
-|-------|-------|
-| `rs-unit` | Library and binary unit tests |
-| `rs-integration` | End-to-end, component, regression tests |
-| `rs-executor` | Executor crate tests |
-| `rs-client-tests` | Client crate tests (wave scheduler, sync) |
-| `rs-bwrap` | Bubblewrap runtime tests |
-| `rs-gc` | Garbage collection tests |
-| `rs-containers` | Docker and Podman tests |
-
-Example:
+Rust tests run inside NixOS VMs with the reference Lab available. Checks are prefixed with `rs-` and cover unit tests, integration tests, executor, client, bwrap, GC, and container runtimes.
 
 ```bash
 nix build .#checks.x86_64-linux.rs-unit
@@ -65,46 +53,33 @@ nix build .#checks.x86_64-linux.repx-py-tests
 
 ### Nix Library Tests
 
-Validation of the `repx-lib` Nix functions:
+Validation of `repx-lib` Nix functions. Checks are prefixed with `lib-` and cover parameter handling, pipeline DAG construction, cache invalidation, dependency resolution, and more.
 
-| Check | Description |
-|-------|-------------|
-| `integration` | Full Lab build validation |
-| `invalidation` | Cache invalidation behavior |
-| `parameters` | Parameter handling |
-| `parameters_types` | Parameter type handling |
-| `pipeline_logic` | Pipeline DAG construction |
-| `dynamic_parameters_validation` | Dynamic parameter validation |
-| `zip_parameters` | Zip parameter sweep behavior |
-| `pass_valid` | Dependency check (valid case) |
-| `pass_complex` | Complex dependency scenarios |
-| `fail_missing` | Missing dependency detection |
+### End-to-End Runtime Tests
 
-### End-to-End Tests
+Full execution tests in NixOS VMs. These follow naming conventions that encode the test dimensions:
 
-Full execution tests in NixOS VMs:
-
-| Check | Description |
-|-------|-------------|
-| `e2e-local` | Local bwrap execution |
-| `e2e-impure` | Impure mode with host mounts |
-| `e2e-impure-docker` | Docker container execution |
-| `e2e-impure-podman` | Podman container execution |
-| `e2e-mount-paths` | Explicit mount path configuration |
-| `e2e-mount-paths-docker` | Docker with mount paths |
-| `e2e-mount-paths-podman` | Podman with mount paths |
-| `e2e-remote-local` | SSH target, local scheduler |
-| `e2e-remote-slurm` | SSH target, SLURM scheduler |
-| `incremental-sync` | Incremental image synchronization |
-| `non-nixos-standalone` | Execution on non-NixOS host |
-| `non-nixos-remote` | Remote execution to non-NixOS target |
-| `static-analysis` | Static binary validation |
-
-Example:
+- **`e2e-local-{runtime}-{mode}`** -- Local execution with a given runtime (`bwrap`, `docker`, `podman`) and sandbox mode (`pure`, `impure`, `mount-paths`).
+- **`non-nixos-remote-{runtime}-{mode}`** -- Remote SSH execution to a simulated non-NixOS target (no `/nix` on the remote). Same runtime/mode matrix.
+- **`e2e-remote-slurm`** / **`non-nixos-remote-slurm`** -- SLURM scheduler variants.
+- Additional tests for GC, incremental sync, overlay fallback, scatter-gather, static analysis, and `node_local_path`.
 
 ```bash
-nix build .#checks.x86_64-linux.e2e-local
-nix build .#checks.x86_64-linux.incremental-sync
+nix build .#checks.x86_64-linux.e2e-local-bwrap-pure
+nix build .#checks.x86_64-linux.non-nixos-remote-docker-impure
+```
+
+### Reference Labs
+
+Tests use pre-built Labs as input. Each Lab targets a different testing scenario:
+
+- **`reference-lab`** -- Standard containerized lab with a multi-stage pipeline and parameter sweeps. Used by pure, impure, and most other tests.
+- **`reference-lab-native`** -- Same pipeline with `containerized = false`. Used by native execution tests.
+- **`reference-lab-mount-paths`** -- Parameterized lab with a job that reads from a bind-mounted host path. Used by mount-paths tests to verify the sandbox hole-punch actually works. Takes `mountDir` and `mountFile` as Nix arguments, so downstream consumers can reuse it to test their own impure paths.
+
+```bash
+nix build .#reference-lab
+nix build .#reference-lab-mount-paths
 ```
 
 ## Development Testing
@@ -138,24 +113,13 @@ fn test_execution() {
 }
 ```
 
-### Reference Lab
+### Test Helpers (Nix)
 
-The `reference-lab` package provides a pre-built Lab for testing:
+Runtime tests are built from shared helpers in `nix/checks/runtime/helpers/`:
 
-```bash
-nix build .#reference-lab
-```
-
-Tests automatically use this Lab via `REFERENCE_LAB_PATH`.
-
-## Writing Tests
-
-### Rust Guidelines
-
-1. Unit tests: `mod tests` blocks in source files
-2. Integration tests: `tests/` directory in crate root
-3. Use `TestContext` for tests requiring Lab artifacts
-4. Use `#[tokio::test]` for async tests
+- **`mk-runtime-test.nix`** -- Generates a local e2e test for a given runtime and sandbox mode.
+- **`mk-non-nixos-remote-test.nix`** -- Generates a two-VM (client + target) test simulating a non-NixOS remote via bwrap + ForceCommand.
+- **`get-subset-jobs/`** -- Python package that selects a small representative subset of jobs from a Lab, avoiding running the full parameter sweep (hundreds of jobs) during CI.
 
 ### Adding a New Check
 

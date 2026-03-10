@@ -6,8 +6,9 @@
 
 import ./helpers/mk-runtime-test.nix {
   inherit pkgs repx referenceLab;
-  testName = "repx-impure-mode-podman";
+  testName = "e2e-local-podman-impure";
   runtime = "podman";
   mountMode = "impure";
-  bannerText = "E2E IMPURE PODMAN TEST COMPLETED";
+  useSubset = true;
+  bannerText = "E2E LOCAL PODMAN IMPURE TEST COMPLETED";
 }
