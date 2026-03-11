@@ -76,6 +76,48 @@ struct VizArgs {
 
     #[arg(long, help = "Output format (png, pdf, svg, etc.)")]
     format: Option<String>,
+
+    #[arg(
+        long,
+        default_value_t = true,
+        help = "Draw pipeline DAG nodes and edges (default: on)"
+    )]
+    pipelines: bool,
+
+    #[arg(
+        long,
+        default_value_t = false,
+        help = "Draw run summary nodes listing their pipelines"
+    )]
+    runs: bool,
+
+    #[arg(
+        long,
+        default_value_t = false,
+        help = "Draw group cluster wrappers around run summaries (implies --runs)"
+    )]
+    groups: bool,
+
+    #[arg(
+        long,
+        default_value_t = false,
+        help = "Show varying parameter nodes on pipeline stages"
+    )]
+    show_params: bool,
+
+    #[arg(
+        long,
+        default_value_t = false,
+        help = "Hide intra-pipeline stage edges"
+    )]
+    no_intra_edges: bool,
+
+    #[arg(
+        long,
+        default_value_t = false,
+        help = "Hide inter-run dependency edges"
+    )]
+    no_inter_edges: bool,
 }
 
 #[derive(Args)]
@@ -220,10 +262,17 @@ fn main() {
             }
         }
         Commands::Viz(args) => {
+            let show_runs = args.runs || args.groups;
             let viz_args = repx_viz::VizArgs {
                 lab: cli.lab,
                 output: args.output,
                 format: args.format,
+                show_pipelines: args.pipelines,
+                show_runs,
+                show_groups: args.groups,
+                show_params: args.show_params,
+                show_intra_edges: !args.no_intra_edges,
+                show_inter_edges: !args.no_inter_edges,
             };
             if let Err(e) = repx_viz::run(viz_args) {
                 eprintln!("{}", format!("[ERROR] {}", e).red());

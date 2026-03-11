@@ -4,6 +4,7 @@ pub(crate) const DPI: &str = "300";
 pub(crate) const FONT_NAME: &str = "Helvetica, Arial, sans-serif";
 pub(crate) const RANK_SEP: &str = "0.6";
 pub(crate) const NODE_SEP: &str = "0.4";
+pub(crate) const GRAPH_PAD: &str = "0.5";
 pub(crate) const JOB_FONT_SIZE: &str = "12";
 pub(crate) const COLOR_CLUSTER_BORDER: &str = "#334155";
 pub(crate) const COLOR_GROUP_BORDER: &str = "#1e40af";
@@ -26,6 +27,8 @@ pub(crate) const SG_PHASE_FONT_SIZE: &str = "10";
 pub(crate) const SG_STEP_FONT_SIZE: &str = "9";
 
 const DEFAULT_FILL: &str = "#F8FAFC";
+
+pub(crate) const RUN_FILL: &str = "#F1F5F9";
 
 pub(crate) fn get_fill_color(name: &str) -> &'static str {
     let name_lower = name.to_lowercase();

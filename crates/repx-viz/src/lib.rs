@@ -15,9 +15,21 @@ pub struct VizArgs {
     pub lab: PathBuf,
     pub output: Option<PathBuf>,
     pub format: Option<String>,
+
+    pub show_pipelines: bool,
+    pub show_runs: bool,
+    pub show_groups: bool,
+
+    pub show_params: bool,
+    pub show_intra_edges: bool,
+    pub show_inter_edges: bool,
 }
 
 pub fn run(args: VizArgs) -> Result<()> {
+    if !args.show_pipelines && !args.show_runs && !args.show_groups {
+        anyhow::bail!("Nothing to draw. Enable at least one of: --pipelines, --runs, --groups.");
+    }
+
     let lab = repx_core::lab::load_from_path(&args.lab)?;
 
     let mut generator = VizGenerator::new(&lab);
