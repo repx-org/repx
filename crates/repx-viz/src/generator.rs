@@ -1,14 +1,10 @@
 use anyhow::Result;
 use repx_core::model::{Job, JobId, Lab, StageType};
 use serde_json::Value;
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 use crate::helpers::*;
 use crate::VizArgs;
-
-type StageJobs<'a> = BTreeMap<String, Vec<&'a JobId>>;
-
-type RunStages<'a> = BTreeMap<String, StageJobs<'a>>;
 
 pub(crate) struct VizGenerator<'a> {
     pub lab: &'a Lab,
@@ -42,13 +38,11 @@ impl<'a> VizGenerator<'a> {
         dot.push_str("    compound=\"true\";\n");
         dot.push_str("    rankdir=\"LR\";\n");
         dot.push_str("    bgcolor=\"#FFFFFF\";\n");
+        dot_writeln!(dot, "    pad=\"{}\";", GRAPH_PAD);
         dot_writeln!(dot, "    nodesep=\"{}\";", NODE_SEP);
         dot_writeln!(dot, "    ranksep=\"{}\";", RANK_SEP);
         dot_writeln!(dot, "    node [fontname=\"{}\"];", FONT_NAME);
         dot.push_str("    edge [color=\"#000000\", penwidth=\"1.2\", arrowsize=\"0.7\"];\n\n");
-
-        let mut grouped_jobs: RunStages<'_> = BTreeMap::new();
-        let mut run_anchors: HashMap<String, String> = HashMap::new();
 
         let mut job_to_run: HashMap<JobId, String> = HashMap::new();
         for (run_id, run) in &self.lab.runs {
@@ -57,309 +51,452 @@ impl<'a> VizGenerator<'a> {
             }
         }
 
+        let mut pipeline_jobs: BTreeMap<String, Vec<&JobId>> = BTreeMap::new();
+        let mut pipeline_representative: HashMap<String, &Job> = HashMap::new();
+
+        for (jid, job) in &self.lab.jobs {
+            let name = job.name.clone().unwrap_or_else(|| jid.to_string());
+            pipeline_jobs.entry(name.clone()).or_default().push(jid);
+            pipeline_representative.entry(name).or_insert(job);
+        }
+
+        let mut run_pipelines: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
         for (jid, job) in &self.lab.jobs {
             let run_name = job_to_run
                 .get(jid)
                 .cloned()
                 .unwrap_or_else(|| "detached".to_string());
-            let job_name = job.name.clone().unwrap_or_else(|| jid.to_string());
-
-            grouped_jobs
-                .entry(run_name.clone())
+            let pipeline_name = job.name.clone().unwrap_or_else(|| jid.to_string());
+            run_pipelines
+                .entry(run_name)
                 .or_default()
-                .entry(job_name.clone())
-                .or_default()
-                .push(jid);
-
-            run_anchors.entry(run_name).or_insert(job_name);
+                .insert(pipeline_name);
         }
 
-        let mut intra_edges: HashMap<(String, String, String, String), usize> = HashMap::new();
-        let mut inter_edges: HashSet<(String, String, String, String)> = HashSet::new();
+        if args.show_pipelines {
+            self.render_pipeline_layer(&mut dot, args, &pipeline_jobs, &pipeline_representative);
+        }
 
-        for (jid, job) in &self.lab.jobs {
-            let run_name = job_to_run
-                .get(jid)
-                .cloned()
-                .unwrap_or_else(|| "detached".to_string());
-            let clean_run = clean_id(&run_name);
-
-            let tgt_name = job.name.clone().unwrap_or_else(|| jid.to_string());
-            let clean_tgt = clean_id(&tgt_name);
-
-            let inputs = Self::get_job_inputs(job);
-
-            for mapping in inputs {
-                if let Some(sid) = &mapping.job_id {
-                    let src_run = job_to_run
-                        .get(sid)
-                        .cloned()
-                        .unwrap_or_else(|| "detached".to_string());
-
-                    if let Some(src_job) = self.lab.jobs.get(sid) {
-                        let src_name = src_job.name.clone().unwrap_or_else(|| sid.to_string());
-                        let clean_src_run = clean_id(&src_run);
-                        let clean_src = clean_id(&src_name);
-
-                        *intra_edges
-                            .entry((
-                                clean_src_run,
-                                clean_src,
-                                clean_run.clone(),
-                                clean_tgt.clone(),
-                            ))
-                            .or_default() += 1;
+        if args.show_runs {
+            let mut run_to_group: HashMap<String, String> = HashMap::new();
+            if args.show_groups {
+                for (group_name, run_ids) in &self.lab.groups {
+                    for rid in run_ids {
+                        run_to_group.insert(rid.to_string(), group_name.clone());
                     }
                 }
+            }
 
-                if let Some(srun) = &mapping.source_run {
-                    let dtype = mapping
-                        .dependency_type
-                        .map(|d| d.to_string())
-                        .unwrap_or_else(|| "hard".to_string());
-                    inter_edges.insert((
-                        srun.to_string(),
-                        clean_run.clone(),
-                        clean_tgt.clone(),
-                        dtype,
-                    ));
+            self.render_run_layer(&mut dot, args, &run_pipelines, &run_to_group);
+        }
+
+        if args.show_pipelines && args.show_inter_edges {
+            self.render_inter_run_edges(&mut dot, &job_to_run);
+        }
+
+        if args.show_pipelines && args.show_runs {
+            for (run_name, pipelines) in &run_pipelines {
+                let clean_run = clean_id(run_name);
+                let run_node = format!("run_{}", clean_run);
+                for pipeline_name in pipelines {
+                    let clean_pipe = clean_id(pipeline_name);
+                    let is_sg = self.scatter_gather_clean_names.contains(&clean_pipe);
+                    let pipe_node = if is_sg {
+                        format!("pipe_{}_sg_scatter", clean_pipe)
+                    } else {
+                        format!("pipe_{}", clean_pipe)
+                    };
+                    dot_writeln!(dot, "    {} -> {} [", run_node, pipe_node);
+                    dot.push_str("        style=\"dashed\",\n");
+                    dot.push_str("        color=\"#94a3b8\",\n");
+                    dot.push_str("        arrowhead=\"open\",\n");
+                    dot.push_str("        penwidth=\"0.8\"\n");
+                    dot.push_str("    ];\n");
                 }
             }
-        }
-
-        let has_groups = !self.lab.groups.is_empty();
-        let mut runs_in_groups: HashSet<String> = HashSet::new();
-
-        let mut run_to_prefix: HashMap<String, String> = HashMap::new();
-
-        if has_groups {
-            let mut sorted_groups: Vec<_> = self.lab.groups.iter().collect();
-            sorted_groups.sort_by_key(|(name, _)| *name);
-
-            for (group_name, group_run_ids) in sorted_groups {
-                if group_run_ids.is_empty() {
-                    continue;
-                }
-
-                let clean_group = clean_id(group_name);
-                dot_writeln!(dot, "    subgraph cluster_group_{} {{", clean_group);
-                dot_writeln!(dot, "        label=\"@{}\";", escape_dot_label(group_name));
-                dot.push_str("        style=\"solid,rounded\";\n");
-                dot_writeln!(dot, "        color=\"{}\";", COLOR_GROUP_BORDER);
-                dot_writeln!(dot, "        fontsize=\"{}\";", GROUP_FONT_SIZE);
-                dot.push_str("        penwidth=\"2\";\n");
-                dot.push_str("        margin=\"20\";\n\n");
-
-                for run_id in group_run_ids {
-                    let run_name = run_id.as_str();
-                    runs_in_groups.insert(run_name.to_string());
-                    if let Some(jobs) = grouped_jobs.get(run_name) {
-                        let clean_run = clean_id(run_name);
-                        let prefix = format!("{}_{}", clean_group, clean_run);
-                        run_to_prefix.insert(clean_run, prefix.clone());
-                        self.render_run_cluster(&mut dot, run_name, &prefix, jobs, "        ");
-                    }
-                }
-
-                dot.push_str("    }\n\n");
-            }
-        }
-
-        for (run_name, jobs) in &grouped_jobs {
-            if has_groups && runs_in_groups.contains(run_name) {
-                continue;
-            }
-            let clean_run = clean_id(run_name);
-            let prefix = clean_run.clone();
-            run_to_prefix.insert(clean_run, prefix.clone());
-            self.render_run_cluster(&mut dot, run_name, &prefix, jobs, "    ");
-        }
-
-        for ((src_run, src_job_name, dst_run, dst_job_name), cnt) in &intra_edges {
-            if src_run != dst_run {
-                continue;
-            }
-
-            let Some(prefix) = run_to_prefix.get(src_run) else {
-                continue;
-            };
-
-            let width = if *cnt > 1 { "2.0" } else { "1.2" };
-
-            let src_node = format!("{}_{}", prefix, src_job_name);
-            let dst_node = format!("{}_{}", prefix, dst_job_name);
-
-            let src_is_sg = self.is_scatter_gather_stage_by_clean_name(src_job_name);
-            let dst_is_sg = self.is_scatter_gather_stage_by_clean_name(dst_job_name);
-
-            let actual_src = if src_is_sg {
-                format!("{}_sg_gather", src_node)
-            } else {
-                src_node.clone()
-            };
-            let actual_dst = if dst_is_sg {
-                format!("{}_sg_scatter", dst_node)
-            } else {
-                dst_node.clone()
-            };
-
-            dot_write!(
-                dot,
-                "    {} -> {} [penwidth=\"{}\"",
-                actual_src,
-                actual_dst,
-                width
-            );
-            if src_is_sg {
-                dot_write!(dot, ", ltail=\"cluster_{}_sg\"", src_node);
-            }
-            if dst_is_sg {
-                dot_write!(dot, ", lhead=\"cluster_{}_sg\"", dst_node);
-            }
-            dot.push_str("];\n");
-        }
-
-        let mut sorted_inter: Vec<_> = inter_edges.into_iter().collect();
-        sorted_inter.sort();
-
-        for (srun, tgt_run, tgt_job, dtype) in sorted_inter {
-            let Some(anchor_job) = run_anchors.get(&srun) else {
-                continue;
-            };
-            let clean_srun = clean_id(&srun);
-
-            let Some(src_prefix) = run_to_prefix.get(&clean_srun) else {
-                continue;
-            };
-            let Some(tgt_prefix) = run_to_prefix.get(&tgt_run) else {
-                continue;
-            };
-
-            let clean_anchor = clean_id(anchor_job);
-            let unique_anchor = format!("{}_{}", src_prefix, clean_anchor);
-            let prefixed_tgt = format!("{}_{}", tgt_prefix, tgt_job);
-
-            let style = if dtype == "soft" { "dashed" } else { "solid" };
-            dot_writeln!(dot, "    {} -> {} [", unique_anchor, prefixed_tgt);
-            dot_writeln!(dot, "        ltail=\"cluster_{}\",", src_prefix);
-            dot_writeln!(dot, "        style=\"{}\",", style);
-            dot.push_str("        color=\"#64748B\"\n");
-            dot.push_str("    ];\n");
         }
 
         dot.push_str("}\n");
         Ok(dot)
     }
 
-    fn is_scatter_gather_stage_by_clean_name(&self, clean_name: &str) -> bool {
-        self.scatter_gather_clean_names.contains(clean_name)
-    }
-
-    #[allow(clippy::expect_used)]
-    fn render_run_cluster(
+    fn render_pipeline_layer(
         &self,
         dot: &mut String,
-        run_name: &str,
-        prefix: &str,
-        jobs: &BTreeMap<String, Vec<&JobId>>,
-        indent: &str,
+        args: &VizArgs,
+        pipeline_jobs: &BTreeMap<String, Vec<&JobId>>,
+        pipeline_representative: &HashMap<String, &Job>,
     ) {
-        dot_writeln!(dot, "{}subgraph cluster_{} {{", indent, prefix);
-        dot_writeln!(
-            dot,
-            "{}    label=\"Run: {}\";",
-            indent,
-            escape_dot_label(run_name)
-        );
-        dot_writeln!(dot, "{}    style=\"dashed,rounded\";", indent);
-        dot_writeln!(dot, "{}    color=\"{}\";", indent, COLOR_CLUSTER_BORDER);
-        dot_writeln!(dot, "{}    fontsize=\"14\";", indent);
-        dot_writeln!(dot, "{}    margin=\"16\";", indent);
-
-        for (job_name, job_ids) in jobs {
+        for (pipeline_name, job_ids) in pipeline_jobs {
             let count = job_ids.len();
-            let first_job = job_ids.first().and_then(|jid| self.lab.jobs.get(jid));
-            let is_sg = first_job
+            let clean_pipe = clean_id(pipeline_name);
+            let node_id = format!("pipe_{}", clean_pipe);
+
+            let is_sg = pipeline_representative
+                .get(pipeline_name)
                 .map(|j| j.stage_type == StageType::ScatterGather)
                 .unwrap_or(false);
 
-            let clean_job = clean_id(job_name);
-            let unique_node_id = format!("{}_{}", prefix, clean_job);
-
             if is_sg {
+                #[allow(clippy::expect_used)]
+                let rep = pipeline_representative
+                    .get(pipeline_name)
+                    .expect("representative must exist if pipeline is in map");
                 self.render_scatter_gather_subgraph(
                     dot,
-                    job_name,
-                    &unique_node_id,
+                    pipeline_name,
+                    &node_id,
                     count,
-                    first_job.expect("first_job is guaranteed Some when is_sg is true"),
-                    &format!("{}    ", indent),
+                    rep,
+                    "    ",
                 );
             } else {
-                let job_label = format!("{}\\n(x{})", escape_dot_label(job_name), count);
-                let fill_color = get_fill_color(job_name);
+                let job_label = format!("{}\\n(x{})", escape_dot_label(pipeline_name), count);
+                let fill_color = get_fill_color(pipeline_name);
 
-                dot_writeln!(dot, "{}    {} [", indent, unique_node_id);
-                dot_writeln!(dot, "{}        label=\"{}\",", indent, job_label);
-                dot_writeln!(dot, "{}        shape=\"box\",", indent);
-                dot_writeln!(dot, "{}        style=\"filled,rounded\",", indent);
-                dot_writeln!(dot, "{}        fontsize=\"{}\",", indent, JOB_FONT_SIZE);
-                dot_writeln!(dot, "{}        fillcolor=\"{}\",", indent, fill_color);
-                dot_writeln!(dot, "{}        penwidth=\"1\"", indent);
-                dot_writeln!(dot, "{}    ];", indent);
+                dot_writeln!(dot, "    {} [", node_id);
+                dot_writeln!(dot, "        label=\"{}\",", job_label);
+                dot.push_str("        shape=\"box\",\n");
+                dot.push_str("        style=\"filled,rounded\",\n");
+                dot_writeln!(dot, "        fontsize=\"{}\",", JOB_FONT_SIZE);
+                dot_writeln!(dot, "        fillcolor=\"{}\",", fill_color);
+                dot.push_str("        penwidth=\"1\"\n");
+                dot.push_str("    ];\n");
             }
 
-            let varying_params = self.get_varying_params(job_ids);
-            for (p_key, p_vals) in varying_params {
-                let clean_key = clean_id(&p_key);
-                let param_node_id = format!("p_{}_{}_{}", prefix, clean_job, clean_key);
+            if args.show_params {
+                let varying = self.get_varying_params(job_ids);
+                for (p_key, p_vals) in varying {
+                    let clean_key = clean_id(&p_key);
+                    let param_node_id = format!("pparam_{}_{}", clean_pipe, clean_key);
 
-                let clean_vals: Vec<String> = p_vals
-                    .iter()
-                    .map(|v| smart_truncate(v, PARAM_MAX_WIDTH))
-                    .collect();
+                    let clean_vals: Vec<String> = p_vals
+                        .iter()
+                        .map(|v| smart_truncate(v, PARAM_MAX_WIDTH))
+                        .collect();
+                    let mut val_str = clean_vals.join(", ");
+                    if val_str.chars().count() > PARAM_MAX_WIDTH {
+                        let keep = PARAM_MAX_WIDTH.saturating_sub(2);
+                        let truncated: String = val_str.chars().take(keep).collect();
+                        val_str = format!("{}..", truncated);
+                    }
+                    let label = format!(
+                        "{}:\\n{}",
+                        escape_dot_label(&p_key),
+                        escape_dot_label(&val_str)
+                    );
 
-                let mut val_str = clean_vals.join(", ");
-                if val_str.chars().count() > PARAM_MAX_WIDTH {
-                    let keep = PARAM_MAX_WIDTH.saturating_sub(2);
-                    let truncated: String = val_str.chars().take(keep).collect();
-                    val_str = format!("{}..", truncated);
+                    dot_writeln!(dot, "    {} [", param_node_id);
+                    dot_writeln!(dot, "        label=\"{}\",", label);
+                    dot_writeln!(dot, "        shape=\"{}\",", PARAM_SHAPE);
+                    dot.push_str("        style=\"filled\",\n");
+                    dot_writeln!(dot, "        fillcolor=\"{}\",", PARAM_FILL);
+                    dot_writeln!(dot, "        color=\"{}\",", PARAM_BORDER);
+                    dot_writeln!(dot, "        fontcolor=\"{}\",", PARAM_FONT_COLOR);
+                    dot_writeln!(dot, "        fontsize=\"{}\",", PARAM_FONT_SIZE);
+                    dot.push_str("        margin=\"0.1,0.05\",\n");
+                    dot.push_str("        penwidth=\"0.8\"\n");
+                    dot.push_str("    ];\n");
+
+                    let target = if is_sg {
+                        format!("pipe_{}_sg_scatter", clean_pipe)
+                    } else {
+                        node_id.clone()
+                    };
+                    dot_writeln!(dot, "    {} -> {} [", param_node_id, target);
+                    dot.push_str("        style=\"dotted\",\n");
+                    dot_writeln!(dot, "        color=\"{}\",", PARAM_BORDER);
+                    dot.push_str("        arrowhead=\"dot\",\n");
+                    dot.push_str("        arrowsize=\"0.5\",\n");
+                    dot.push_str("        penwidth=\"1.0\"\n");
+                    dot.push_str("    ];\n");
                 }
-
-                let label = format!(
-                    "{}:\\n{}",
-                    escape_dot_label(&p_key),
-                    escape_dot_label(&val_str)
-                );
-
-                dot_writeln!(dot, "{}    {} [", indent, param_node_id);
-                dot_writeln!(dot, "{}        label=\"{}\",", indent, label);
-                dot_writeln!(dot, "{}        shape=\"{}\",", indent, PARAM_SHAPE);
-                dot_writeln!(dot, "{}        style=\"filled\",", indent);
-                dot_writeln!(dot, "{}        fillcolor=\"{}\",", indent, PARAM_FILL);
-                dot_writeln!(dot, "{}        color=\"{}\",", indent, PARAM_BORDER);
-                dot_writeln!(dot, "{}        fontcolor=\"{}\",", indent, PARAM_FONT_COLOR);
-                dot_writeln!(dot, "{}        fontsize=\"{}\",", indent, PARAM_FONT_SIZE);
-                dot_writeln!(dot, "{}        margin=\"0.1,0.05\",", indent);
-                dot_writeln!(dot, "{}        penwidth=\"0.8\"", indent);
-                dot_writeln!(dot, "{}    ];", indent);
-
-                let target_node = if is_sg {
-                    format!("{}_sg_scatter", unique_node_id)
-                } else {
-                    unique_node_id.clone()
-                };
-
-                dot_writeln!(dot, "{}    {} -> {} [", indent, param_node_id, target_node);
-                dot_writeln!(dot, "{}        style=\"dotted\",", indent);
-                dot_writeln!(dot, "{}        color=\"{}\",", indent, PARAM_BORDER);
-                dot_writeln!(dot, "{}        arrowhead=\"dot\",", indent);
-                dot_writeln!(dot, "{}        arrowsize=\"0.5\",", indent);
-                dot_writeln!(dot, "{}        penwidth=\"1.0\"", indent);
-                dot_writeln!(dot, "{}    ];", indent);
             }
         }
-        dot_writeln!(dot, "{}}}", indent);
+
+        if args.show_intra_edges {
+            let mut drawn: HashSet<(String, String)> = HashSet::new();
+
+            for job in self.lab.jobs.values() {
+                let tgt_name = job.name.clone().unwrap_or_default();
+                let clean_tgt = clean_id(&tgt_name);
+
+                for mapping in Self::get_job_inputs(job) {
+                    if let Some(sid) = &mapping.job_id {
+                        if let Some(src_job) = self.lab.jobs.get(sid) {
+                            let src_name = src_job.name.clone().unwrap_or_default();
+                            let clean_src = clean_id(&src_name);
+
+                            if clean_src == clean_tgt {
+                                continue;
+                            }
+
+                            let key = (clean_src.clone(), clean_tgt.clone());
+                            if drawn.contains(&key) {
+                                continue;
+                            }
+                            drawn.insert(key);
+
+                            let src_is_sg = self.scatter_gather_clean_names.contains(&clean_src);
+                            let dst_is_sg = self.scatter_gather_clean_names.contains(&clean_tgt);
+
+                            let actual_src = if src_is_sg {
+                                format!("pipe_{}_sg_gather", clean_src)
+                            } else {
+                                format!("pipe_{}", clean_src)
+                            };
+                            let actual_dst = if dst_is_sg {
+                                format!("pipe_{}_sg_scatter", clean_tgt)
+                            } else {
+                                format!("pipe_{}", clean_tgt)
+                            };
+
+                            dot_write!(
+                                dot,
+                                "    {} -> {} [penwidth=\"1.2\"",
+                                actual_src,
+                                actual_dst
+                            );
+                            if src_is_sg {
+                                dot_write!(dot, ", ltail=\"cluster_pipe_{}_sg\"", clean_src);
+                            }
+                            if dst_is_sg {
+                                dot_write!(dot, ", lhead=\"cluster_pipe_{}_sg\"", clean_tgt);
+                            }
+                            dot.push_str("];\n");
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    fn render_run_layer(
+        &self,
+        dot: &mut String,
+        args: &VizArgs,
+        run_pipelines: &BTreeMap<String, BTreeSet<String>>,
+        run_to_group: &HashMap<String, String>,
+    ) {
+        let mut groups: BTreeMap<String, Vec<String>> = BTreeMap::new();
+        let mut ungrouped: Vec<String> = Vec::new();
+
+        for run_name in run_pipelines.keys() {
+            if let Some(group) = run_to_group.get(run_name) {
+                groups
+                    .entry(group.clone())
+                    .or_default()
+                    .push(run_name.clone());
+            } else {
+                ungrouped.push(run_name.clone());
+            }
+        }
+        ungrouped.sort();
+
+        if args.show_groups {
+            for (group_name, mut run_names) in groups {
+                run_names.sort();
+                let clean_group = clean_id(&group_name);
+                dot_writeln!(dot, "    subgraph cluster_group_{} {{", clean_group);
+                dot_writeln!(dot, "        label=\"@{}\";", escape_dot_label(&group_name));
+                dot.push_str("        style=\"solid,rounded\";\n");
+                dot_writeln!(dot, "        color=\"{}\";", COLOR_GROUP_BORDER);
+                dot_writeln!(dot, "        fontsize=\"{}\";", GROUP_FONT_SIZE);
+                dot.push_str("        penwidth=\"2\";\n");
+                dot.push_str("        margin=\"20\";\n\n");
+
+                for run_name in &run_names {
+                    if let Some(pipelines) = run_pipelines.get(run_name) {
+                        self.render_run_summary_node(dot, run_name, pipelines, "        ");
+                    }
+                }
+
+                dot.push_str("    }\n\n");
+            }
+        } else {
+            for (_group_name, mut run_names) in groups {
+                run_names.sort();
+                for run_name in &run_names {
+                    if let Some(pipelines) = run_pipelines.get(run_name) {
+                        self.render_run_summary_node(dot, run_name, pipelines, "    ");
+                    }
+                }
+            }
+        }
+
+        for run_name in &ungrouped {
+            if let Some(pipelines) = run_pipelines.get(run_name) {
+                self.render_run_summary_node(dot, run_name, pipelines, "    ");
+            }
+        }
+    }
+
+    fn render_run_summary_node(
+        &self,
+        dot: &mut String,
+        run_name: &str,
+        pipelines: &BTreeSet<String>,
+        indent: &str,
+    ) {
+        let clean_run = clean_id(run_name);
+        let node_id = format!("run_{}", clean_run);
+
+        let pipe_list = pipelines
+            .iter()
+            .map(|p| escape_dot_label(p))
+            .collect::<Vec<_>>()
+            .join(", ");
+
+        let label = format!(
+            "{}|{{pipelines: {}}}",
+            escape_dot_label(run_name),
+            pipe_list
+        );
+
+        dot_writeln!(dot, "{}{} [", indent, node_id);
+        dot_writeln!(dot, "{}    label=\"{}\",", indent, label);
+        dot.push_str(&format!("{}    shape=\"record\",\n", indent));
+        dot.push_str(&format!("{}    style=\"filled,rounded\",\n", indent));
+        dot_writeln!(dot, "{}    fillcolor=\"{}\",", indent, RUN_FILL);
+        dot_writeln!(dot, "{}    color=\"{}\",", indent, COLOR_CLUSTER_BORDER);
+        dot_writeln!(dot, "{}    fontsize=\"{}\",", indent, JOB_FONT_SIZE);
+        dot.push_str(&format!("{}    penwidth=\"1.5\"\n", indent));
+        dot_writeln!(dot, "{}];", indent);
+    }
+
+    fn render_inter_run_edges(&self, dot: &mut String, job_to_run: &HashMap<JobId, String>) {
+        let mut drawn: HashSet<(String, String, String)> = HashSet::new();
+
+        for job in self.lab.jobs.values() {
+            let tgt_name = job.name.clone().unwrap_or_default();
+            let clean_tgt = clean_id(&tgt_name);
+
+            for mapping in Self::get_job_inputs(job) {
+                if let Some(srun) = &mapping.source_run {
+                    let dtype = mapping
+                        .dependency_type
+                        .map(|d| d.to_string())
+                        .unwrap_or_else(|| "hard".to_string());
+
+                    let src_pipelines: BTreeSet<String> = self
+                        .lab
+                        .runs
+                        .get(srun)
+                        .map(|run| {
+                            run.jobs
+                                .iter()
+                                .filter_map(|jid| self.lab.jobs.get(jid))
+                                .filter_map(|j| j.name.clone())
+                                .collect()
+                        })
+                        .unwrap_or_default();
+
+                    let filtered: BTreeSet<String> =
+                        if let Some(filter) = &mapping.source_stage_filter {
+                            src_pipelines.into_iter().filter(|n| n == filter).collect()
+                        } else {
+                            src_pipelines
+                        };
+
+                    for src_pipeline in filtered {
+                        let clean_src = clean_id(&src_pipeline);
+                        let key = (clean_src.clone(), clean_tgt.clone(), dtype.clone());
+                        if drawn.contains(&key) {
+                            continue;
+                        }
+                        drawn.insert(key);
+
+                        let src_is_sg = self.scatter_gather_clean_names.contains(&clean_src);
+                        let dst_is_sg = self.scatter_gather_clean_names.contains(&clean_tgt);
+
+                        let actual_src = if src_is_sg {
+                            format!("pipe_{}_sg_gather", clean_src)
+                        } else {
+                            format!("pipe_{}", clean_src)
+                        };
+                        let actual_dst = if dst_is_sg {
+                            format!("pipe_{}_sg_scatter", clean_tgt)
+                        } else {
+                            format!("pipe_{}", clean_tgt)
+                        };
+
+                        let style = if dtype == "soft" { "dashed" } else { "solid" };
+                        dot_writeln!(dot, "    {} -> {} [", actual_src, actual_dst);
+                        if src_is_sg {
+                            dot_writeln!(dot, "        ltail=\"cluster_pipe_{}_sg\",", clean_src);
+                        }
+                        if dst_is_sg {
+                            dot_writeln!(dot, "        lhead=\"cluster_pipe_{}_sg\",", clean_tgt);
+                        }
+                        dot_writeln!(dot, "        style=\"{}\",", style);
+                        dot.push_str("        color=\"#64748B\"\n");
+                        dot.push_str("    ];\n");
+                    }
+                }
+
+                if let Some(sid) = &mapping.job_id {
+                    if let Some(src_job) = self.lab.jobs.get(sid) {
+                        let src_name = src_job.name.clone().unwrap_or_default();
+                        let clean_src = clean_id(&src_name);
+
+                        if clean_src == clean_tgt {
+                            continue;
+                        }
+
+                        let src_run = job_to_run.get(sid);
+                        let tgt_run = self.lab.jobs.iter().find_map(|(jid, j)| {
+                            if j.name.as_deref().map(clean_id).as_deref() == Some(&clean_tgt) {
+                                job_to_run.get(jid)
+                            } else {
+                                None
+                            }
+                        });
+
+                        if src_run != tgt_run {
+                            let dtype = "hard".to_string();
+                            let key = (clean_src.clone(), clean_tgt.clone(), dtype.clone());
+                            if drawn.contains(&key) {
+                                continue;
+                            }
+                            drawn.insert(key);
+
+                            let src_is_sg = self.scatter_gather_clean_names.contains(&clean_src);
+                            let dst_is_sg = self.scatter_gather_clean_names.contains(&clean_tgt);
+
+                            let actual_src = if src_is_sg {
+                                format!("pipe_{}_sg_gather", clean_src)
+                            } else {
+                                format!("pipe_{}", clean_src)
+                            };
+                            let actual_dst = if dst_is_sg {
+                                format!("pipe_{}_sg_scatter", clean_tgt)
+                            } else {
+                                format!("pipe_{}", clean_tgt)
+                            };
+
+                            dot_writeln!(dot, "    {} -> {} [", actual_src, actual_dst);
+                            if src_is_sg {
+                                dot_writeln!(
+                                    dot,
+                                    "        ltail=\"cluster_pipe_{}_sg\",",
+                                    clean_src
+                                );
+                            }
+                            if dst_is_sg {
+                                dot_writeln!(
+                                    dot,
+                                    "        lhead=\"cluster_pipe_{}_sg\",",
+                                    clean_tgt
+                                );
+                            }
+                            dot.push_str("        style=\"solid\",\n");
+                            dot.push_str("        color=\"#64748B\"\n");
+                            dot.push_str("    ];\n");
+                        }
+                    }
+                }
+            }
+        }
     }
 
     #[allow(clippy::expect_used)]
