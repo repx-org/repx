@@ -15,7 +15,7 @@
     (pkgs.python3.withPackages (ps: [
       ps.pandas
       ps.matplotlib
-      pkgs.repx-py
+      pkgs.repx
     ]))
   ];
 
