@@ -121,6 +121,9 @@ let
       inherit pkgs repx repx-lib;
       gitHash = "check";
     };
+    e2e-examples = import ./checks/runtime/e2e-examples.nix {
+      inherit pkgs repx repx-lib;
+    };
   };
 
   libChecks = {
@@ -146,7 +149,6 @@ let
     "lib-non-scalar-params" = pkgs.callPackage ./checks/lib/check-non-scalar-params.nix {
       inherit repx-lib;
     };
-    "lib-repx-examples" = pkgs.callPackage ./checks/lib/check-repx-examples.nix { inherit repx; };
   }
   // (import ./checks/lib/check-deps.nix { inherit pkgs; });
 
