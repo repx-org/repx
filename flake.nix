@@ -40,11 +40,9 @@
       {
         packages = {
           default = pkgs.repx;
-          inherit (pkgs) repx repx-py;
+          inherit (pkgs) repx;
           inherit (labs) reference-lab reference-lab-native reference-lab-mount-paths;
           inherit (docsOutputs) docs logo;
-
-          repx-static = pkgs.pkgsStatic.callPackage ./default.nix { };
         };
 
         apps = import ./nix/apps.nix {
@@ -74,7 +72,6 @@
             clippy
             cargo-machete
 
-            repx-py
             (python3.withPackages (ps: [
               ps.pytest
               ps.pandas
