@@ -1,4 +1,4 @@
 { pkgs, referenceLab }:
-pkgs.repx-py.override {
+pkgs.callPackage ../../pkgs/repx-py.nix {
   reference-lab = referenceLab;
 }

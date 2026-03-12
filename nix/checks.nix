@@ -146,11 +146,12 @@ let
     "lib-non-scalar-params" = pkgs.callPackage ./checks/lib/check-non-scalar-params.nix {
       inherit repx-lib;
     };
+    "lib-repx-examples" = pkgs.callPackage ./checks/lib/check-repx-examples.nix { inherit repx; };
   }
   // (import ./checks/lib/check-deps.nix { inherit pkgs; });
 
   unitChecks = {
-    repx-py-tests = import ./checks/unit/repx-py.nix { inherit pkgs referenceLab; };
+    py-tests = import ./checks/unit/repx-py.nix { inherit pkgs referenceLab; };
     rs-client-tests = import ./checks/unit/repx-rs.nix {
       inherit pkgs referenceLab referenceLabNative;
       testName = "repx-rs-client-tests";

@@ -14,16 +14,6 @@
       meta.description = "The RepX runner binary";
     };
 
-  check-repx-examples =
-    flake-utils.lib.mkApp {
-      drv = pkgs.callPackage ./apps/check-repx-examples.nix {
-        inherit repx;
-      };
-    }
-    // {
-      meta.description = "Check RepX examples for correctness";
-    };
-
   docs-preview =
     flake-utils.lib.mkApp {
       drv = pkgs.writeShellScriptBin "docs-preview" ''
