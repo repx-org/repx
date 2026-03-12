@@ -32,7 +32,7 @@ jobs:
       fail-fast: false
       matrix:
         check:
-          - repx-py-tests
+          - py-tests
           - rs-client-tests
           - rs-unit
           - rs-bwrap
@@ -81,6 +81,7 @@ jobs:
           - lib-resource-hints
           - lib-zip-params
           - lib-non-scalar-params
+          - lib-repx-examples
           - e2e-bwrap-overlay-fallback
           - e2e-gc-local
           - e2e-gc-remote
@@ -93,13 +94,3 @@ jobs:
       - name: Run E2E Check
         run: nix build -L .#checks.x86_64-linux.${{ matrix.check }}
 
-  example-checks:
-    name: Example Checks
-    needs: fast-checks
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: DeterminateSystems/nix-installer-action@main
-
-      - name: Run Example Checks
-        run: nix run -L .#check-repx-examples

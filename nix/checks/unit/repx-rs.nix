@@ -6,7 +6,7 @@
   cargoTestArgs,
 }:
 let
-  repxSrc = (pkgs.callPackage ../../../default.nix { }).src;
+  repxSrc = (pkgs.callPackage ../../pkgs/repx-rs.nix { }).src;
   cargoDeps = pkgs.rustPlatform.importCargoLock {
     lockFile = ../../../Cargo.lock;
   };
