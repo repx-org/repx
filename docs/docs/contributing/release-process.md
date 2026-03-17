@@ -44,8 +44,6 @@ nix flake check
 
 # Build all packages
 nix build .#repx
-nix build .#repx-static
-nix build .#repx-py
 nix build .#docs
 
 # Verify examples

@@ -46,15 +46,14 @@ RepX is used as a **flake input** in your project's `flake.nix`. This is the sta
 
       devShells.${system}.default = pkgs.mkShell {
         buildInputs = [
-          pkgs.repx       # The CLI
-          pkgs.repx-py    # The Python client
+          pkgs.repx       # The CLI + Python client
         ];
       };
     };
 }
 ```
 
-The `devShell` gives you both the `repx` CLI and `repx-py` in your development environment. Enter it with `nix develop` or use [direnv](https://direnv.net/) with an `.envrc` containing `use flake`.
+The `devShell` gives you `repx` (which includes both the CLI and `repx-py`) in your development environment. Enter it with `nix develop` or use [direnv](https://direnv.net/) with an `.envrc` containing `use flake`.
 
 See the [examples/](https://github.com/repx-org/repx/tree/main/examples) directory for complete working projects.
 

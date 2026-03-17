@@ -27,8 +27,6 @@ nix flake show
 | Output | Description |
 |--------|-------------|
 | `packages.repx` | The RepX CLI binary |
-| `packages.repx-static` | Statically linked binary (musl) |
-| `packages.repx-py` | Python analysis library |
 | `packages.docs` | Built documentation site |
 | `packages.reference-lab` | Reference Lab for testing |
 
@@ -59,22 +57,10 @@ nix build
 # Output: ./result/bin/repx
 ```
 
-### Build Static Binary
-
-```bash
-nix build .#repx-static
-```
-
 ### Build Documentation
 
 ```bash
 nix build .#docs
-```
-
-### Build Python Package
-
-```bash
-nix build .#repx-py
 ```
 
 ## Development Workflow
