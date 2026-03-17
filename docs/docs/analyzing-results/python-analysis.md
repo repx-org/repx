@@ -14,7 +14,7 @@ Analyzing reproducible experiments often requires locating specific output files
   outputs = { self, nixpkgs, repx }: {
     devShells.x86_64-linux.default = nixpkgs.legacyPackages.x86_64-linux.mkShell {
       packages = [
-        repx.packages.x86_64-linux.repx-py
+        repx.packages.x86_64-linux.repx
       ];
     };
   };
@@ -24,7 +24,7 @@ Analyzing reproducible experiments often requires locating specific output files
 Or build it directly:
 
 ```bash
-nix build github:repx-org/repx#repx-py
+nix build github:repx-org/repx#repx
 ```
 
 ## Loading an Experiment

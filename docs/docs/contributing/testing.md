@@ -48,7 +48,7 @@ nix build .#checks.x86_64-linux.rs-executor
 ### Python Tests
 
 ```bash
-nix build .#checks.x86_64-linux.repx-py-tests
+nix build .#checks.x86_64-linux.py-tests
 ```
 
 ### Nix Library Tests

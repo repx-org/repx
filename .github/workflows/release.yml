@@ -41,7 +41,7 @@ jobs:
 
       - name: Build Static Binary
         run: |
-          nix build -L .#repx-static
+          nix build -L .#repx
 
           mkdir -p dist
           cp result/bin/repx dist/repx
