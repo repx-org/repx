@@ -10,6 +10,7 @@ use std::thread;
 use std::time::Duration;
 
 use crate::{cli::RunArgs, commands::AppContext, error::CliError};
+use repx_core::model::Memory;
 
 fn format_phase_suffix(phase: &Option<WorkUnitPhase>) -> String {
     match phase {
@@ -28,6 +29,20 @@ pub fn handle_run(
     num_jobs: Option<usize>,
     verbose: repx_core::logging::Verbosity,
 ) -> Result<(), CliError> {
+    let mem_override = if let Some(ref mem_str) = args.mem {
+        let m = Memory::from(mem_str.as_str());
+        Some(m.to_bytes().ok_or_else(|| {
+            CliError::Config(CoreError::InvalidConfig {
+                detail: format!(
+                    "Invalid memory value: '{}'. Use e.g. 32G, 128G, 512M",
+                    mem_str
+                ),
+            })
+        })?)
+    } else {
+        None
+    };
+
     println!(
         "- Submitting run request to target '{}' using '{}' scheduler...",
         target_name.cyan(),
@@ -60,6 +75,7 @@ pub fn handle_run(
             execution_type: None,
             resources,
             num_jobs,
+            mem_override,
             event_sender: Some(tx),
             continue_on_failure,
             verbose,

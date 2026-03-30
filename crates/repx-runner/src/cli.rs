@@ -328,6 +328,12 @@ pub struct RunArgs {
 
     #[arg(
         long,
+        help = "Override the available memory for the local scheduler (e.g., 64G, 128G). By default, system RAM is detected automatically."
+    )]
+    pub mem: Option<String>,
+
+    #[arg(
+        long,
         help = "Continue running independent jobs even when some jobs fail. Report all failures at the end."
     )]
     pub continue_on_failure: bool,

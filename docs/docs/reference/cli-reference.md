@@ -38,6 +38,7 @@ Accepts **multiple** run names or job IDs. If none are specified, all runs in th
 | Option | Short | Description |
 |--------|-------|-------------|
 | `--jobs <N>` | `-j` | Maximum parallel jobs |
+| `--mem <SIZE>` | | Override available memory for the local scheduler (e.g., `64G`, `128G`). By default, system RAM is detected automatically. |
 | `--continue-on-failure` | | Continue executing independent jobs when some fail. All failures are reported at the end. |
 
 **Exit Codes:**

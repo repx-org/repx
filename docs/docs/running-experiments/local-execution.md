@@ -20,6 +20,15 @@ RepX parallelizes job execution based on available CPU cores. Override the defau
 repx run simulation --lab ./result -j 4
 ```
 
+## Memory Limit Override
+
+The local scheduler detects system RAM and uses it to limit how many jobs run concurrently based on their declared memory requirements. Use `--mem` to override the detected amount, for example to oversubscribe memory:
+
+```bash
+# Tell the scheduler it has 256G available (even if the machine has less)
+repx run simulation --mem 256G
+```
+
 ## Execution Modes
 
 The execution runtime is selected based on Lab configuration and target settings. RepX supports:
