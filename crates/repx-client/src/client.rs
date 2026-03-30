@@ -160,6 +160,7 @@ pub struct SubmitOptions {
     pub execution_type: Option<String>,
     pub resources: Option<Resources>,
     pub num_jobs: Option<usize>,
+    pub mem_override: Option<u64>,
     pub event_sender: Option<Sender<ClientEvent>>,
     pub continue_on_failure: bool,
     pub verbose: repx_core::logging::Verbosity,

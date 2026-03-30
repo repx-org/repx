@@ -188,11 +188,26 @@ struct ResourceTracker {
 }
 
 impl ResourceTracker {
-    fn new() -> Self {
-        let mut sys = System::new();
-        sys.refresh_memory();
-        let total_mem_bytes = sys.total_memory();
+    fn new(mem_override: Option<u64>) -> Self {
         let total_cpus = num_cpus::get();
+        let total_mem_bytes = match mem_override {
+            Some(m) => {
+                let mut sys = System::new();
+                sys.refresh_memory();
+                let system_mem = sys.total_memory();
+                tracing::info!(
+                    "Memory override: {} (system has {})",
+                    format_bytes(m),
+                    format_bytes(system_mem),
+                );
+                m
+            }
+            None => {
+                let mut sys = System::new();
+                sys.refresh_memory();
+                sys.total_memory()
+            }
+        };
 
         tracing::debug!(
             "Local scheduler resource limits: {} RAM, {} CPUs",
@@ -866,7 +881,7 @@ pub fn submit_local_batch_run(
 
     let mut total_work_units = units_left.len();
 
-    let mut resource_tracker = ResourceTracker::new();
+    let mut resource_tracker = ResourceTracker::new(options.mem_override);
     let mut active_handles: Vec<ActiveHandle> = vec![];
     let mut failed_units: Vec<(WorkUnitId, String)> = vec![];
     let mut blocked_units: HashSet<WorkUnitId> = HashSet::new();

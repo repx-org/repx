@@ -989,6 +989,7 @@ impl App {
                 execution_type: Some(execution_type),
                 resources: resources_clone,
                 num_jobs,
+                mem_override: None,
                 event_sender: None,
                 continue_on_failure: false,
                 verbose: repx_core::logging::Verbosity::default(),
