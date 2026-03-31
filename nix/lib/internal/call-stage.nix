@@ -1,6 +1,7 @@
 args: stageFile: dependencies:
 let
   inherit (args) pkgs;
+  hashMode = args.hashMode or "pure";
   common = import ./common.nix;
   processDependenciesFn = import ./process-dependencies.nix;
   mkSimpleStage = import ../stage-simple.nix { inherit pkgs; };
@@ -85,7 +86,7 @@ let
           pname = resolvedPname;
           inputs = resolvedInputs;
           outputs = resolvedOutputs;
-          inherit resolvedParameters;
+          inherit resolvedParameters hashMode;
           dependencyDerivations = common.uniqueDrvs processed.dependencyDerivations;
           inherit (processed) upstreamJobs;
           stageInputs = processed.finalFlatInputs;

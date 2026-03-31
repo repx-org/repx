@@ -21,8 +21,15 @@ let
     "parametersDependencies"
     "dependencyJobs"
     "interRunDepTypes"
+    "hashMode"
     "override"
     "overrideDerivation"
+  ];
+
+  hashMode = args.hashMode or "pure";
+  validHashModes = [
+    "pure"
+    "params-only"
   ];
 
   actualKeys = builtins.attrNames args;
@@ -262,7 +269,12 @@ let
           ) rawCombinations;
 
   repxForDiscovery = repx-lib.mkPipelineHelpers {
-    inherit pkgs repx-lib interRunDepTypes;
+    inherit
+      pkgs
+      repx-lib
+      interRunDepTypes
+      hashMode
+      ;
   };
 
   getDrvsFromPipeline =
@@ -304,6 +316,12 @@ if invalidKeys != [ ] then
     Error in 'mkRun' definition for run "${name}".
     Unknown attributes were provided: ${builtins.toJSON invalidKeys}.
     The set of valid attributes is: ${builtins.toJSON validKeys}.
+  ''
+else if !(builtins.elem hashMode validHashModes) then
+  throw ''
+    Error in 'mkRun' definition for run "${name}".
+    Invalid hashMode: "${hashMode}".
+    Valid values are: ${builtins.toJSON validHashModes}.
   ''
 else if allCombinations == [ ] then
   throw ''
@@ -350,6 +368,7 @@ else
             resolvedParameters
             dependencyJobs
             interRunDepTypes
+            hashMode
             ;
         };
 

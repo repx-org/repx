@@ -4,6 +4,7 @@ let
   mkStageScript = import ./internal/mk-stage-script.nix { inherit pkgs; };
   common = import ./internal/common.nix;
 
+  hashMode = stageDef.hashMode or "pure";
   resolvedParameters = stageDef.resolvedParameters or { };
   dependencyDerivations = stageDef.dependencyDerivations or [ ];
   runDependencies = stageDef.runDependencies or [ ];
@@ -45,8 +46,10 @@ let
   };
   inherit (depMeta) dependencyManifestJson dependencyHash parametersJson;
 
+  hashIdentity = if hashMode == "params-only" then "${pname}-${version}" else toString scriptDrv;
+
   jobId = common.mkJobId [
-    (toString scriptDrv)
+    hashIdentity
     parametersJson
     dependencyManifestJson
     dependencyHash

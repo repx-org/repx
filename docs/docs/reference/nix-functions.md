@@ -141,6 +141,7 @@ A **run definition file** (e.g., `runs/simulation.nix`) returns an attribute set
 | `params` | Attribute Set | Yes | | Parameter lists for sweeping. RepX generates the Cartesian product. Use [`utils.zip`](#utilszip) to pair parameters in lockstep instead. |
 | `containerized` | Boolean | No | `true` | When `false`, skips Docker/OCI image generation entirely. Use for native-only execution. |
 | `paramsDependencies` | List | No | `[]` | Additional Nix derivations that parameter values depend on (beyond auto-detection). |
+| `hashMode` | String | No | `"pure"` | Controls how job IDs are computed. `"pure"` (default) includes the full Nix store path of the stage script derivation, so any change to packages (even transitive dependencies like glibc) invalidates the job. `"params-only"` hashes only the stage identity (pname + version), resolved parameters, and pipeline wiring -- package/dependency changes are ignored. See [Hash Modes](#hash-modes) below. |
 
 **Parameter format:**
 
@@ -166,6 +167,41 @@ params = {
 ```
 
 The run definition file receives `{ pkgs, repx-lib, ... }` as arguments (via `callPackage`). You can access `repx-lib.utils` for parameter helpers -- see [mkUtils](#repx-libmkutils).
+
+### Hash Modes
+
+The `hashMode` attribute controls how job IDs (the hashes in directory names like `<hash>-stage-name-1.1`) are computed. This affects when jobs are considered "changed" and need to be re-executed.
+
+| Mode | Description |
+|------|-------------|
+| `"pure"` (default) | The job ID includes the full Nix store path of the stage script derivation. Any change to the script, its `runDependencies`, or any transitive dependency (e.g., a glibc update, a nixpkgs bump) produces a new job ID and forces re-execution. This is the strictest mode and guarantees full reproducibility. |
+| `"params-only"` | The job ID is computed from the stage's `pname`, `version`, resolved parameter values, and the upstream dependency graph structure. Changes to packages, `runDependencies`, or script contents do **not** affect the job ID. Only parameter changes, stage renames, version bumps, or pipeline rewiring trigger re-execution. |
+
+**Example:**
+
+```nix
+# nix/runs/simulation.nix
+{ repx-lib, ... }:
+{
+  name = "simulation";
+  hashMode = "params-only";  # ignore package updates
+  pipelines = [ ./pipelines/main.nix ];
+  parameters = {
+    seed = [ 1 2 3 ];
+  };
+}
+```
+
+**When to use `"params-only"`:**
+
+- Large parameter sweeps where you want to iterate on script logic without invalidating thousands of completed jobs.
+- Environments where nixpkgs updates are frequent but irrelevant to your experiment's correctness.
+- Workloads where the experiment parameters are the only meaningful source of variation.
+
+**Caveats:**
+
+- Changing a stage's script body will **not** produce a new job ID. If you fix a bug in the script, you must either bump the `version`, change a parameter, or manually clean the old results.
+- `runDependencies` changes (e.g., adding a new tool) are also invisible to the hash. Ensure your runtime environment is correct before relying on cached results.
 
 ---
 

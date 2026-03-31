@@ -2,6 +2,7 @@
 stageDef:
 let
   common = import ./internal/common.nix;
+  hashMode = stageDef.hashMode or "pure";
   groupPname = stageDef.pname;
   version = stageDef.version or "1.1";
 
@@ -119,7 +120,7 @@ else
         (pkgs.lib.removeAttrs subStageDef [ "deps" ])
         // subStageArgs
         // {
-          inherit resolvedParameters;
+          inherit resolvedParameters hashMode;
           dependencyDerivations = [ ];
         }
       );
@@ -356,8 +357,16 @@ else
       (toString gatherDrv)
     ];
 
+    hashIdentities =
+      if hashMode == "params-only" then
+        [ "${groupPname}-scatter-${version}" ]
+        ++ (map (name: "${groupPname}-step-${name}-${version}") (builtins.sort builtins.lessThan stepNames))
+        ++ [ "${groupPname}-gather-${version}" ]
+      else
+        allSubScriptPaths;
+
     jobId = common.mkJobId (
-      allSubScriptPaths
+      hashIdentities
       ++ [
         parametersJson
         dependencyManifestJson
