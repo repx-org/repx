@@ -16,7 +16,7 @@ use std::process::Child;
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use sysinfo::System;
 
 const DEFAULT_JOB_MEM_BYTES: u64 = 1024 * 1024 * 1024;
@@ -27,6 +27,7 @@ type ActiveHandle = (
     WorkUnitId,
     Arc<Mutex<Option<Child>>>,
     std::thread::JoinHandle<std::io::Result<std::process::Output>>,
+    Instant,
 );
 
 fn get_job_mem_bytes(job: &Job, resources_config: &Option<repx_core::config::Resources>) -> u64 {
@@ -894,7 +895,7 @@ pub fn submit_local_batch_run(
                     "Cancellation requested, killing {} running processes...",
                     active_handles.len()
                 );
-                for (uid, child_handle, _) in &active_handles {
+                for (uid, child_handle, _, _) in &active_handles {
                     if let Ok(mut guard) = child_handle.lock() {
                         if let Some(ref mut child) = *guard {
                             tracing::debug!("Killing process for unit {}", uid);
@@ -910,7 +911,7 @@ pub fn submit_local_batch_run(
         }
 
         let mut finished_indices = Vec::new();
-        for (i, (_id, _, handle)) in active_handles.iter().enumerate() {
+        for (i, (_id, _, handle, _)) in active_handles.iter().enumerate() {
             if handle.is_finished() {
                 finished_indices.push(i);
             }
@@ -918,13 +919,14 @@ pub fn submit_local_batch_run(
         let any_finished = !finished_indices.is_empty();
 
         for i in finished_indices.into_iter().rev() {
-            let (unit_id, _, handle) = active_handles.remove(i);
+            let (unit_id, _, handle, started_at) = active_handles.remove(i);
             resource_tracker.release(&unit_id);
 
             match handle.join() {
                 Ok(output_res) => {
                     let output = output_res.map_err(|e| ClientError::Config(CoreError::Io(e)))?;
                     let phase = unit_id.phase();
+                    let wall_time = Some(started_at.elapsed());
 
                     if !output.status.success() {
                         let stderr = String::from_utf8_lossy(&output.stderr).to_string();
@@ -941,6 +943,7 @@ pub fn submit_local_batch_run(
                                         send(ClientEvent::JobFailed {
                                             job_id: jid.clone(),
                                             phase: phase.clone(),
+                                            wall_time,
                                         });
                                     }
                                 }
@@ -948,6 +951,7 @@ pub fn submit_local_batch_run(
                                 send(ClientEvent::JobFailed {
                                     job_id: u.job_id.clone(),
                                     phase: phase.clone(),
+                                    wall_time,
                                 });
                             }
 
@@ -1040,6 +1044,7 @@ pub fn submit_local_batch_run(
                                     send(ClientEvent::JobSucceeded {
                                         job_id: jid.clone(),
                                         phase: phase.clone(),
+                                        wall_time,
                                     });
                                 }
                             }
@@ -1047,6 +1052,7 @@ pub fn submit_local_batch_run(
                             send(ClientEvent::JobSucceeded {
                                 job_id: u.job_id.clone(),
                                 phase: phase.clone(),
+                                wall_time,
                             });
                         }
                     }
@@ -1054,6 +1060,7 @@ pub fn submit_local_batch_run(
                 Err(e) => {
                     if options.continue_on_failure {
                         let phase = unit_id.phase();
+                        let wall_time = Some(started_at.elapsed());
                         failed_units.push((unit_id.clone(), format!("Process panicked: {:?}", e)));
 
                         let reported_via_completion_map =
@@ -1066,6 +1073,7 @@ pub fn submit_local_batch_run(
                                     send(ClientEvent::JobFailed {
                                         job_id: jid.clone(),
                                         phase: phase.clone(),
+                                        wall_time,
                                     });
                                 }
                             }
@@ -1073,6 +1081,7 @@ pub fn submit_local_batch_run(
                             send(ClientEvent::JobFailed {
                                 job_id: u.job_id.clone(),
                                 phase: phase.clone(),
+                                wall_time,
                             });
                         }
                     } else {
@@ -1194,7 +1203,7 @@ pub fn submit_local_batch_run(
                         Err(_) => Err(std::io::Error::other("Mutex was poisoned")),
                     }
                 });
-                active_handles.push((uid, child_handle, handle));
+                active_handles.push((uid, child_handle, handle, Instant::now()));
             }
         }
 
