@@ -1043,6 +1043,11 @@ pub fn submit_local_batch_run(
                                     });
                                 }
                             }
+                        } else if let Some(u) = work_units.get(&unit_id) {
+                            send(ClientEvent::JobSucceeded {
+                                job_id: u.job_id.clone(),
+                                phase: phase.clone(),
+                            });
                         }
                     }
                 }
