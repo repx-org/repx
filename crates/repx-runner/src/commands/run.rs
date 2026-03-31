@@ -19,6 +19,39 @@ fn format_phase_suffix(phase: &Option<WorkUnitPhase>) -> String {
     }
 }
 
+fn format_wall_time(d: &Duration) -> String {
+    let total_secs = d.as_secs();
+    let days = total_secs / 86400;
+    let hours = (total_secs % 86400) / 3600;
+    let mins = (total_secs % 3600) / 60;
+    let secs = total_secs % 60;
+
+    let mut parts = Vec::new();
+    if days > 0 {
+        parts.push(format!("{}d", days));
+    }
+    if hours > 0 {
+        parts.push(format!("{}h", hours));
+    }
+    if mins > 0 {
+        parts.push(format!("{}m", mins));
+    }
+    if secs > 0 || parts.is_empty() {
+        parts.push(format!("{}s", secs));
+    }
+    parts.join(" ")
+}
+
+fn format_wall_time_suffix(wall_time: &Option<Duration>, show_timing: bool) -> String {
+    if !show_timing {
+        return String::new();
+    }
+    match wall_time {
+        Some(d) => format!(" {}", format_wall_time(d)).dimmed().to_string(),
+        None => String::new(),
+    }
+}
+
 #[allow(clippy::expect_used)]
 pub fn handle_run(
     args: RunArgs,
@@ -83,6 +116,7 @@ pub fn handle_run(
         };
         client.submit_batch_run(run_specs, &target_name_clone, scheduler, options)
     });
+    let show_timing = !args.no_timing;
     let mut pb: Option<ProgressBar> = None;
     let mut user_cancelled = false;
 
@@ -182,22 +216,34 @@ pub fn handle_run(
                     pid,
                 );
             }
-            ClientEvent::JobSucceeded { job_id, phase } => {
+            ClientEvent::JobSucceeded {
+                job_id,
+                phase,
+                wall_time,
+            } => {
                 let phase_suffix = format_phase_suffix(&phase);
+                let time_suffix = format_wall_time_suffix(&wall_time, show_timing);
                 println!(
-                    "  {} {}{}",
+                    "  {} {}{}{}",
                     "OK".green().bold(),
                     job_id.to_string().dimmed(),
                     phase_suffix,
+                    time_suffix,
                 );
             }
-            ClientEvent::JobFailed { job_id, phase } => {
+            ClientEvent::JobFailed {
+                job_id,
+                phase,
+                wall_time,
+            } => {
                 let phase_suffix = format_phase_suffix(&phase);
+                let time_suffix = format_wall_time_suffix(&wall_time, show_timing);
                 println!(
-                    "  {} {}{}",
+                    "  {} {}{}{}",
                     "FAIL".red().bold(),
                     job_id.to_string().dimmed(),
                     phase_suffix,
+                    time_suffix,
                 );
             }
             ClientEvent::JobBlocked {

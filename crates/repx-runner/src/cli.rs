@@ -337,6 +337,9 @@ pub struct RunArgs {
         help = "Continue running independent jobs even when some jobs fail. Report all failures at the end."
     )]
     pub continue_on_failure: bool,
+
+    #[arg(long, help = "Disable wall clock timing on job completion messages.")]
+    pub no_timing: bool,
 }
 
 #[derive(Args)]

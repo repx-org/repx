@@ -14,6 +14,7 @@ use repx_core::{
 };
 use sha2::{Digest, Sha256};
 use std::path::Path;
+use std::time::Duration;
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
     path::PathBuf,
@@ -84,10 +85,12 @@ pub enum ClientEvent {
     JobSucceeded {
         job_id: JobId,
         phase: Option<WorkUnitPhase>,
+        wall_time: Option<Duration>,
     },
     JobFailed {
         job_id: JobId,
         phase: Option<WorkUnitPhase>,
+        wall_time: Option<Duration>,
     },
     JobBlocked {
         job_id: JobId,
