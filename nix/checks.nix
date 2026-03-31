@@ -149,6 +149,9 @@ let
     "lib-non-scalar-params" = pkgs.callPackage ./checks/lib/check-non-scalar-params.nix {
       inherit repx-lib;
     };
+    "lib-hash-mode" = pkgs.callPackage ./checks/lib/check-hash-mode.nix {
+      inherit repx-lib;
+    };
   }
   // (import ./checks/lib/check-deps.nix { inherit pkgs; });
 

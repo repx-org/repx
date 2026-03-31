@@ -81,6 +81,7 @@ jobs:
           - lib-resource-hints
           - lib-zip-params
           - lib-non-scalar-params
+          - lib-hash-mode
           - e2e-examples
           - e2e-bwrap-overlay-fallback
           - e2e-gc-local
