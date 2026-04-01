@@ -3,6 +3,7 @@
   gitHash,
   repxVersion,
   includeImages ? true,
+  sharedImage ? null,
 }:
 let
   removeNulls = attrs: pkgs.lib.filterAttrs (_: v: v != null) attrs;
@@ -51,10 +52,16 @@ let
     let
       runName = runDef.name;
 
-      imageDrv = runDef.image;
+      effectiveImageDrv =
+        if runDef.image != null then
+          runDef.image
+        else if (runDef.wantsSharedImage or false) && sharedImage != null then
+          sharedImage
+        else
+          null;
       imagePath =
-        if includeImages && imageDrv != null then
-          "images/" + (builtins.baseNameOf (toString imageDrv))
+        if includeImages && effectiveImageDrv != null then
+          "images/" + (builtins.baseNameOf (toString effectiveImageDrv))
         else
           null;
 
