@@ -31,12 +31,10 @@ let
   resolvedContainerMode =
     if containerMode != null then
       containerMode
-    else if containerized then
+    else if containerized == null || containerized then
       "shared"
-    else if !containerized then
-      "none"
     else
-      "shared";
+      "none";
 
   validContainerModes = [
     "none"
