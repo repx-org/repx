@@ -7,7 +7,7 @@ use repx_core::{
     constants::{dirs, targets},
     engine,
     errors::CoreError,
-    model::{Job, JobId},
+    model::{Job, JobId, Lab},
 };
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
@@ -332,6 +332,22 @@ fn format_bytes(bytes: u64) -> String {
     } else {
         format!("{}B", bytes)
     }
+}
+
+fn build_run_affinity_index(lab: &Lab) -> HashMap<JobId, usize> {
+    let mut sorted_run_ids: Vec<_> = lab.runs.keys().collect();
+    sorted_run_ids.sort();
+
+    sorted_run_ids
+        .iter()
+        .enumerate()
+        .flat_map(|(idx, run_id)| {
+            lab.runs[*run_id]
+                .jobs
+                .iter()
+                .map(move |job_id| (job_id.clone(), idx))
+        })
+        .collect()
 }
 
 fn build_sg_common_args(
@@ -720,6 +736,7 @@ pub fn submit_local_batch_run(
         concurrency: Some(concurrency),
     });
     let mut succeeded_work_units: usize = 0;
+    let run_affinity = build_run_affinity_index(&client.lab);
 
     let all_deps: HashSet<JobId> = jobs_in_batch
         .values()
@@ -1138,7 +1155,19 @@ pub fn submit_local_batch_run(
                 .cloned()
                 .collect();
 
-            ready.sort();
+            ready.sort_by(|a, b| {
+                let run_a = work_units
+                    .get(a)
+                    .and_then(|u| run_affinity.get(&u.job_id))
+                    .copied()
+                    .unwrap_or(usize::MAX);
+                let run_b = work_units
+                    .get(b)
+                    .and_then(|u| run_affinity.get(&u.job_id))
+                    .copied()
+                    .unwrap_or(usize::MAX);
+                run_a.cmp(&run_b).then_with(|| a.cmp(b))
+            });
 
             if ready.is_empty() && active_handles.is_empty() {
                 if !failed_units.is_empty() {
@@ -1379,5 +1408,194 @@ mod tests {
 
         assert_eq!(tracker.used_mem_bytes, 4 * 1024 * 1024 * 1024);
         assert_eq!(tracker.used_cpus, 2);
+    }
+
+    fn make_test_lab(runs: Vec<(&str, Vec<&str>)>) -> Lab {
+        use repx_core::model::{Run, RunId};
+        use std::path::PathBuf;
+
+        let mut lab = Lab {
+            repx_version: "0.0.0".to_string(),
+            lab_version: "0.0.0".to_string(),
+            git_hash: "test".to_string(),
+            content_hash: "test".to_string(),
+            runs: HashMap::new(),
+            jobs: HashMap::new(),
+            groups: HashMap::new(),
+            host_tools_path: PathBuf::new(),
+            host_tools_dir_name: String::new(),
+            referenced_files: Vec::new(),
+        };
+
+        for (run_name, job_names) in runs {
+            let job_ids: Vec<JobId> = job_names.iter().map(|n| JobId::from(*n)).collect();
+            lab.runs.insert(
+                RunId::from(run_name),
+                Run {
+                    image: None,
+                    jobs: job_ids,
+                    dependencies: HashMap::new(),
+                },
+            );
+        }
+
+        lab
+    }
+
+    #[test]
+    fn test_run_affinity_basic_ordering() {
+        let lab = make_test_lab(vec![
+            ("alpha-run", vec!["a1", "a2", "a3"]),
+            ("beta-run", vec!["b1", "b2"]),
+        ]);
+        let index = build_run_affinity_index(&lab);
+
+        assert_eq!(index[&JobId::from("a1")], 0);
+        assert_eq!(index[&JobId::from("a2")], 0);
+        assert_eq!(index[&JobId::from("a3")], 0);
+        assert_eq!(index[&JobId::from("b1")], 1);
+        assert_eq!(index[&JobId::from("b2")], 1);
+    }
+
+    #[test]
+    fn test_run_affinity_empty_lab() {
+        let lab = make_test_lab(vec![]);
+        let index = build_run_affinity_index(&lab);
+        assert!(index.is_empty());
+    }
+
+    #[test]
+    fn test_run_affinity_single_run() {
+        let lab = make_test_lab(vec![("only-run", vec!["j1", "j2", "j3"])]);
+        let index = build_run_affinity_index(&lab);
+
+        assert_eq!(index.len(), 3);
+        assert_eq!(index[&JobId::from("j1")], 0);
+        assert_eq!(index[&JobId::from("j2")], 0);
+        assert_eq!(index[&JobId::from("j3")], 0);
+    }
+
+    #[test]
+    fn test_run_affinity_sort_groups_by_run() {
+        let lab = make_test_lab(vec![
+            ("run-a", vec!["xa", "ya"]),
+            ("run-b", vec!["xb", "yb"]),
+            ("run-c", vec!["xc", "yc"]),
+        ]);
+        let affinity = build_run_affinity_index(&lab);
+
+        let mut work_units: HashMap<WorkUnitId, JobId> = HashMap::new();
+        for jid in ["xa", "ya", "xb", "yb", "xc", "yc"] {
+            let uid = WorkUnitId::from_job(&JobId::from(jid));
+            work_units.insert(uid, JobId::from(jid));
+        }
+
+        let mut ready: Vec<WorkUnitId> = work_units.keys().cloned().collect();
+
+        ready.sort_by(|a, b| {
+            let run_a = work_units
+                .get(a)
+                .and_then(|jid| affinity.get(jid))
+                .copied()
+                .unwrap_or(usize::MAX);
+            let run_b = work_units
+                .get(b)
+                .and_then(|jid| affinity.get(jid))
+                .copied()
+                .unwrap_or(usize::MAX);
+            run_a.cmp(&run_b).then_with(|| a.cmp(b))
+        });
+
+        let sorted_runs: Vec<usize> = ready
+            .iter()
+            .map(|uid| {
+                let jid = &work_units[uid];
+                affinity[jid]
+            })
+            .collect();
+
+        assert_eq!(sorted_runs, vec![0, 0, 1, 1, 2, 2]);
+    }
+
+    #[test]
+    fn test_run_affinity_unknown_jobs_sort_last() {
+        let lab = make_test_lab(vec![("run-a", vec!["a1"])]);
+        let affinity = build_run_affinity_index(&lab);
+
+        let known_uid = WorkUnitId::from_job(&JobId::from("a1"));
+        let unknown_uid = WorkUnitId::from_job(&JobId::from("unknown_job"));
+
+        let mut work_units: HashMap<WorkUnitId, JobId> = HashMap::new();
+        work_units.insert(known_uid.clone(), JobId::from("a1"));
+        work_units.insert(unknown_uid.clone(), JobId::from("unknown_job"));
+
+        let mut ready = [unknown_uid.clone(), known_uid.clone()];
+
+        ready.sort_by(|a, b| {
+            let run_a = work_units
+                .get(a)
+                .and_then(|jid| affinity.get(jid))
+                .copied()
+                .unwrap_or(usize::MAX);
+            let run_b = work_units
+                .get(b)
+                .and_then(|jid| affinity.get(jid))
+                .copied()
+                .unwrap_or(usize::MAX);
+            run_a.cmp(&run_b).then_with(|| a.cmp(b))
+        });
+
+        assert_eq!(ready[0], known_uid);
+        assert_eq!(ready[1], unknown_uid);
+    }
+
+    #[test]
+    fn test_run_affinity_scatter_gather_same_run() {
+        let lab = make_test_lab(vec![
+            ("run-a", vec!["sg_job"]),
+            ("run-b", vec!["simple_job"]),
+        ]);
+        let affinity = build_run_affinity_index(&lab);
+
+        let scatter = WorkUnitId::scatter(&JobId::from("sg_job"));
+        let step = WorkUnitId::step(&JobId::from("sg_job"), 0, "compute");
+        let gather = WorkUnitId::gather(&JobId::from("sg_job"));
+        let simple = WorkUnitId::from_job(&JobId::from("simple_job"));
+
+        let mut work_units: HashMap<WorkUnitId, JobId> = HashMap::new();
+        work_units.insert(scatter.clone(), JobId::from("sg_job"));
+        work_units.insert(step.clone(), JobId::from("sg_job"));
+        work_units.insert(gather.clone(), JobId::from("sg_job"));
+        work_units.insert(simple.clone(), JobId::from("simple_job"));
+
+        let mut ready = [
+            simple.clone(),
+            gather.clone(),
+            scatter.clone(),
+            step.clone(),
+        ];
+
+        ready.sort_by(|a, b| {
+            let run_a = work_units
+                .get(a)
+                .and_then(|jid| affinity.get(jid))
+                .copied()
+                .unwrap_or(usize::MAX);
+            let run_b = work_units
+                .get(b)
+                .and_then(|jid| affinity.get(jid))
+                .copied()
+                .unwrap_or(usize::MAX);
+            run_a.cmp(&run_b).then_with(|| a.cmp(b))
+        });
+
+        let run_indices: Vec<usize> = ready
+            .iter()
+            .map(|uid| {
+                let jid = &work_units[uid];
+                affinity[jid]
+            })
+            .collect();
+        assert_eq!(run_indices, vec![0, 0, 0, 1]);
     }
 }
