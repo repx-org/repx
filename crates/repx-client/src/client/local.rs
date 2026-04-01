@@ -10,7 +10,8 @@ use repx_core::{
     model::{Job, JobId, Lab},
 };
 use serde_json::Value;
-use std::collections::{HashMap, HashSet};
+use std::cmp::Reverse;
+use std::collections::{BinaryHeap, HashMap, HashSet};
 use std::path::Path;
 use std::process::Child;
 use std::sync::atomic::Ordering;
@@ -897,11 +898,44 @@ pub fn submit_local_batch_run(
         }
     }
 
+    let mut reverse_completion_map: HashMap<WorkUnitId, Vec<JobId>> = HashMap::new();
+    for (jid, uid) in &completion_map {
+        if jobs_in_batch.contains_key(jid) {
+            reverse_completion_map
+                .entry(uid.clone())
+                .or_default()
+                .push(jid.clone());
+        }
+    }
+
+    let mut unit_priorities: HashMap<WorkUnitId, usize> = HashMap::new();
+    for (uid, unit) in &work_units {
+        let run_idx = run_affinity
+            .get(&unit.job_id)
+            .copied()
+            .unwrap_or(usize::MAX);
+        unit_priorities.insert(uid.clone(), run_idx);
+    }
+
+    let mut ready_queue: BinaryHeap<Reverse<(usize, WorkUnitId)>> = BinaryHeap::new();
+    let mut in_ready_queue: HashSet<WorkUnitId> = HashSet::new();
+    for uid in &units_left {
+        if let Some(unit) = work_units.get(uid) {
+            let deps_met = unit.deps.iter().all(|d| completed.contains(d));
+            if deps_met {
+                let prio = *unit_priorities.get(uid).unwrap_or(&usize::MAX);
+                ready_queue.push(Reverse((prio, uid.clone())));
+                in_ready_queue.insert(uid.clone());
+            }
+        }
+    }
+
     let mut total_work_units = units_left.len();
 
     let mut resource_tracker = ResourceTracker::new(options.mem_override);
     let mut active_handles: Vec<ActiveHandle> = vec![];
     let mut failed_units: Vec<(WorkUnitId, String)> = vec![];
+    let mut failed_ids: HashSet<WorkUnitId> = HashSet::new();
     let mut blocked_units: HashSet<WorkUnitId> = HashSet::new();
     let mut submitted_count: usize = 0;
 
@@ -949,20 +983,15 @@ pub fn submit_local_batch_run(
                         let stderr = String::from_utf8_lossy(&output.stderr).to_string();
                         if options.continue_on_failure {
                             failed_units.push((unit_id.clone(), stderr));
+                            failed_ids.insert(unit_id.clone());
 
-                            let reported_via_completion_map =
-                                completion_map.iter().any(|(jid, comp_uid)| {
-                                    comp_uid == &unit_id && jobs_in_batch.contains_key(jid)
-                                });
-                            if reported_via_completion_map {
-                                for (jid, comp_uid) in &completion_map {
-                                    if comp_uid == &unit_id && jobs_in_batch.contains_key(jid) {
-                                        send(ClientEvent::JobFailed {
-                                            job_id: jid.clone(),
-                                            phase: phase.clone(),
-                                            wall_time,
-                                        });
-                                    }
+                            if let Some(job_ids) = reverse_completion_map.get(&unit_id) {
+                                for jid in job_ids {
+                                    send(ClientEvent::JobFailed {
+                                        job_id: jid.clone(),
+                                        phase: phase.clone(),
+                                        wall_time,
+                                    });
                                 }
                             } else if let Some(u) = work_units.get(&unit_id) {
                                 send(ClientEvent::JobFailed {
@@ -984,22 +1013,15 @@ pub fn submit_local_batch_run(
                                     blocked_units.insert(candidate_id.clone());
                                     if let Some(ref blocked_by_jid) = failed_job_id {
                                         let blocked_phase = candidate_id.phase();
-                                        let reported_via_completion_map =
-                                            completion_map.iter().any(|(jid, comp_uid)| {
-                                                comp_uid == candidate_id
-                                                    && jobs_in_batch.contains_key(jid)
-                                            });
-                                        if reported_via_completion_map {
-                                            for (jid, comp_uid) in &completion_map {
-                                                if comp_uid == candidate_id
-                                                    && jobs_in_batch.contains_key(jid)
-                                                {
-                                                    send(ClientEvent::JobBlocked {
-                                                        job_id: jid.clone(),
-                                                        blocked_by: blocked_by_jid.clone(),
-                                                        phase: blocked_phase.clone(),
-                                                    });
-                                                }
+                                        if let Some(job_ids) =
+                                            reverse_completion_map.get(candidate_id)
+                                        {
+                                            for jid in job_ids {
+                                                send(ClientEvent::JobBlocked {
+                                                    job_id: jid.clone(),
+                                                    blocked_by: blocked_by_jid.clone(),
+                                                    phase: blocked_phase.clone(),
+                                                });
                                             }
                                         } else {
                                             send(ClientEvent::JobBlocked {
@@ -1044,26 +1066,60 @@ pub fn submit_local_batch_run(
                                 )?;
                                 let num_expanded = expanded.len();
                                 for (new_id, new_unit) in expanded {
+                                    for dep in &new_unit.deps {
+                                        dependents
+                                            .entry(dep.clone())
+                                            .or_default()
+                                            .push(new_id.clone());
+                                    }
+                                    let deps_met =
+                                        new_unit.deps.iter().all(|d| completed.contains(d));
+                                    let run_idx = run_affinity
+                                        .get(&new_unit.job_id)
+                                        .copied()
+                                        .unwrap_or(usize::MAX);
+                                    unit_priorities.insert(new_id.clone(), run_idx);
                                     units_left.insert(new_id.clone());
-                                    work_units.insert(new_id, new_unit);
+                                    work_units.insert(new_id.clone(), new_unit);
+                                    if deps_met && !in_ready_queue.contains(&new_id) {
+                                        ready_queue.push(Reverse((run_idx, new_id.clone())));
+                                        in_ready_queue.insert(new_id);
+                                    }
                                 }
                                 total_work_units += num_expanded;
                             }
                         }
 
-                        let reported_via_completion_map =
-                            completion_map.iter().any(|(jid, comp_uid)| {
-                                comp_uid == &unit_id && jobs_in_batch.contains_key(jid)
-                            });
-                        if reported_via_completion_map {
-                            for (jid, comp_uid) in &completion_map {
-                                if comp_uid == &unit_id && jobs_in_batch.contains_key(jid) {
-                                    send(ClientEvent::JobSucceeded {
-                                        job_id: jid.clone(),
-                                        phase: phase.clone(),
-                                        wall_time,
-                                    });
+                        if let Some(dep_list) = dependents.get(&unit_id) {
+                            for candidate_id in dep_list {
+                                if !units_left.contains(candidate_id)
+                                    || in_ready_queue.contains(candidate_id)
+                                {
+                                    continue;
                                 }
+                                if let Some(candidate) = work_units.get(candidate_id) {
+                                    let deps_met =
+                                        candidate.deps.iter().all(|d| completed.contains(d));
+                                    let no_failed =
+                                        candidate.deps.iter().all(|d| !failed_ids.contains(d));
+                                    if deps_met && no_failed {
+                                        let prio = *unit_priorities
+                                            .get(candidate_id)
+                                            .unwrap_or(&usize::MAX);
+                                        ready_queue.push(Reverse((prio, candidate_id.clone())));
+                                        in_ready_queue.insert(candidate_id.clone());
+                                    }
+                                }
+                            }
+                        }
+
+                        if let Some(job_ids) = reverse_completion_map.get(&unit_id) {
+                            for jid in job_ids {
+                                send(ClientEvent::JobSucceeded {
+                                    job_id: jid.clone(),
+                                    phase: phase.clone(),
+                                    wall_time,
+                                });
                             }
                         } else if let Some(u) = work_units.get(&unit_id) {
                             send(ClientEvent::JobSucceeded {
@@ -1079,20 +1135,15 @@ pub fn submit_local_batch_run(
                         let phase = unit_id.phase();
                         let wall_time = Some(started_at.elapsed());
                         failed_units.push((unit_id.clone(), format!("Process panicked: {:?}", e)));
+                        failed_ids.insert(unit_id.clone());
 
-                        let reported_via_completion_map =
-                            completion_map.iter().any(|(jid, comp_uid)| {
-                                comp_uid == &unit_id && jobs_in_batch.contains_key(jid)
-                            });
-                        if reported_via_completion_map {
-                            for (jid, comp_uid) in &completion_map {
-                                if comp_uid == &unit_id && jobs_in_batch.contains_key(jid) {
-                                    send(ClientEvent::JobFailed {
-                                        job_id: jid.clone(),
-                                        phase: phase.clone(),
-                                        wall_time,
-                                    });
-                                }
+                        if let Some(job_ids) = reverse_completion_map.get(&unit_id) {
+                            for jid in job_ids {
+                                send(ClientEvent::JobFailed {
+                                    job_id: jid.clone(),
+                                    phase: phase.clone(),
+                                    wall_time,
+                                });
                             }
                         } else if let Some(u) = work_units.get(&unit_id) {
                             send(ClientEvent::JobFailed {
@@ -1117,6 +1168,7 @@ pub fn submit_local_batch_run(
 
         for blocked_id in &blocked_units {
             units_left.remove(blocked_id);
+            in_ready_queue.remove(blocked_id);
         }
         blocked_units.clear();
 
@@ -1138,51 +1190,21 @@ pub fn submit_local_batch_run(
             });
         }
 
+        let mut spawned = 0;
         let slots_available = concurrency.saturating_sub(active_handles.len());
-        if slots_available > 0 && !units_left.is_empty() {
-            let failed_ids: HashSet<&WorkUnitId> = failed_units.iter().map(|(id, _)| id).collect();
+        if slots_available > 0 && !ready_queue.is_empty() {
+            let mut resource_deferred: Vec<Reverse<(usize, WorkUnitId)>> = Vec::new();
 
-            let mut ready: Vec<WorkUnitId> = units_left
-                .iter()
-                .filter(|uid| match work_units.get(uid) {
-                    Some(unit) => {
-                        let deps_met = unit.deps.iter().all(|d| completed.contains(d));
-                        let no_failed = unit.deps.iter().all(|d| !failed_ids.contains(d));
-                        deps_met && no_failed
-                    }
-                    None => false,
-                })
-                .cloned()
-                .collect();
-
-            ready.sort_by(|a, b| {
-                let run_a = work_units
-                    .get(a)
-                    .and_then(|u| run_affinity.get(&u.job_id))
-                    .copied()
-                    .unwrap_or(usize::MAX);
-                let run_b = work_units
-                    .get(b)
-                    .and_then(|u| run_affinity.get(&u.job_id))
-                    .copied()
-                    .unwrap_or(usize::MAX);
-                run_a.cmp(&run_b).then_with(|| a.cmp(b))
-            });
-
-            if ready.is_empty() && active_handles.is_empty() {
-                if !failed_units.is_empty() {
+            while spawned < slots_available {
+                let Some(Reverse((_prio, uid))) = ready_queue.pop() else {
                     break;
-                }
-                return Err(ClientError::Config(CoreError::CycleDetected {
-                    context: "dependency graph or missing dependency".to_string(),
-                }));
-            }
+                };
+                in_ready_queue.remove(&uid);
 
-            let mut spawned = 0;
-            for uid in ready {
-                if spawned >= slots_available {
-                    break;
+                if !units_left.contains(&uid) {
+                    continue;
                 }
+
                 let unit = match work_units.get(&uid) {
                     Some(u) => u,
                     None => continue,
@@ -1195,6 +1217,9 @@ pub fn submit_local_batch_run(
                         format_bytes(unit.mem_bytes),
                         unit.cpus
                     );
+                    let prio = *unit_priorities.get(&uid).unwrap_or(&usize::MAX);
+                    resource_deferred.push(Reverse((prio, uid.clone())));
+                    in_ready_queue.insert(uid);
                     continue;
                 }
 
@@ -1234,9 +1259,25 @@ pub fn submit_local_batch_run(
                 });
                 active_handles.push((uid, child_handle, handle, Instant::now()));
             }
+
+            for item in resource_deferred {
+                ready_queue.push(item);
+            }
+
+            if ready_queue.is_empty() && active_handles.is_empty() && units_left.is_empty() {
+                break;
+            }
+            if ready_queue.is_empty() && active_handles.is_empty() && !units_left.is_empty() {
+                if !failed_units.is_empty() {
+                    break;
+                }
+                return Err(ClientError::Config(CoreError::CycleDetected {
+                    context: "dependency graph or missing dependency".to_string(),
+                }));
+            }
         }
 
-        if !active_handles.is_empty() {
+        if !active_handles.is_empty() && !any_finished && spawned == 0 {
             thread::sleep(Duration::from_millis(POLL_INTERVAL_MS));
         }
     }
