@@ -402,15 +402,16 @@ let
 
         buildCommand = ''
           mkdir -p $out $out/lab $out/readme
-          cp -r --no-dereference ${artifacts.labCore}/* $out/
+          cp -r --reflink=auto --no-dereference ${artifacts.labCore}/* $out/
           cp ${readme} $out/readme/$(basename ${readme})
 
           files_json_file=$(mktemp)
-          find $out -type f | sort | while read -r filepath; do
-            relpath="''${filepath#$out/}"
-            hash=$(sha256sum "$filepath" | cut -d' ' -f1)
-            printf '{"path":"%s","sha256":"%s"}\n' "$relpath" "$hash"
-          done | jq -s '.' > "$files_json_file"
+          prefix="$out/"
+          find $out -type f -print0 | xargs -0 -P"$(nproc)" -n 100 sha256sum | \
+            awk -v prefix="$prefix" '{hash=$1; path=substr($2, length(prefix)+1); printf "%s\t%s\n", path, hash}' | \
+            sort -t$'\t' -k1,1 | \
+            awk -F'\t' '{printf "{\"path\":\"%s\",\"sha256\":\"%s\"}\n", $1, $2}' | \
+            jq -s '.' > "$files_json_file"
 
           labId=$(jq -r '.labId' ${artifacts.labManifest})
           metadata=$(jq -r '.metadata' ${artifacts.labManifest})

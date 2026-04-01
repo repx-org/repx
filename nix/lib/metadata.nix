@@ -79,10 +79,9 @@ let
         jobs = jobsAttrSet;
       };
     in
-    pkgs.writeTextFile {
-      name = "metadata-${runName}.json";
-      text = builtins.toJSON metadata;
-    };
+    builtins.toFile "metadata-${runName}.json" (
+      builtins.unsafeDiscardStringContext (builtins.toJSON metadata)
+    );
 
   mkRootMetadata =
     {
@@ -98,10 +97,9 @@ let
       }
       // (if groups != { } then { inherit groups; } else { });
     in
-    pkgs.writeTextFile {
-      name = "metadata-top.json";
-      text = builtins.toJSON metadata;
-    };
+    builtins.toFile "metadata-top.json" (
+      builtins.unsafeDiscardStringContext (builtins.toJSON metadata)
+    );
 in
 {
   inherit mkRunMetadata mkRootMetadata;
