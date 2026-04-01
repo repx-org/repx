@@ -594,6 +594,7 @@ async fn async_handle_scatter_gather(
         repx_core::model::SchedulerType::Slurm => {
             let (last_step_slurm_ids, all_worker_slurm_ids) = slurm::submit_slurm_branches(
                 &orch,
+                &args,
                 &work_items,
                 &steps_meta,
                 &topo_order,

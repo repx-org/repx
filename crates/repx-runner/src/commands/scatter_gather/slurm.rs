@@ -8,16 +8,6 @@ use crate::cli::InternalScatterGatherArgs;
 use repx_core::constants::manifests;
 use serde_json::Value;
 
-pub(crate) fn command_to_shell_string(cmd: &TokioCommand) -> String {
-    let program = cmd.as_std().get_program().to_string_lossy();
-    let args: Vec<String> = cmd
-        .as_std()
-        .get_args()
-        .map(|arg| format!("'{}'", arg.to_string_lossy().replace('\'', "'\\''")))
-        .collect();
-    format!("{} {}", program, args.join(" "))
-}
-
 pub(crate) async fn cancel_workers_from_manifest(repx_dir: &std::path::Path) {
     let manifest_path = repx_dir.join(manifests::WORKER_SLURM_IDS);
     if let Ok(content) = fs::read_to_string(&manifest_path) {
@@ -142,6 +132,7 @@ pub(crate) async fn submit_slurm_gather_job(
 #[allow(clippy::expect_used)]
 pub(crate) async fn submit_slurm_branches(
     orch: &ScatterGatherOrchestrator,
+    args: &InternalScatterGatherArgs,
     work_items: &[Value],
     steps_meta: &StepsMetadata,
     topo_order: &[String],
@@ -149,6 +140,30 @@ pub(crate) async fn submit_slurm_branches(
 ) -> Result<(Vec<String>, Vec<u32>), CliError> {
     let mut last_step_slurm_ids = Vec::new();
     let mut all_worker_slurm_ids: Vec<u32> = Vec::new();
+
+    let repx_binary = std::env::current_exe()?;
+    let repx_binary_str = repx_binary.to_string_lossy();
+    let runtime_str = args.runtime.to_string();
+    let base_path_str = orch.base_path.to_string_lossy();
+    let image_tag_flag = args
+        .image_tag
+        .as_ref()
+        .map(|t| format!("--image-tag '{}'", t))
+        .unwrap_or_default();
+    let node_local_flag = orch
+        .node_local_path
+        .as_ref()
+        .map(|p| format!("--node-local-path '{}'", p.to_string_lossy()))
+        .unwrap_or_default();
+    let mount_flags = match &orch.mount_policy {
+        repx_core::model::MountPolicy::AllHostPaths => "--mount-host-paths".to_string(),
+        repx_core::model::MountPolicy::SpecificPaths(paths) => paths
+            .iter()
+            .map(|p| format!("--mount-paths '{}'", p))
+            .collect::<Vec<_>>()
+            .join(" "),
+        repx_core::model::MountPolicy::Isolated => String::new(),
+    };
 
     for (branch_idx, item) in work_items.iter().enumerate() {
         let branch_root = orch.job_root.join(format!("branch-{}", branch_idx));
@@ -181,32 +196,33 @@ pub(crate) async fn submit_slurm_branches(
             let inputs_path = step_repx.join("inputs.json");
             fs::write(&inputs_path, serde_json::to_string_pretty(&inputs)?)?;
 
-            let executor = orch.create_executor(step_out.clone(), step_repx.clone());
-            let exe_args = vec![
-                step_out.to_string_lossy().to_string(),
-                inputs_path.to_string_lossy().to_string(),
-                orch.parameters_json_path.to_string_lossy().to_string(),
-            ];
-            let cmd = executor
-                .build_command_for_script(&step_meta.exe_path, &exe_args)
-                .await
-                .map_err(|e| CliError::ExecutionFailed {
-                    message: format!(
-                        "Failed to build command for branch #{} step '{}'",
-                        branch_idx, step_name
-                    ),
-                    log_path: None,
-                    log_summary: e.to_string(),
-                })?;
-            let cmd_str = command_to_shell_string(&cmd);
-
-            let wrapped_cmd = format!(
-                "( {} && touch {}/{} ) || ( touch {}/{}; exit 1 )",
-                cmd_str,
-                step_repx.display(),
-                repx_core::constants::markers::SUCCESS,
-                step_repx.display(),
-                repx_core::constants::markers::FAIL
+            let repx_cmd = format!(
+                "{repx} internal-execute \
+                 --job-id '{job_id}' \
+                 --runtime '{runtime}' \
+                 {image_tag} \
+                 --base-path '{base_path}' \
+                 --host-tools-dir '{host_tools_dir}' \
+                 {node_local} \
+                 {mount} \
+                 --executable-path '{exe_path}' \
+                 --user-out-dir '{user_out}' \
+                 --repx-out-dir '{repx_out}' \
+                 --parameters-json-path '{params_json}' \
+                 --job-package-path '{job_pkg}'",
+                repx = repx_binary_str,
+                job_id = orch.job_id.as_str(),
+                runtime = runtime_str,
+                image_tag = image_tag_flag,
+                base_path = base_path_str,
+                host_tools_dir = args.host_tools_dir,
+                node_local = node_local_flag,
+                mount = mount_flags,
+                exe_path = step_meta.exe_path.display(),
+                user_out = step_out.display(),
+                repx_out = step_repx.display(),
+                params_json = orch.parameters_json_path.display(),
+                job_pkg = orch.job_package_path.display(),
             );
 
             let mut sbatch = TokioCommand::new("sbatch");
@@ -234,7 +250,7 @@ pub(crate) async fn submit_slurm_branches(
                 ))
                 .arg(format!("--output={}/slurm-%j.out", step_repx.display()))
                 .arg("--wrap")
-                .arg(wrapped_cmd);
+                .arg(repx_cmd);
 
             let output = sbatch.output().await?;
             if !output.status.success() {
