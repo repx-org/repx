@@ -112,8 +112,32 @@ let
         ) allVirtualJobs
       );
 
-      imageDerivations = common.uniqueDrvs (
+      perRunImageDerivations = common.uniqueDrvs (
         pkgs.lib.filter (i: i != null) (pkgs.lib.map (run: run.image) runs)
+      );
+
+      allSharedImageContents = common.uniqueDrvs (
+        pkgs.lib.flatten (pkgs.lib.map (run: run.imageContents or [ ]) runs)
+      );
+
+      hasSharedImageContents = allSharedImageContents != [ ];
+
+      sharedImage =
+        if hasSharedImageContents then
+          pkgs.dockerTools.buildLayeredImage {
+            name = "repx-shared-image";
+            tag = "latest";
+            compressor = "none";
+            contents = allSharedImageContents;
+            config = {
+              Cmd = [ "${pkgs.bash}/bin/bash" ];
+            };
+          }
+        else
+          null;
+
+      imageDerivations = common.uniqueDrvs (
+        perRunImageDerivations ++ (pkgs.lib.optional (sharedImage != null) sharedImage)
       );
 
       metadataHelpers = (import ./metadata.nix) {
@@ -122,6 +146,7 @@ let
           gitHash
           repxVersion
           includeImages
+          sharedImage
           ;
       };
 

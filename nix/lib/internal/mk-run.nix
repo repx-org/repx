@@ -2,7 +2,8 @@
   pkgs,
   repx-lib,
   name,
-  containerized ? true,
+  containerized ? null,
+  containerMode ? null,
   pipelines,
   parameters,
   parametersDependencies ? [ ],
@@ -16,6 +17,7 @@ let
     "repx-lib"
     "name"
     "containerized"
+    "containerMode"
     "pipelines"
     "parameters"
     "parametersDependencies"
@@ -24,6 +26,22 @@ let
     "hashMode"
     "override"
     "overrideDerivation"
+  ];
+
+  resolvedContainerMode =
+    if containerMode != null then
+      containerMode
+    else if containerized then
+      "shared"
+    else if !containerized then
+      "none"
+    else
+      "shared";
+
+  validContainerModes = [
+    "none"
+    "shared"
+    "per-run"
   ];
 
   hashMode = args.hashMode or "pure";
@@ -323,6 +341,12 @@ else if !(builtins.elem hashMode validHashModes) then
     Invalid hashMode: "${hashMode}".
     Valid values are: ${builtins.toJSON validHashModes}.
   ''
+else if !(builtins.elem resolvedContainerMode validContainerModes) then
+  throw ''
+    Error in 'mkRun' definition for run "${name}".
+    Invalid containerMode: "${resolvedContainerMode}".
+    Valid values are: ${builtins.toJSON validContainerModes}.
+  ''
 else if allCombinations == [ ] then
   throw ''
     Error in 'mkRun' for run "${name}":
@@ -331,30 +355,35 @@ else if allCombinations == [ ] then
     'pkgs.lib.cartesianProduct' produces no combinations if *any* input list is empty.
   ''
 else
+  let
+    paramDepsClosure = pkgs.writeTextDir "share/repx/param-dependencies" (
+      builtins.toJSON (parametersDependencies ++ autoParametersDependencies)
+    );
+
+    pipelineScriptDrvs = pkgs.lib.flatten (map getDrvsFromPipeline loadedPipelines);
+
+    runImageContents = pipelineScriptDrvs ++ (common.mkRuntimePackages pkgs) ++ [ paramDepsClosure ];
+  in
   {
     inherit name interRunDepTypes;
 
     image =
-      if containerized then
-        let
-          paramDepsClosure = pkgs.writeTextDir "share/repx/param-dependencies" (
-            builtins.toJSON (parametersDependencies ++ autoParametersDependencies)
-          );
-        in
+      if resolvedContainerMode == "per-run" then
         pkgs.dockerTools.buildLayeredImage {
           name = name + "-image";
           tag = "latest";
           compressor = "none";
-          contents =
-            (pkgs.lib.flatten (map getDrvsFromPipeline loadedPipelines))
-            ++ (common.mkRuntimePackages pkgs)
-            ++ [ paramDepsClosure ];
+          contents = runImageContents;
           config = {
             Cmd = [ "${pkgs.bash}/bin/bash" ];
           };
         }
       else
         null;
+
+    imageContents = if resolvedContainerMode == "shared" then runImageContents else [ ];
+
+    wantsSharedImage = resolvedContainerMode == "shared";
 
     runs = pkgs.lib.map (
       combo:
