@@ -19,8 +19,13 @@ async fn async_handle_execute(args: InternalExecuteArgs) -> Result<(), CliError>
 
     let job_id = JobId::from(args.job_id);
     let job_root = args.base_path.join(dirs::OUTPUTS).join(job_id.as_str());
-    let user_out_dir = job_root.join(dirs::OUT);
-    let repx_dir = job_root.join(dirs::REPX);
+
+    let user_out_dir = args
+        .user_out_dir
+        .unwrap_or_else(|| job_root.join(dirs::OUT));
+    let repx_dir = args
+        .repx_out_dir
+        .unwrap_or_else(|| job_root.join(dirs::REPX));
     fs::create_dir_all(&user_out_dir)?;
     fs::create_dir_all(&repx_dir)?;
 
@@ -28,21 +33,33 @@ async fn async_handle_execute(args: InternalExecuteArgs) -> Result<(), CliError>
     let _ = fs::remove_file(repx_dir.join(markers::FAIL));
 
     let script_path = args.executable_path;
-    let job_package_path = script_path
-        .parent()
-        .and_then(|p| p.parent())
-        .ok_or_else(|| {
-            CliError::Config(CoreError::InvalidConfig {
-                detail: "Could not determine job package path from executable path".to_string(),
-            })
-        })?
-        .to_path_buf();
+    let job_package_path = if let Some(pkg_path) = args.job_package_path {
+        pkg_path
+    } else {
+        script_path
+            .parent()
+            .and_then(|p| p.parent())
+            .ok_or_else(|| {
+                CliError::Config(CoreError::InvalidConfig {
+                    detail: "Could not determine job package path from executable path".to_string(),
+                })
+            })?
+            .to_path_buf()
+    };
     let inputs_json_path = repx_dir.join("inputs.json");
-    let parameters_json_path = repx_dir.join("parameters.json");
+    let parameters_json_path = args
+        .parameters_json_path
+        .unwrap_or_else(|| repx_dir.join("parameters.json"));
 
     let runtime = super::parse_runtime(args.runtime, args.image_tag)?;
     let host_tools_root = args.base_path.join("artifacts").join("host-tools");
     let host_tools_bin_dir = Some(host_tools_root.join(&args.host_tools_dir).join("bin"));
+
+    let exec_args = vec![
+        user_out_dir.to_string_lossy().to_string(),
+        inputs_json_path.to_string_lossy().to_string(),
+        parameters_json_path.to_string_lossy().to_string(),
+    ];
 
     let request = ExecutionRequest {
         job_id: job_id.clone(),
@@ -50,7 +67,7 @@ async fn async_handle_execute(args: InternalExecuteArgs) -> Result<(), CliError>
         base_path: args.base_path,
         node_local_path: args.node_local_path,
         job_package_path,
-        inputs_json_path: inputs_json_path.clone(),
+        inputs_json_path,
         user_out_dir,
         repx_out_dir: repx_dir.clone(),
         host_tools_bin_dir,
@@ -58,11 +75,6 @@ async fn async_handle_execute(args: InternalExecuteArgs) -> Result<(), CliError>
     };
 
     let executor = Executor::new(request);
-    let exec_args = vec![
-        job_root.join("out").to_string_lossy().to_string(),
-        inputs_json_path.to_string_lossy().to_string(),
-        parameters_json_path.to_string_lossy().to_string(),
-    ];
 
     let cancel = CancellationToken::new();
     let result = executor

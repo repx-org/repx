@@ -370,6 +370,27 @@ pub struct InternalExecuteArgs {
     pub executable_path: PathBuf,
     #[arg(long, default_value_t = false, help = "Enable debug logging to stderr")]
     pub debug: bool,
+
+    #[arg(
+        long,
+        help = "Override the user output directory (for scatter-gather steps)."
+    )]
+    pub user_out_dir: Option<PathBuf>,
+    #[arg(
+        long,
+        help = "Override the repx metadata directory (for scatter-gather steps)."
+    )]
+    pub repx_out_dir: Option<PathBuf>,
+    #[arg(
+        long,
+        help = "Override the parameters JSON path (for scatter-gather steps)."
+    )]
+    pub parameters_json_path: Option<PathBuf>,
+    #[arg(
+        long,
+        help = "Override the job package path (for scatter-gather steps)."
+    )]
+    pub job_package_path: Option<PathBuf>,
 }
 
 #[derive(Args)]

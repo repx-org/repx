@@ -56,25 +56,40 @@ impl BwrapRuntime {
             extract_dir
         );
 
-        let image_path = ctx.find_image_file(image_tag).await.ok_or_else(|| {
+        let shared_image_path = ctx.find_image_file(image_tag).await.ok_or_else(|| {
             ExecutorError::ImageNotFound(format!(
                 "Image file for tag '{}' not found in artifacts/images or artifacts/image",
                 image_tag
             ))
         })?;
 
-        if !image_path.is_dir() {
+        if !shared_image_path.is_dir() {
             return Err(ExecutorError::InvalidImage(format!(
                 "Image artifact at {:?} must be a directory (exploded OCI layout), but it is a file.",
-                image_path
+                shared_image_path
             )));
         }
 
-        let manifest_path = image_path.join("manifest.json");
+        let image_source = if ctx.request.node_local_path.is_some() {
+            let local_image_copy = image_dir.join("image");
+            if !local_image_copy.join("manifest.json").exists() {
+                tracing::info!(
+                    "Staging image from shared storage to node-local: {:?} -> {:?}",
+                    shared_image_path,
+                    local_image_copy
+                );
+                Self::stage_image_locally(&shared_image_path, &local_image_copy, ctx).await?;
+            }
+            local_image_copy
+        } else {
+            shared_image_path
+        };
+
+        let manifest_path = image_source.join("manifest.json");
         if !manifest_path.exists() {
             return Err(ExecutorError::InvalidImage(format!(
                 "Could not find 'manifest.json' inside the image directory {:?}.",
-                image_path
+                image_source
             )));
         }
 
@@ -107,7 +122,7 @@ impl BwrapRuntime {
         let tar_path = ctx.resolve_tool("tar").await?;
 
         for layer in layers {
-            let layer_path = image_path.join(layer);
+            let layer_path = image_source.join(layer);
             if !layer_path.exists() {
                 let _ = tokio::fs::remove_dir_all(&staging_dir).await;
                 return Err(ExecutorError::Io(std::io::Error::other(format!(
@@ -170,6 +185,48 @@ impl BwrapRuntime {
 
         tracing::info!("Successfully extracted rootfs for '{}'", image_tag);
         Ok(extract_dir)
+    }
+
+    async fn stage_image_locally(
+        shared_path: &std::path::Path,
+        local_path: &std::path::Path,
+        ctx: &RuntimeContext<'_>,
+    ) -> Result<()> {
+        let staging = local_path.with_file_name(".image_staging");
+        if staging.exists() {
+            tokio::fs::remove_dir_all(&staging).await?;
+        }
+        tokio::fs::create_dir_all(&staging).await?;
+
+        let rsync_path = ctx.resolve_tool("rsync").await?;
+        let mut cmd = TokioCommand::new(&rsync_path);
+        cmd.arg("-rL")
+            .arg("--chmod=u+w")
+            .arg(format!("{}/", shared_path.display()))
+            .arg(&staging)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+
+        ctx.restrict_command_environment(&mut cmd, &[]).await;
+
+        let output = cmd.output().await?;
+        if !output.status.success() {
+            let _ = tokio::fs::remove_dir_all(&staging).await;
+            return Err(ExecutorError::Io(std::io::Error::other(format!(
+                "Failed to stage image locally from {:?}. Stderr: {}",
+                shared_path,
+                String::from_utf8_lossy(&output.stderr)
+            ))));
+        }
+
+        if local_path.exists() {
+            let _ = tokio::fs::remove_dir_all(local_path).await;
+        }
+        tokio::fs::rename(&staging, local_path).await?;
+
+        tracing::info!("Image staged locally to {:?}", local_path);
+
+        Ok(())
     }
 
     pub async fn prepare_symlink_union(
