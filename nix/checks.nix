@@ -187,6 +187,9 @@ let
       inherit repx-lib;
     };
     "lib-hash-mode" = pkgs.callPackage ./checks/lib/check-hash-mode.nix { };
+    "lib-image-closure" = pkgs.callPackage ./checks/lib/check-image-closure.nix {
+      inherit repx-lib;
+    };
   }
   // (import ./checks/lib/check-deps.nix { inherit pkgs; });
 
