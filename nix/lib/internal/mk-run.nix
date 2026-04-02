@@ -219,8 +219,8 @@ let
         else
           [
             (pkgs.runCommand "param-store-paths" { } ''
-              mkdir -p $out/share/repx
-              cat > $out/share/repx/param-paths.txt <<'REPX_PATHS_EOF'
+              mkdir -p $out/share/repx/${name}
+              cat > $out/share/repx/${name}/param-paths.txt <<'REPX_PATHS_EOF'
               ${builtins.concatStringsSep "\n" nixStoreStrings}
               REPX_PATHS_EOF
             '')
@@ -384,7 +384,7 @@ else if allCombinations == [ ] then
   ''
 else
   let
-    paramDepsClosure = pkgs.writeTextDir "share/repx/param-dependencies" (
+    paramDepsClosure = pkgs.writeTextDir "share/repx/${name}/param-dependencies" (
       builtins.toJSON (parametersDependencies ++ autoParametersDependencies)
     );
 
