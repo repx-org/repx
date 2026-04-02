@@ -83,6 +83,7 @@ jobs:
           - lib-non-scalar-params
           - lib-hash-mode
           - lib-image-closure
+          - lib-container-mode
           - e2e-examples
           - e2e-bwrap-overlay-fallback
           - e2e-gc-local

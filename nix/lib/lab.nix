@@ -5,8 +5,16 @@
   lab_version,
   runs,
   groups ? { },
+  containerMode ? "unified",
+  runContainerMode ? "per-run",
 }:
 let
+  validContainerModes = [
+    "none"
+    "unified"
+    "per-run"
+  ];
+
   common = import ./internal/common.nix;
   lab-packagers = (import ./lab-packagers.nix) { inherit pkgs gitHash lab_version; };
   findRunName =
@@ -182,7 +190,17 @@ let
   );
 
 in
-if duplicateNames != [ ] then
+if !(builtins.elem containerMode validContainerModes) then
+  throw ''
+    Error in 'mkLab': invalid containerMode "${containerMode}".
+    Valid values are: ${builtins.toJSON validContainerModes}.
+  ''
+else if !(builtins.elem runContainerMode validContainerModes) then
+  throw ''
+    Error in 'mkLab': invalid runContainerMode "${runContainerMode}".
+    Valid values are: ${builtins.toJSON validContainerModes}.
+  ''
+else if duplicateNames != [ ] then
   throw ''
     Error: Duplicate run names detected in your lab definition.
     Each run must have a unique 'name' attribute after evaluation.
@@ -195,7 +213,24 @@ else if collidingGroupNames != [ ] then
     Group names must not match any run name.
   ''
 else
-  lab-packagers.runs2Lab {
-    inherit resolvedGroups;
-    runDefinitions = finalRunDefinitions;
+  let
+    fullLab = lab-packagers.runs2Lab {
+      inherit resolvedGroups containerMode;
+      runDefinitions = finalRunDefinitions;
+    };
+
+    perRunLabs = pkgs.lib.listToAttrs (
+      map (runName: {
+        name = runName;
+        value =
+          (lab-packagers.runs2Lab {
+            containerMode = runContainerMode;
+            runDefinitions = [ evaluationResults.${runName}.evaluatedRun ];
+          }).lab;
+      }) sortedRunNames
+    );
+  in
+  fullLab
+  // {
+    runs = perRunLabs;
   }

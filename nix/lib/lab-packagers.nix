@@ -79,6 +79,7 @@ let
     {
       runs,
       includeImages,
+      containerMode,
       resolvedGroups ? { },
     }:
     let
@@ -112,23 +113,17 @@ let
         ) allVirtualJobs
       );
 
-      perRunImageDerivations = common.uniqueDrvs (
-        pkgs.lib.filter (i: i != null) (pkgs.lib.map (run: run.image) runs)
-      );
-
-      allSharedImageContents = common.uniqueDrvs (
+      allImageContents = common.uniqueDrvs (
         pkgs.lib.flatten (pkgs.lib.map (run: run.imageContents or [ ]) runs)
       );
 
-      hasSharedImageContents = allSharedImageContents != [ ];
-
-      sharedImage =
-        if hasSharedImageContents then
+      unifiedImage =
+        if containerMode == "unified" && allImageContents != [ ] then
           pkgs.dockerTools.buildLayeredImage {
             name = "repx-shared-image";
             tag = "latest";
             compressor = "none";
-            contents = allSharedImageContents;
+            contents = allImageContents;
             config = {
               Cmd = [ "${pkgs.bash}/bin/bash" ];
             };
@@ -136,8 +131,39 @@ let
         else
           null;
 
+      perRunImages =
+        if containerMode == "per-run" then
+          pkgs.lib.listToAttrs (
+            pkgs.lib.filter (entry: entry.value != null) (
+              map (
+                run:
+                let
+                  contents = run.imageContents or [ ];
+                in
+                {
+                  inherit (run) name;
+                  value =
+                    if contents != [ ] then
+                      pkgs.dockerTools.buildLayeredImage {
+                        name = run.name + "-image";
+                        tag = "latest";
+                        compressor = "none";
+                        inherit contents;
+                        config = {
+                          Cmd = [ "${pkgs.bash}/bin/bash" ];
+                        };
+                      }
+                    else
+                      null;
+                }
+              ) runs
+            )
+          )
+        else
+          { };
+
       imageDerivations = common.uniqueDrvs (
-        perRunImageDerivations ++ (pkgs.lib.optional (sharedImage != null) sharedImage)
+        (pkgs.lib.optional (unifiedImage != null) unifiedImage) ++ (builtins.attrValues perRunImages)
       );
 
       metadataHelpers = (import ./metadata.nix) {
@@ -146,7 +172,9 @@ let
           gitHash
           repxVersion
           includeImages
-          sharedImage
+          containerMode
+          unifiedImage
+          perRunImages
           ;
       };
 
@@ -399,12 +427,13 @@ let
     {
       runDefinitions,
       resolvedGroups ? { },
+      containerMode ? "unified",
     }:
     let
       runs = runDefinitions;
       artifacts = buildLabCoreAndManifest {
-        inherit runs resolvedGroups;
-        includeImages = true;
+        inherit runs resolvedGroups containerMode;
+        includeImages = containerMode != "none";
       };
       readme = pkgs.runCommand "README.md" { } ''
         cat ${artifacts.allReadmeParts.readmeNative}/README.md > $out

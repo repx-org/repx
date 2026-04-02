@@ -76,7 +76,7 @@ nix build .#checks.x86_64-linux.e2e-remote-docker-impure
 Tests use pre-built Labs as input. Each Lab targets a different testing scenario:
 
 - **`reference-lab`** -- Standard containerized lab with a multi-stage pipeline and parameter sweeps. Used by pure, impure, and most other tests.
-- **`reference-lab-native`** -- Same pipeline with `containerized = false`. Used by native execution tests.
+- **`reference-lab-native`** -- Same pipeline with `containerMode = "none"`. Used by native execution tests.
 - **`reference-lab-mount-paths`** -- Parameterized lab with a job that reads from a bind-mounted host path. Used by mount-paths tests to verify the sandbox hole-punch actually works. Takes `mountDir` and `mountFile` as Nix arguments, so downstream consumers can reuse it to test their own impure paths.
 
 ```bash

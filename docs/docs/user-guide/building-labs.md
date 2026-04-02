@@ -42,7 +42,7 @@ result/
 - **`revision/`**: Contains the root metadata (DAG structure, run definitions, group mappings) and per-run job manifests with all job-level metadata.
 - **`jobs/`**: One subdirectory per unique job, containing the executable scripts and output structure templates.
 - **`host-tools/`**: Statically-linked binaries (coreutils, bash, jq, rsync, bubblewrap, etc.) for bootstrapping on machines without Nix.
-- **`images/`**: Docker/OCI container images when `containerized = true` (the default) in the run definition.
+- **`images/`**: Docker/OCI container images when `containerMode` is `"unified"` (default) or `"per-run"` in the lab definition.
 - **`store/`**: The Nix store closure containing all software dependencies.
 
 ## Reproducibility Guarantees

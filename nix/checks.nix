@@ -190,6 +190,9 @@ let
     "lib-image-closure" = pkgs.callPackage ./checks/lib/check-image-closure.nix {
       inherit repx-lib;
     };
+    "lib-container-mode" = pkgs.callPackage ./checks/lib/check-container-mode.nix {
+      inherit repx-lib;
+    };
   }
   // (import ./checks/lib/check-deps.nix { inherit pkgs; });
 

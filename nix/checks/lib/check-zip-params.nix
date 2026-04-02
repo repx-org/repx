@@ -10,7 +10,6 @@ let
         inherit utils;
       };
       name = "zip-test";
-      containerized = false;
       pipelines = [
         ({ repx }: repx.mkPipe { })
       ];
