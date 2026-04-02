@@ -28,8 +28,12 @@ repx-lib.mkLab {
 | `lab_version` | String | Yes | User-defined version string for this lab. Written into the lab manifest. |
 | `runs` | Attribute Set | Yes | Dictionary where keys are run attribute names and values are run placeholders (created by `callRun`). |
 | `groups` | Attribute Set | No (default: `{}`) | Named groupings of runs. See [Run Groups](#run-groups). |
+| `containerMode` | String | No (default: `"unified"`) | Controls container image generation for the full lab. `"unified"` builds one shared image for all runs, `"per-run"` builds a separate image per run, `"none"` skips image generation entirely. |
+| `runContainerMode` | String | No (default: `"per-run"`) | Controls container image generation for per-run lab slices (accessed via `.runs.<name>`). Same values as `containerMode`. |
 
-**Returns:** A Lab derivation containing the complete experiment graph.
+**Returns:** An attribute set containing:
+- `lab` -- The Lab derivation containing the complete experiment graph.
+- `runs` -- An attribute set of per-run Lab derivations. Each entry (e.g., `.runs.simulation`) is a standalone Lab containing only that single run, built with `runContainerMode`.
 
 **Validation rules:**
 - All run names must be unique after evaluation.
@@ -139,7 +143,7 @@ A **run definition file** (e.g., `runs/simulation.nix`) returns an attribute set
 | `name` | String | Yes | | Unique name for this run. |
 | `pipelines` | List of Paths | Yes | | Paths to pipeline definition files. |
 | `params` | Attribute Set | Yes | | Parameter lists for sweeping. RepX generates the Cartesian product. Use [`utils.zip`](#utilszip) to pair parameters in lockstep instead. |
-| `containerized` | Boolean | No | `true` | When `false`, skips Docker/OCI image generation entirely. Use for native-only execution. |
+| ~~`containerized`~~ | | | | **Removed.** Container image generation is now controlled at the lab level via `containerMode` on `mkLab`. |
 | `paramsDependencies` | List | No | `[]` | Additional Nix derivations that parameter values depend on (beyond auto-detection). |
 | `hashMode` | String | No | `"pure"` | Controls how job IDs are computed. `"pure"` (default) includes the full Nix store path of the stage script derivation, so any change to packages (even transitive dependencies like glibc) invalidates the job. `"params-only"` hashes only the stage identity (pname + version), resolved parameters, and pipeline wiring -- package/dependency changes are ignored. See [Hash Modes](#hash-modes) below. |
 

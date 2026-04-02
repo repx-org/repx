@@ -10,7 +10,6 @@ let
         inherit utils;
       };
       name = "non-scalar-test";
-      containerized = false;
       pipelines = [
         ({ repx }: repx.mkPipe { })
       ];

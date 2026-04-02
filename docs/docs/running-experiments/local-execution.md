@@ -40,7 +40,7 @@ The execution runtime is selected based on Lab configuration and target settings
 | Docker | Docker container runtime |
 | Podman | Podman container runtime |
 
-The runtime is configured via the `--scheduler` flag or target configuration in `config.toml`. Labs built with `containerized = false` only support native execution.
+The runtime is configured via the `--scheduler` flag or target configuration in `config.toml`. Labs built with `containerMode = "none"` only support native execution.
 
 ## Failure Handling
 

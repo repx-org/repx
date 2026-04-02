@@ -7,7 +7,6 @@ let
 in
 {
   name = "simulation-run";
-  containerized = false;
   pipelines = [ ./pipelines/pipe-simulation.nix ];
 
   parameters = {

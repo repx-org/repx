@@ -23,6 +23,7 @@ repx-lib.mkLab {
     runs
     ;
   lab_version = "1.0.0";
+  containerMode = "none";
   groups = {
     all = with runs; [
       simulation

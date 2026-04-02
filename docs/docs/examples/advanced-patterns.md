@@ -320,19 +320,58 @@ in
 
 **Hard dependencies** pass all jobs from the upstream run as inputs to the downstream run's pipelines. **Soft dependencies** make the downstream run aware of the upstream run's jobs (for metadata/provenance) without creating data flow edges.
 
-## Native-Only Runs
+## Native-Only Labs
 
-If your experiment doesn't need container isolation (e.g., it only uses host tools or runs on a trusted cluster), disable container image generation:
+If your experiment doesn't need container isolation (e.g., it only uses host tools or runs on a trusted cluster), disable container image generation at the lab level:
 
 ```nix
-# nix/runs/lightweight.nix
-{ pkgs, ... }:
-{
-  name = "lightweight";
-  containerized = false;  # Skip Docker image generation
-  pipelines = [ ./pipelines/quick.nix ];
-  params = { seed = [ 1 2 3 ]; };
+# nix/lab.nix
+repx-lib.mkLab {
+  inherit pkgs repx-lib;
+  gitHash = self.rev or self.dirtyRev or "unknown";
+  lab_version = "1.0.0";
+  containerMode = "none";  # Skip Docker image generation for all runs
+  runs = {
+    lightweight = repx-lib.callRun ./runs/lightweight.nix [];
+  };
 }
 ```
 
 This reduces build time and Lab size significantly.
+
+## Per-Run Container Images
+
+For labs with runs of very different sizes (e.g., a 5GB simulation and a 1GB analysis), use `"per-run"` mode so each run gets its own container image instead of one large unified image:
+
+```nix
+repx-lib.mkLab {
+  inherit pkgs repx-lib;
+  gitHash = self.rev or self.dirtyRev or "unknown";
+  lab_version = "1.0.0";
+  containerMode = "per-run";
+  runs = {
+    simulation = repx-lib.callRun ./runs/simulation.nix [];
+    analysis = repx-lib.callRun ./runs/analysis.nix [];
+  };
+}
+```
+
+## Per-Run Lab Slices
+
+You can build a lab containing only a single run using `.runs.<name>`:
+
+```bash
+nix build .#mylab              # Full lab (all runs, unified image)
+nix build .#mylab.runs.sim     # Only the sim run
+```
+
+The `runContainerMode` parameter (default: `"per-run"`) controls container generation for these slices independently from the full lab's `containerMode`:
+
+```nix
+repx-lib.mkLab {
+  # ...
+  containerMode = "unified";       # Full lab: one shared 10GB image
+  runContainerMode = "per-run";    # Slices: each run gets its own smaller image
+  # ...
+}
+```

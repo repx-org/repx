@@ -3,7 +3,9 @@
   gitHash,
   repxVersion,
   includeImages ? true,
-  sharedImage ? null,
+  containerMode ? "none",
+  unifiedImage ? null,
+  perRunImages ? { },
 }:
 let
   removeNulls = attrs: pkgs.lib.filterAttrs (_: v: v != null) attrs;
@@ -53,10 +55,10 @@ let
       runName = runDef.name;
 
       effectiveImageDrv =
-        if runDef.image != null then
-          runDef.image
-        else if (runDef.wantsSharedImage or false) && sharedImage != null then
-          sharedImage
+        if containerMode == "unified" then
+          unifiedImage
+        else if containerMode == "per-run" then
+          perRunImages.${runName} or null
         else
           null;
       imagePath =

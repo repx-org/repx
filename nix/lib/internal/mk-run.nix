@@ -2,8 +2,6 @@
   pkgs,
   repx-lib,
   name,
-  containerized ? null,
-  containerMode ? null,
   pipelines,
   parameters,
   parametersDependencies ? [ ],
@@ -16,8 +14,6 @@ let
     "pkgs"
     "repx-lib"
     "name"
-    "containerized"
-    "containerMode"
     "pipelines"
     "parameters"
     "parametersDependencies"
@@ -26,20 +22,6 @@ let
     "hashMode"
     "override"
     "overrideDerivation"
-  ];
-
-  resolvedContainerMode =
-    if containerMode != null then
-      containerMode
-    else if containerized == null || containerized then
-      "shared"
-    else
-      "none";
-
-  validContainerModes = [
-    "none"
-    "shared"
-    "per-run"
   ];
 
   hashMode = args.hashMode or "pure";
@@ -369,12 +351,6 @@ else if !(builtins.elem hashMode validHashModes) then
     Invalid hashMode: "${hashMode}".
     Valid values are: ${builtins.toJSON validHashModes}.
   ''
-else if !(builtins.elem resolvedContainerMode validContainerModes) then
-  throw ''
-    Error in 'mkRun' definition for run "${name}".
-    Invalid containerMode: "${resolvedContainerMode}".
-    Valid values are: ${builtins.toJSON validContainerModes}.
-  ''
 else if allCombinations == [ ] then
   throw ''
     Error in 'mkRun' for run "${name}":
@@ -399,23 +375,7 @@ else
   {
     inherit name interRunDepTypes;
 
-    image =
-      if resolvedContainerMode == "per-run" then
-        pkgs.dockerTools.buildLayeredImage {
-          name = name + "-image";
-          tag = "latest";
-          compressor = "none";
-          contents = runImageContents;
-          config = {
-            Cmd = [ "${pkgs.bash}/bin/bash" ];
-          };
-        }
-      else
-        null;
-
-    imageContents = if resolvedContainerMode == "shared" then runImageContents else [ ];
-
-    wantsSharedImage = resolvedContainerMode == "shared";
+    imageContents = runImageContents;
 
     runs = pkgs.lib.map (
       combo:

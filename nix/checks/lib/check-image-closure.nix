@@ -46,7 +46,6 @@ let
   runAlpha = _: {
     name = "closure-test-alpha";
     hashMode = "params-only";
-    containerized = true;
     pipelines = [ pipeline ];
     parameters = {
       dir = [ "${pkgAlpha}/bin" ];
@@ -57,7 +56,6 @@ let
   runBeta = _: {
     name = "closure-test-beta";
     hashMode = "params-only";
-    containerized = true;
     pipelines = [ pipeline ];
     parameters = {
       dir = [ "${pkgBeta}/bin" ];
