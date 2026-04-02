@@ -428,10 +428,9 @@ async fn handle_phase_step(
     let step_repx = branch_root
         .join(format!("step-{}", step_name))
         .join(dirs::REPX);
-    fs::create_dir_all(&step_out)?;
     fs::create_dir_all(&step_repx)?;
-
     clear_step_markers(&step_repx);
+    fs::create_dir_all(&step_out)?;
 
     let inputs = inputs::resolve_step_inputs(
         step_meta,
