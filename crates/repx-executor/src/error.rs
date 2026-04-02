@@ -9,7 +9,7 @@ pub enum ExecutorError {
     #[error(transparent)]
     Domain(#[from] repx_core::errors::DomainError),
 
-    #[error("{operation} '{path}': {source}")]
+    #[error("I/O error during {operation} on '{path}': {source}")]
     Io {
         operation: &'static str,
         path: PathBuf,
