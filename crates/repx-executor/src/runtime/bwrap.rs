@@ -1,5 +1,5 @@
 use crate::context::RuntimeContext;
-use crate::error::{ExecutorError, Result};
+use crate::error::{ExecutorError, IoContext, Result};
 use crate::ExecutionRequest;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -38,7 +38,9 @@ impl BwrapRuntime {
         let temp_path = ctx.get_temp_path().await;
         let lock_path = temp_path.join(format!("repx-extract-{}.lock", image_hash));
 
-        tokio::fs::create_dir_all(&images_cache_dir).await?;
+        tokio::fs::create_dir_all(&images_cache_dir)
+            .await
+            .io_ctx("create_dir_all", &images_cache_dir)?;
 
         if success_marker.exists() && extract_dir.exists() {
             return Ok(extract_dir);
@@ -49,6 +51,15 @@ impl BwrapRuntime {
         if success_marker.exists() && extract_dir.exists() {
             return Ok(extract_dir);
         }
+
+        if extract_dir.exists() {
+            tracing::info!(
+                "Removing stale rootfs at {:?} (no success marker)",
+                extract_dir
+            );
+            let _ = tokio::fs::remove_dir_all(&extract_dir).await;
+        }
+        let _ = tokio::fs::remove_file(&success_marker).await;
 
         tracing::info!(
             "Extracting rootfs for image '{}' to {:?}",
@@ -99,7 +110,9 @@ impl BwrapRuntime {
             layers: Vec<String>,
         }
 
-        let manifest_content = tokio::fs::read_to_string(&manifest_path).await?;
+        let manifest_content = tokio::fs::read_to_string(&manifest_path)
+            .await
+            .io_ctx("read_to_string", &manifest_path)?;
         let manifest: Vec<ManifestEntry> =
             serde_json::from_str(&manifest_content).map_err(|e| {
                 ExecutorError::InvalidImage(format!("Failed to parse manifest.json: {}", e))
@@ -115,9 +128,13 @@ impl BwrapRuntime {
 
         let staging_dir = image_dir.join(".rootfs_staging");
         if staging_dir.exists() {
-            tokio::fs::remove_dir_all(&staging_dir).await?;
+            tokio::fs::remove_dir_all(&staging_dir)
+                .await
+                .io_ctx("remove_dir_all", &staging_dir)?;
         }
-        tokio::fs::create_dir_all(&staging_dir).await?;
+        tokio::fs::create_dir_all(&staging_dir)
+            .await
+            .io_ctx("create_dir_all", &staging_dir)?;
 
         let tar_path = ctx.resolve_tool("tar").await?;
 
@@ -125,11 +142,15 @@ impl BwrapRuntime {
             let layer_path = image_source.join(layer);
             if !layer_path.exists() {
                 let _ = tokio::fs::remove_dir_all(&staging_dir).await;
-                return Err(ExecutorError::Io(std::io::Error::other(format!(
-                    "Layer '{}' listed in manifest but not found at '{}'",
-                    layer,
-                    layer_path.display()
-                ))));
+                return Err(ExecutorError::Io {
+                    source: std::io::Error::other(format!(
+                        "Layer '{}' listed in manifest but not found at '{}'",
+                        layer,
+                        layer_path.display()
+                    )),
+                    operation: "metadata",
+                    path: layer_path.clone(),
+                });
             }
 
             tracing::debug!("Extracting layer: {:?}", layer_path);
@@ -149,37 +170,51 @@ impl BwrapRuntime {
 
             ctx.restrict_command_environment(&mut cmd_layer, &[]).await;
 
-            let output = cmd_layer.output().await?;
+            let output = cmd_layer
+                .output()
+                .await
+                .map_err(|e| ExecutorError::CommandFailed {
+                    command: "tar".into(),
+                    source: e,
+                })?;
             if !output.status.success() {
                 let _ = tokio::fs::remove_dir_all(&staging_dir).await;
-                return Err(ExecutorError::Io(std::io::Error::other(format!(
-                    "Failed to extract layer '{}'. Stderr: {}",
-                    layer,
-                    String::from_utf8_lossy(&output.stderr)
-                ))));
+                return Err(ExecutorError::Io {
+                    source: std::io::Error::other(format!(
+                        "Failed to extract layer '{}'. Stderr: {}",
+                        layer,
+                        String::from_utf8_lossy(&output.stderr)
+                    )),
+                    operation: "extract",
+                    path: layer_path.clone(),
+                });
             }
         }
 
         for dir in &["dev", "proc", "tmp"] {
             let p = staging_dir.join(dir);
             if !p.exists() {
-                tokio::fs::create_dir(&p).await?;
+                tokio::fs::create_dir(&p).await.io_ctx("create_dir", &p)?;
             }
         }
 
         if extract_dir.exists() && !success_marker.exists() {
-            tokio::fs::remove_dir_all(&extract_dir).await?;
+            tokio::fs::remove_dir_all(&extract_dir)
+                .await
+                .io_ctx("remove_dir_all", &extract_dir)?;
         }
 
         if !extract_dir.exists() {
-            tokio::fs::rename(&staging_dir, &extract_dir).await?;
+            tokio::fs::rename(&staging_dir, &extract_dir)
+                .await
+                .io_ctx("rename", &extract_dir)?;
         } else {
             let _ = tokio::fs::remove_dir_all(&staging_dir).await;
         }
 
         tokio::fs::File::create(&success_marker)
             .await
-            .map_err(ExecutorError::Io)?;
+            .io_ctx("create", &success_marker)?;
 
         let _ = tokio::fs::remove_file(&lock_path).await;
 
@@ -194,9 +229,13 @@ impl BwrapRuntime {
     ) -> Result<()> {
         let staging = local_path.with_file_name(".image_staging");
         if staging.exists() {
-            tokio::fs::remove_dir_all(&staging).await?;
+            tokio::fs::remove_dir_all(&staging)
+                .await
+                .io_ctx("remove_dir_all", &staging)?;
         }
-        tokio::fs::create_dir_all(&staging).await?;
+        tokio::fs::create_dir_all(&staging)
+            .await
+            .io_ctx("create_dir_all", &staging)?;
 
         let rsync_path = ctx.resolve_tool("rsync").await?;
         let mut cmd = TokioCommand::new(&rsync_path);
@@ -209,20 +248,32 @@ impl BwrapRuntime {
 
         ctx.restrict_command_environment(&mut cmd, &[]).await;
 
-        let output = cmd.output().await?;
+        let output = cmd
+            .output()
+            .await
+            .map_err(|e| ExecutorError::CommandFailed {
+                command: "rsync".into(),
+                source: e,
+            })?;
         if !output.status.success() {
             let _ = tokio::fs::remove_dir_all(&staging).await;
-            return Err(ExecutorError::Io(std::io::Error::other(format!(
-                "Failed to stage image locally from {:?}. Stderr: {}",
-                shared_path,
-                String::from_utf8_lossy(&output.stderr)
-            ))));
+            return Err(ExecutorError::Io {
+                source: std::io::Error::other(format!(
+                    "Failed to stage image locally from {:?}. Stderr: {}",
+                    shared_path,
+                    String::from_utf8_lossy(&output.stderr)
+                )),
+                operation: "rsync",
+                path: staging.clone(),
+            });
         }
 
         if local_path.exists() {
             let _ = tokio::fs::remove_dir_all(local_path).await;
         }
-        tokio::fs::rename(&staging, local_path).await?;
+        tokio::fs::rename(&staging, local_path)
+            .await
+            .io_ctx("rename", local_path)?;
 
         tracing::info!("Image staged locally to {:?}", local_path);
 
@@ -238,28 +289,50 @@ impl BwrapRuntime {
     ) -> Result<PathBuf> {
         let union_dir = request.repx_out_dir.join("nix_union_store");
         if union_dir.exists() {
-            tokio::fs::remove_dir_all(&union_dir).await?;
+            tokio::fs::remove_dir_all(&union_dir)
+                .await
+                .io_ctx("remove_dir_all", &union_dir)?;
         }
-        tokio::fs::create_dir_all(&union_dir).await?;
+        tokio::fs::create_dir_all(&union_dir)
+            .await
+            .io_ctx("create_dir_all", &union_dir)?;
 
-        let mut host_entries = tokio::fs::read_dir(host_store).await?;
-        while let Some(entry) = host_entries.next_entry().await? {
+        let mut host_entries = tokio::fs::read_dir(host_store)
+            .await
+            .io_ctx("read_dir", host_store)?;
+        while let Some(entry) = host_entries
+            .next_entry()
+            .await
+            .io_ctx("read_dir", host_store)?
+        {
             let file_name = entry.file_name();
             let target = host_mount_point.join(&file_name);
             let link_path = union_dir.join(&file_name);
-            tokio::fs::symlink(target, link_path).await?;
+            tokio::fs::symlink(&target, &link_path)
+                .await
+                .io_ctx("symlink", &link_path)?;
         }
 
-        let mut image_entries = tokio::fs::read_dir(image_store).await?;
-        while let Some(entry) = image_entries.next_entry().await? {
+        let mut image_entries = tokio::fs::read_dir(image_store)
+            .await
+            .io_ctx("read_dir", image_store)?;
+        while let Some(entry) = image_entries
+            .next_entry()
+            .await
+            .io_ctx("read_dir", image_store)?
+        {
             let file_name = entry.file_name();
             let target = image_mount_point.join(&file_name);
             let link_path = union_dir.join(&file_name);
 
             if link_path.exists() || tokio::fs::symlink_metadata(&link_path).await.is_ok() {
-                tokio::fs::remove_file(&link_path).await?;
+                tokio::fs::remove_file(&link_path)
+                    .await
+                    .io_ctx("remove_file", &link_path)?;
             }
-            tokio::fs::symlink(target, link_path).await?;
+            tokio::fs::symlink(&target, &link_path)
+                .await
+                .io_ctx("symlink", &link_path)?;
         }
 
         Ok(union_dir)
@@ -654,8 +727,15 @@ impl BwrapRuntime {
             let mut has_image_store_entries = false;
 
             if image_store.exists() {
-                let mut entries = tokio::fs::read_dir(&image_store).await?;
-                if entries.next_entry().await?.is_some() {
+                let mut entries = tokio::fs::read_dir(&image_store)
+                    .await
+                    .io_ctx("read_dir", &image_store)?;
+                if entries
+                    .next_entry()
+                    .await
+                    .io_ctx("read_dir", &image_store)?
+                    .is_some()
+                {
                     has_image_store_entries = true;
                 }
             }
@@ -670,8 +750,12 @@ impl BwrapRuntime {
                 let overlay_upper = request.repx_out_dir.join("nix_overlay_upper");
                 let overlay_work = request.repx_out_dir.join("nix_overlay_work");
 
-                tokio::fs::create_dir_all(&overlay_upper).await?;
-                tokio::fs::create_dir_all(&overlay_work).await?;
+                tokio::fs::create_dir_all(&overlay_upper)
+                    .await
+                    .io_ctx("create_dir_all", &overlay_upper)?;
+                tokio::fs::create_dir_all(&overlay_work)
+                    .await
+                    .io_ctx("create_dir_all", &overlay_work)?;
 
                 cmd.arg("--overlay-src")
                     .arg("/nix/store")
@@ -680,8 +764,14 @@ impl BwrapRuntime {
                     .arg(&overlay_work)
                     .arg("/nix/store");
 
-                let mut entries = tokio::fs::read_dir(&image_store).await?;
-                while let Some(entry) = entries.next_entry().await? {
+                let mut entries = tokio::fs::read_dir(&image_store)
+                    .await
+                    .io_ctx("read_dir", &image_store)?;
+                while let Some(entry) = entries
+                    .next_entry()
+                    .await
+                    .io_ctx("read_dir", &image_store)?
+                {
                     let file_name = entry.file_name();
                     let image_path = entry.path();
                     let target_path = PathBuf::from("/nix/store").join(file_name);
@@ -695,8 +785,12 @@ impl BwrapRuntime {
                 let host_mount_point = request.repx_out_dir.join("store_host");
                 let image_mount_point = request.repx_out_dir.join("store_image");
 
-                tokio::fs::create_dir_all(&host_mount_point).await?;
-                tokio::fs::create_dir_all(&image_mount_point).await?;
+                tokio::fs::create_dir_all(&host_mount_point)
+                    .await
+                    .io_ctx("create_dir_all", &host_mount_point)?;
+                tokio::fs::create_dir_all(&image_mount_point)
+                    .await
+                    .io_ctx("create_dir_all", &image_mount_point)?;
 
                 let union_dir = Self::prepare_symlink_union(
                     request,
@@ -748,11 +842,13 @@ impl BwrapRuntime {
         let rootfs = rootfs_path.to_path_buf();
         let mounts: std::result::Result<Vec<RootfsMount>, ExecutorError> =
             tokio::task::spawn_blocking(move || {
-                let entries = std::fs::read_dir(&rootfs).map_err(|e| {
-                    ExecutorError::Io(std::io::Error::new(
+                let entries = std::fs::read_dir(&rootfs).map_err(|e| ExecutorError::Io {
+                    source: std::io::Error::new(
                         std::io::ErrorKind::NotFound,
                         format!("Failed to read rootfs directory {:?}: {}", rootfs, e),
-                    ))
+                    ),
+                    operation: "read_dir",
+                    path: rootfs.clone(),
                 })?;
 
                 let mut result = Vec::new();
@@ -787,11 +883,10 @@ impl BwrapRuntime {
                 Ok(result)
             })
             .await
-            .map_err(|e| {
-                ExecutorError::Io(std::io::Error::other(format!(
-                    "Rootfs mount task panicked: {}",
-                    e
-                )))
+            .map_err(|e| ExecutorError::Io {
+                source: std::io::Error::other(format!("Rootfs mount task panicked: {}", e)),
+                operation: "read_dir",
+                path: rootfs_path.to_path_buf(),
             })?;
 
         for mount in mounts? {

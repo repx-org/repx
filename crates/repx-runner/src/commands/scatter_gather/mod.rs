@@ -93,6 +93,8 @@ pub(crate) struct ScatterGatherOrchestrator {
     pub(crate) static_inputs: Value,
     pub(crate) host_tools_bin_dir: Option<PathBuf>,
     pub(crate) node_local_path: Option<PathBuf>,
+    pub(crate) local_artifacts_path: Option<PathBuf>,
+    pub(crate) lab_tar_path: Option<PathBuf>,
     pub(crate) mount_policy: MountPolicy,
 }
 
@@ -109,8 +111,30 @@ impl ScatterGatherOrchestrator {
         let parameters_json_path = repx_dir.join("parameters.json");
 
         let runtime = super::parse_runtime(args.runtime, args.image_tag.clone())?;
-        let host_tools_root = args.base_path.join("artifacts").join("host-tools");
-        let host_tools_bin_dir = Some(host_tools_root.join(&args.host_tools_dir).join("bin"));
+
+        let host_tools_bin_dir = if let Some(ref local) = args.local_artifacts_path {
+            let local_tools = local
+                .join("host-tools")
+                .join(&args.host_tools_dir)
+                .join("bin");
+            if local_tools.exists() {
+                Some(local_tools)
+            } else {
+                let host_tools_root = args.base_path.join("artifacts").join("host-tools");
+                Some(host_tools_root.join(&args.host_tools_dir).join("bin"))
+            }
+        } else {
+            let host_tools_root = args.base_path.join("artifacts").join("host-tools");
+            Some(host_tools_root.join(&args.host_tools_dir).join("bin"))
+        };
+
+        let resolve = |p: &std::path::Path| {
+            crate::commands::resolve_to_local_artifacts(
+                p,
+                &args.base_path,
+                &args.local_artifacts_path,
+            )
+        };
 
         Ok(Self {
             job_id,
@@ -123,10 +147,12 @@ impl ScatterGatherOrchestrator {
             inputs_json_path,
             parameters_json_path,
             runtime,
-            job_package_path: args.job_package_path.clone(),
+            job_package_path: resolve(&args.job_package_path),
             static_inputs: Value::Object(Default::default()),
             host_tools_bin_dir,
             node_local_path: args.node_local_path.clone(),
+            local_artifacts_path: args.local_artifacts_path.clone(),
+            lab_tar_path: args.lab_tar_path.clone(),
             mount_policy: MountPolicy::from_flags(args.mount_host_paths, args.mount_paths.clone()),
         })
     }
@@ -161,6 +187,7 @@ impl ScatterGatherOrchestrator {
             runtime: self.runtime.clone(),
             base_path: self.base_path.clone(),
             node_local_path: self.node_local_path.clone(),
+            local_artifacts_path: self.local_artifacts_path.clone(),
             job_package_path: self.job_package_path.clone(),
             inputs_json_path: self.inputs_json_path.clone(),
             user_out_dir: user_out,
@@ -269,6 +296,11 @@ async fn run_scatter_if_needed(
         return Ok(true);
     }
 
+    if orch.scatter_out_dir.exists() {
+        let _ = fs::remove_dir_all(&orch.scatter_out_dir);
+        fs::create_dir_all(&orch.scatter_out_dir)?;
+    }
+
     if let Err(e) = orch.run_scatter(scatter_exe_path).await {
         write_marker(&orch.scatter_repx_dir.join(markers::FAIL))?;
         write_marker(&orch.repx_dir.join(markers::FAIL))?;
@@ -330,6 +362,13 @@ fn invalidate_stale_step_markers(
 fn clear_step_markers(step_repx: &Path) {
     let _ = fs::remove_file(step_repx.join(markers::SUCCESS));
     let _ = fs::remove_file(step_repx.join(markers::FAIL));
+
+    if let Some(step_root) = step_repx.parent() {
+        let step_out = step_root.join(dirs::OUT);
+        if step_out.exists() {
+            let _ = fs::remove_dir_all(&step_out);
+        }
+    }
 }
 
 async fn handle_phase_step(
@@ -513,7 +552,7 @@ async fn handle_phase_gather(
 }
 
 async fn async_handle_scatter_gather(
-    args: InternalScatterGatherArgs,
+    mut args: InternalScatterGatherArgs,
     verbose: repx_core::logging::Verbosity,
 ) -> Result<(), CliError> {
     tracing::debug!(
@@ -521,6 +560,13 @@ async fn async_handle_scatter_gather(
         args.phase,
         args.job_id
     );
+
+    let resolve = |p: &std::path::Path| -> std::path::PathBuf {
+        crate::commands::resolve_to_local_artifacts(p, &args.base_path, &args.local_artifacts_path)
+    };
+    args.scatter_exe_path = resolve(&args.scatter_exe_path);
+    args.gather_exe_path = resolve(&args.gather_exe_path);
+    args.job_package_path = resolve(&args.job_package_path);
 
     let steps_meta: StepsMetadata = serde_json::from_str(&args.steps_json).map_err(|e| {
         CliError::Config(CoreError::SerializationError(format!(

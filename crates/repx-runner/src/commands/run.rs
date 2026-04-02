@@ -12,6 +12,14 @@ use std::time::Duration;
 use crate::{cli::RunArgs, commands::AppContext, error::CliError};
 use repx_core::model::Memory;
 
+pub struct RunConfig {
+    pub target_name: String,
+    pub scheduler: SchedulerType,
+    pub num_jobs: Option<usize>,
+    pub verbose: repx_core::logging::Verbosity,
+    pub artifact_store: repx_core::model::ArtifactStore,
+}
+
 fn format_phase_suffix(phase: &Option<WorkUnitPhase>) -> String {
     match phase {
         Some(p) => format!(" [{}]", p).dimmed().to_string(),
@@ -57,11 +65,13 @@ pub fn handle_run(
     args: RunArgs,
     context: &AppContext<'_>,
     resources: Option<Resources>,
-    target_name: &str,
-    scheduler: SchedulerType,
-    num_jobs: Option<usize>,
-    verbose: repx_core::logging::Verbosity,
+    run_config: RunConfig,
 ) -> Result<(), CliError> {
+    let target_name = &run_config.target_name;
+    let scheduler = run_config.scheduler;
+    let num_jobs = run_config.num_jobs;
+    let verbose = run_config.verbose;
+    let artifact_store = run_config.artifact_store;
     let mem_override = if let Some(ref mem_str) = args.mem {
         let m = Memory::from(mem_str.as_str());
         Some(m.to_bytes().ok_or_else(|| {
@@ -103,6 +113,7 @@ pub fn handle_run(
 
     let target_name_clone = target_name.to_string();
     let continue_on_failure = args.continue_on_failure;
+
     let submission_thread = thread::spawn(move || {
         let options = SubmitOptions {
             execution_type: None,
@@ -113,6 +124,7 @@ pub fn handle_run(
             continue_on_failure,
             verbose,
             cancel_flag: Some(cancelled_for_submit),
+            artifact_store,
         };
         client.submit_batch_run(run_specs, &target_name_clone, scheduler, options)
     });
@@ -136,6 +148,12 @@ pub fn handle_run(
         match event {
             ClientEvent::DeployingBinary => {
                 println!("- Deploying repx binary...");
+            }
+            ClientEvent::CreatingLabTar => {
+                println!("- Creating lab tar for node-local extraction...");
+            }
+            ClientEvent::SyncingLabTar => {
+                println!("- Syncing lab tar to target...");
             }
             ClientEvent::GeneratingSlurmScripts { num_jobs } => {
                 println!("- Generating {} SLURM scripts...", num_jobs);

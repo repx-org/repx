@@ -22,7 +22,7 @@ num_cpus = { workspace = true }
 thiserror = { workspace = true }
 ctrlc = { workspace = true }
 walkdir = { workspace = true }
-
+tempfile = { workspace = true }
 
 [dev-dependencies]
 assert_cmd = "2.1.2"

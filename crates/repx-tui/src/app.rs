@@ -994,6 +994,7 @@ impl App {
                 continue_on_failure: false,
                 verbose: repx_core::logging::Verbosity::default(),
                 cancel_flag: None,
+                artifact_store: repx_core::model::ArtifactStore::default(),
             };
 
             match client_clone.submit_batch_run(

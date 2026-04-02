@@ -88,6 +88,17 @@ jobs:
           - e2e-gc-remote
           - e2e-scatter-gather-cancel
           - e2e-init
+          - e2e-local-bwrap-lab-tar
+          - e2e-remote-slurm-lab-tar
+          - e2e-slurm-multi-node-lab-tar
+          - e2e-slurm-scatter-gather-lab-tar
+          - e2e-local-lab-tar-rerun
+          - e2e-slurm-lab-tar-shared-default
+          - e2e-slurm-multi-node-scatter-gather-lab-tar
+          - e2e-slurm-bwrap-scatter-gather-lab-tar
+          - e2e-local-lab-tar-symlink
+          - e2e-local-lab-tar-retry
+          - e2e-local-lab-tar-io-errors
     steps:
       - uses: actions/checkout@v4
       - uses: DeterminateSystems/nix-installer-action@main

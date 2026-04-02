@@ -93,12 +93,44 @@ pub(crate) async fn submit_slurm_gather_job(
         gather_cmd_parts.push("--node-local-path".to_string());
         gather_cmd_parts.push(local.to_string_lossy().to_string());
     }
+    if let Some(local_art) = &args.local_artifacts_path {
+        gather_cmd_parts.push("--local-artifacts-path".to_string());
+        gather_cmd_parts.push(local_art.to_string_lossy().to_string());
+    }
+    if let Some(tar) = &args.lab_tar_path {
+        gather_cmd_parts.push("--lab-tar-path".to_string());
+        gather_cmd_parts.push(tar.to_string_lossy().to_string());
+    }
     if let Some(anchor) = args.anchor_id {
         gather_cmd_parts.push("--anchor-id".to_string());
         gather_cmd_parts.push(anchor.to_string());
     }
 
-    let cmd_str = gather_cmd_parts.join(" ");
+    let gather_bootstrap = match (&orch.local_artifacts_path, &orch.lab_tar_path) {
+        (Some(local_artifacts), Some(tar_path)) => {
+            let local_base = local_artifacts.parent().unwrap_or(local_artifacts);
+            let content_hash = local_base
+                .file_name()
+                .unwrap_or(std::ffi::OsStr::new("unknown"))
+                .to_string_lossy();
+            format!(
+                "export LOCAL_BASE='{local_base}' && \
+                 export MARKER=\"$LOCAL_BASE/.extracted-{hash}\" && \
+                 export LAB_TAR='{tar}' && \
+                 mkdir -p \"$LOCAL_BASE\" && \
+                 flock -x \"$LOCAL_BASE/.lock\" sh -c \
+                   'if [ ! -f \"$MARKER\" ]; then tar xf \"$LAB_TAR\" -C \"$LOCAL_BASE/\" && touch \"$MARKER\"; fi' && ",
+                local_base = local_base.display(),
+                hash = content_hash,
+                tar = tar_path.display(),
+            )
+        }
+        _ => String::new(),
+    };
+    let cmd_str = format!("{}{}", gather_bootstrap, gather_cmd_parts.join(" "));
+
+    let gather_repx_dir = orch.job_root.join("gather").join(dirs::REPX);
+    fs::create_dir_all(&gather_repx_dir)?;
 
     let mut sbatch = TokioCommand::new("sbatch");
     sbatch.arg("--parsable");
@@ -155,6 +187,37 @@ pub(crate) async fn submit_slurm_branches(
         .as_ref()
         .map(|p| format!("--node-local-path '{}'", p.to_string_lossy()))
         .unwrap_or_default();
+    let local_artifacts_flag = orch
+        .local_artifacts_path
+        .as_ref()
+        .map(|p| format!("--local-artifacts-path '{}'", p.to_string_lossy()))
+        .unwrap_or_default();
+
+    let worker_bootstrap = match (&orch.local_artifacts_path, &orch.lab_tar_path) {
+        (Some(local_artifacts), Some(tar_path)) => {
+            let local_base = local_artifacts.parent().unwrap_or(local_artifacts);
+            let content_hash = local_base
+                .file_name()
+                .unwrap_or(std::ffi::OsStr::new("unknown"))
+                .to_string_lossy();
+            let _lab_dir_name = local_artifacts
+                .file_name()
+                .unwrap_or(std::ffi::OsStr::new("result"))
+                .to_string_lossy();
+            format!(
+                "export LOCAL_BASE='{local_base}' && \
+                 export MARKER=\"$LOCAL_BASE/.extracted-{hash}\" && \
+                 export LAB_TAR='{tar}' && \
+                 mkdir -p \"$LOCAL_BASE\" && \
+                 flock -x \"$LOCAL_BASE/.lock\" sh -c \
+                   'if [ ! -f \"$MARKER\" ]; then tar xf \"$LAB_TAR\" -C \"$LOCAL_BASE/\" && touch \"$MARKER\"; fi' && ",
+                local_base = local_base.display(),
+                hash = content_hash,
+                tar = tar_path.display(),
+            )
+        }
+        _ => String::new(),
+    };
     let mount_flags = match &orch.mount_policy {
         repx_core::model::MountPolicy::AllHostPaths => "--mount-host-paths".to_string(),
         repx_core::model::MountPolicy::SpecificPaths(paths) => paths
@@ -196,20 +259,22 @@ pub(crate) async fn submit_slurm_branches(
             let inputs_path = step_repx.join("inputs.json");
             fs::write(&inputs_path, serde_json::to_string_pretty(&inputs)?)?;
 
-            let repx_cmd = format!(
-                "{repx} internal-execute \
+            let inner_cmd = format!(
+                "{bootstrap}{repx} internal-execute \
                  --job-id '{job_id}' \
                  --runtime '{runtime}' \
                  {image_tag} \
                  --base-path '{base_path}' \
                  --host-tools-dir '{host_tools_dir}' \
                  {node_local} \
+                 {local_artifacts} \
                  {mount} \
                  --executable-path '{exe_path}' \
                  --user-out-dir '{user_out}' \
                  --repx-out-dir '{repx_out}' \
                  --parameters-json-path '{params_json}' \
                  --job-package-path '{job_pkg}'",
+                bootstrap = worker_bootstrap,
                 repx = repx_binary_str,
                 job_id = orch.job_id.as_str(),
                 runtime = runtime_str,
@@ -217,6 +282,7 @@ pub(crate) async fn submit_slurm_branches(
                 base_path = base_path_str,
                 host_tools_dir = args.host_tools_dir,
                 node_local = node_local_flag,
+                local_artifacts = local_artifacts_flag,
                 mount = mount_flags,
                 exe_path = step_meta.exe_path.display(),
                 user_out = step_out.display(),
@@ -224,6 +290,7 @@ pub(crate) async fn submit_slurm_branches(
                 params_json = orch.parameters_json_path.display(),
                 job_pkg = orch.job_package_path.display(),
             );
+            let repx_cmd = inner_cmd;
 
             let mut sbatch = TokioCommand::new("sbatch");
             sbatch

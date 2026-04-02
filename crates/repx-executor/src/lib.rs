@@ -4,7 +4,7 @@ mod runtime;
 mod util;
 
 pub use context::RuntimeContext;
-pub use error::{ExecutorError, Result};
+pub use error::{ExecutorError, IoContext, Result};
 pub use runtime::{BwrapRuntime, ContainerRuntime, NativeRuntime, Runtime};
 pub use util::{extract_image_hash, is_binary_allowed, ImageTag, ALLOWED_SYSTEM_BINARIES};
 
@@ -23,6 +23,7 @@ pub struct ExecutionRequest {
     pub runtime: Runtime,
     pub base_path: PathBuf,
     pub node_local_path: Option<PathBuf>,
+    pub local_artifacts_path: Option<PathBuf>,
     pub job_package_path: PathBuf,
     pub inputs_json_path: PathBuf,
     pub user_out_dir: PathBuf,
@@ -114,6 +115,8 @@ impl Executor {
         args: &[String],
     ) -> Result<TokioCommand> {
         let ctx = self.context();
+        let resolved_script = ctx.resolve_to_local(script_path).await;
+        let script_path = resolved_script.as_path();
 
         let cmd = match &self.request.runtime {
             Runtime::Native => NativeRuntime::build_command(&self.request, script_path, args),
@@ -139,12 +142,14 @@ impl Executor {
             .create(true)
             .append(true)
             .open(&stdout_path)
-            .await?;
+            .await
+            .io_ctx("open (create/append)", &stdout_path)?;
         let stderr_file = OpenOptions::new()
             .create(true)
             .append(true)
             .open(&stderr_path)
-            .await?;
+            .await
+            .io_ctx("open (create/append)", &stderr_path)?;
         Ok((stdout_file, stderr_file))
     }
 

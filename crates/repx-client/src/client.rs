@@ -53,6 +53,8 @@ impl std::fmt::Display for WorkUnitPhase {
 #[derive(Debug)]
 pub enum ClientEvent {
     DeployingBinary,
+    CreatingLabTar,
+    SyncingLabTar,
     GeneratingSlurmScripts {
         num_jobs: usize,
     },
@@ -158,6 +160,14 @@ pub(crate) fn resolve_execution_type(
         })
 }
 
+#[derive(Default, Clone, Debug)]
+pub struct LabTarInfo {
+    pub remote_tar_path: PathBuf,
+    pub node_local_base: PathBuf,
+    pub content_hash: String,
+    pub lab_dir_name: String,
+}
+
 #[derive(Default)]
 pub struct SubmitOptions {
     pub execution_type: Option<String>,
@@ -168,7 +178,15 @@ pub struct SubmitOptions {
     pub continue_on_failure: bool,
     pub verbose: repx_core::logging::Verbosity,
     pub cancel_flag: Option<Arc<AtomicBool>>,
+    pub artifact_store: repx_core::model::ArtifactStore,
 }
+
+pub struct SubmissionTarget {
+    pub target: Arc<dyn Target>,
+    pub target_name: String,
+    pub repx_binary_path: PathBuf,
+}
+
 #[derive(Clone)]
 pub struct Client {
     pub(crate) config: Config,
@@ -382,16 +400,97 @@ impl Client {
             remote_repx_binary_path.display()
         );
 
+        let use_node_local = options.artifact_store == repx_core::model::ArtifactStore::NodeLocal;
+        let lab_tar_remote_path = if use_node_local {
+            let node_local = target.config().node_local_path.as_ref().ok_or_else(|| {
+                ClientError::Config(CoreError::InvalidConfig {
+                    detail: "--lab-tar requires node_local_path to be set on the target".into(),
+                })
+            })?;
+
+            send(ClientEvent::CreatingLabTar);
+            let local_target = self
+                .get_target(targets::LOCAL)
+                .ok_or(ClientError::Config(CoreError::MissingLocalTarget))?;
+
+            let lab_is_tar = self.lab_path.is_file();
+            let tar_filename = format!("{}.tar", self.lab.content_hash);
+
+            let local_tar_path = if lab_is_tar {
+                self.lab_path.clone()
+            } else {
+                let local_temp_dir = local_target.base_path().join("repx").join("temp");
+                std::fs::create_dir_all(&local_temp_dir)
+                    .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
+                let tar_path = local_temp_dir.join(&tar_filename);
+
+                if !tar_path.exists() {
+                    let resolved_lab = self
+                        .lab_path
+                        .canonicalize()
+                        .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
+                    let status = std::process::Command::new("tar")
+                        .arg("cf")
+                        .arg(&tar_path)
+                        .arg("-C")
+                        .arg(resolved_lab.parent().unwrap_or(Path::new("/")))
+                        .arg(
+                            resolved_lab
+                                .file_name()
+                                .unwrap_or(std::ffi::OsStr::new("result")),
+                        )
+                        .status()
+                        .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
+                    if !status.success() {
+                        return Err(ClientError::Config(CoreError::InvalidConfig {
+                            detail: format!("Failed to create lab tar at {:?}", tar_path),
+                        }));
+                    }
+                    tracing::info!("Created lab tar: {:?}", tar_path);
+                }
+                tar_path
+            };
+
+            send(ClientEvent::SyncingLabTar);
+            let remote_tar_dir = target.base_path().join("lab-tars");
+            let remote_tar_path = remote_tar_dir.join(&tar_filename);
+            target.sync_file(&local_tar_path, &remote_tar_path)?;
+
+            let lab_tar_info = LabTarInfo {
+                remote_tar_path: remote_tar_path.clone(),
+                node_local_base: node_local
+                    .join("repx")
+                    .join("labs")
+                    .join(&self.lab.content_hash),
+                content_hash: self.lab.content_hash.clone(),
+                lab_dir_name: self
+                    .lab_path
+                    .canonicalize()
+                    .unwrap_or_else(|_| self.lab_path.clone())
+                    .file_name()
+                    .unwrap_or(std::ffi::OsStr::new("result"))
+                    .to_string_lossy()
+                    .into_owned(),
+            };
+            Some(lab_tar_info)
+        } else {
+            None
+        };
+
         send(ClientEvent::SyncingArtifacts { total: 1 });
-        target.sync_lab_root(&self.lab_path)?;
+        if use_node_local {
+            target.sync_lab_root_metadata_only(&self.lab_path)?;
+        } else {
+            target.sync_lab_root(&self.lab_path)?;
+        }
         send(ClientEvent::SyncingArtifactProgress {
             path: PathBuf::from("lab"),
         });
+        send(ClientEvent::SyncingFinished);
 
         if let Err(e) = target.register_gc_root(&project_id, &self.lab.content_hash) {
             tracing::warn!("Failed to register GC root: {}. The next `repx gc` may delete this experiment's results.", e);
         }
-        send(ClientEvent::SyncingFinished);
 
         let raw_statuses = self.get_statuses_for_active_target(target_name, Some(scheduler))?;
         let job_statuses = engine::determine_job_statuses(&self.lab, &raw_statuses);
@@ -408,23 +507,25 @@ impl Client {
         }
         let jobs_to_run_ids: HashSet<JobId> = jobs_to_run.keys().cloned().collect();
 
-        let images_to_sync = submission::collect_images_to_sync(&self.lab, &jobs_to_run_ids);
-        if !images_to_sync.is_empty() {
-            send(ClientEvent::SyncingArtifacts {
-                total: images_to_sync.len() as u64,
-            });
-            let local_target = self
-                .targets
-                .get(targets::LOCAL)
-                .ok_or(ClientError::Config(CoreError::MissingLocalTarget))?;
-            submission::sync_images(
-                &self.lab_path,
-                target,
-                local_target,
-                &images_to_sync,
-                options.event_sender.as_ref(),
-            )?;
-            send(ClientEvent::SyncingFinished);
+        if !use_node_local {
+            let images_to_sync = submission::collect_images_to_sync(&self.lab, &jobs_to_run_ids);
+            if !images_to_sync.is_empty() {
+                send(ClientEvent::SyncingArtifacts {
+                    total: images_to_sync.len() as u64,
+                });
+                let local_target = self
+                    .targets
+                    .get(targets::LOCAL)
+                    .ok_or(ClientError::Config(CoreError::MissingLocalTarget))?;
+                submission::sync_images(
+                    &self.lab_path,
+                    target,
+                    local_target,
+                    &images_to_sync,
+                    options.event_sender.as_ref(),
+                )?;
+                send(ClientEvent::SyncingFinished);
+            }
         }
 
         let jobs_to_submit: HashMap<JobId, &Job> = if scheduler == SchedulerType::Slurm {
@@ -449,25 +550,56 @@ impl Client {
             target.clone(),
         )?;
 
+        let sub_target = SubmissionTarget {
+            target: target.clone(),
+            target_name: target_name.to_string(),
+            repx_binary_path: remote_repx_binary_path.clone(),
+        };
+
         let result = match scheduler {
             SchedulerType::Slurm => slurm::submit_slurm_batch_run(
                 self,
                 jobs_to_submit,
-                target.clone(),
-                target_name,
-                &remote_repx_binary_path,
+                &sub_target,
                 &options,
+                lab_tar_remote_path.as_ref(),
                 send,
             ),
-            SchedulerType::Local => local::submit_local_batch_run(
-                self,
-                jobs_to_run,
-                target.clone(),
-                target_name,
-                &remote_repx_binary_path,
-                &options,
-                send,
-            ),
+            SchedulerType::Local => {
+                let local_artifacts = if let Some(ref info) = lab_tar_remote_path {
+                    let local_base = &info.node_local_base;
+                    let marker = local_base.join(format!(".extracted-{}", info.content_hash));
+                    if !marker.exists() {
+                        std::fs::create_dir_all(local_base)
+                            .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
+                        let status = std::process::Command::new("tar")
+                            .arg("xf")
+                            .arg(&info.remote_tar_path)
+                            .arg("-C")
+                            .arg(local_base)
+                            .status()
+                            .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
+                        if !status.success() {
+                            return Err(ClientError::Config(CoreError::InvalidConfig {
+                                detail: format!("Failed to extract lab tar to {:?}", local_base),
+                            }));
+                        }
+                        std::fs::write(&marker, "")
+                            .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
+                    }
+                    Some(local_base.join(&info.lab_dir_name))
+                } else {
+                    None
+                };
+                local::submit_local_batch_run(
+                    self,
+                    jobs_to_run,
+                    &sub_target,
+                    &options,
+                    local_artifacts.as_ref(),
+                    send,
+                )
+            }
         };
 
         match result {

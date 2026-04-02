@@ -32,6 +32,8 @@ pub struct Target {
     pub default_scheduler: Option<crate::model::SchedulerType>,
     pub default_execution_type: Option<crate::model::ExecutionType>,
     #[serde(default)]
+    pub artifact_store: Option<crate::model::ArtifactStore>,
+    #[serde(default)]
     pub mount_host_paths: bool,
     #[serde(default)]
     pub mount_paths: Vec<String>,

@@ -26,6 +26,7 @@ fn test_data_only_local_target_initialization() {
                 local_concurrency: None,
             }),
             slurm: None,
+            artifact_store: None,
         },
     );
 

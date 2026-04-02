@@ -225,6 +225,7 @@ fn test_gc_root_rotation_keeps_last_5() {
         local: None,
         slurm: None,
         mount_paths: vec![],
+        artifact_store: None,
     };
     let config = Config {
         targets: BTreeMap::from([("local".to_string(), target_config)]),
@@ -431,6 +432,7 @@ fn make_client_and_target(
         local: None,
         slurm: None,
         mount_paths: vec![],
+        artifact_store: None,
     };
     let config = Config {
         targets: BTreeMap::from([("local".to_string(), target_config)]),
@@ -865,6 +867,7 @@ fn test_gc_remove_auto_roots() {
         local: None,
         slurm: None,
         mount_paths: vec![],
+        artifact_store: None,
     };
     let config = Config {
         targets: BTreeMap::from([("local".to_string(), target_config)]),
