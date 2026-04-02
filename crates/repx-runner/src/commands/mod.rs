@@ -64,3 +64,25 @@ pub struct AppContext<'a> {
     pub client: &'a Client,
     pub submission_target: &'a str,
 }
+
+pub(crate) fn resolve_to_local_artifacts(
+    path: &Path,
+    base_path: &Path,
+    local_artifacts_path: &Option<std::path::PathBuf>,
+) -> std::path::PathBuf {
+    if let Some(local) = local_artifacts_path {
+        let artifacts_base = base_path.join("artifacts");
+        if let Ok(suffix) = path.strip_prefix(&artifacts_base) {
+            let local_path = local.join(suffix);
+            if local_path.exists() {
+                tracing::debug!(
+                    "Resolved to local: {} -> {}",
+                    path.display(),
+                    local_path.display()
+                );
+                return local_path;
+            }
+        }
+    }
+    path.to_path_buf()
+}

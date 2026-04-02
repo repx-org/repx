@@ -14,6 +14,10 @@ impl<'a> RuntimeContext<'a> {
         Self { request }
     }
 
+    fn local_artifacts_path(&self) -> Option<&PathBuf> {
+        self.request.local_artifacts_path.as_ref()
+    }
+
     pub async fn find_system_binary_dir(&self, binary_name: &str) -> Option<PathBuf> {
         if let Some(path_var) = std::env::var_os("PATH") {
             for path in std::env::split_paths(&path_var) {
@@ -76,40 +80,48 @@ impl<'a> RuntimeContext<'a> {
     }
 
     pub async fn find_image_file(&self, image_tag: &str) -> Option<PathBuf> {
-        let images_dir = self.request.base_path.join("images");
-        if tokio::fs::metadata(&images_dir).await.is_ok() {
-            let candidates = vec![
-                images_dir.join(image_tag),
-                images_dir.join(format!("{}.gz", image_tag)),
-                images_dir.join(format!("{}.tar", image_tag)),
-                images_dir.join(format!("{}.tar.gz", image_tag)),
-            ];
-            for candidate in candidates {
-                if tokio::fs::metadata(&candidate).await.is_ok() {
-                    return Some(candidate);
+        let search_roots: Vec<PathBuf> = if let Some(local) = self.local_artifacts_path() {
+            vec![local.clone(), self.request.base_path.clone()]
+        } else {
+            vec![self.request.base_path.clone()]
+        };
+
+        for root in &search_roots {
+            let images_dir = root.join("images");
+            if tokio::fs::metadata(&images_dir).await.is_ok() {
+                let candidates = vec![
+                    images_dir.join(image_tag),
+                    images_dir.join(format!("{}.gz", image_tag)),
+                    images_dir.join(format!("{}.tar", image_tag)),
+                    images_dir.join(format!("{}.tar.gz", image_tag)),
+                ];
+                for candidate in candidates {
+                    if tokio::fs::metadata(&candidate).await.is_ok() {
+                        return Some(candidate);
+                    }
                 }
             }
-        }
 
-        let artifacts = self.request.base_path.join("artifacts");
-        let subdirs = ["images", "image"];
+            let artifacts = root.join("artifacts");
+            let subdirs = ["images", "image"];
 
-        for subdir in subdirs {
-            let dir = artifacts.join(subdir);
-            if tokio::fs::metadata(&dir).await.is_err() {
-                continue;
-            }
+            for subdir in subdirs {
+                let dir = artifacts.join(subdir);
+                if tokio::fs::metadata(&dir).await.is_err() {
+                    continue;
+                }
 
-            let candidates = vec![
-                dir.join(image_tag),
-                dir.join(format!("{}.gz", image_tag)),
-                dir.join(format!("{}.tar", image_tag)),
-                dir.join(format!("{}.tar.gz", image_tag)),
-            ];
+                let candidates = vec![
+                    dir.join(image_tag),
+                    dir.join(format!("{}.gz", image_tag)),
+                    dir.join(format!("{}.tar", image_tag)),
+                    dir.join(format!("{}.tar.gz", image_tag)),
+                ];
 
-            for candidate in candidates {
-                if tokio::fs::metadata(&candidate).await.is_ok() {
-                    return Some(candidate);
+                for candidate in candidates {
+                    if tokio::fs::metadata(&candidate).await.is_ok() {
+                        return Some(candidate);
+                    }
                 }
             }
         }
@@ -117,7 +129,18 @@ impl<'a> RuntimeContext<'a> {
     }
 
     pub async fn get_temp_path(&self) -> PathBuf {
-        let temp_root = if let Some(local) = &self.request.node_local_path {
+        let temp_root = if self.local_artifacts_path().is_some() {
+            if let Some(local) = &self.request.node_local_path {
+                local.join("repx").join("temp")
+            } else if let Some(local_artifacts) = self.local_artifacts_path() {
+                local_artifacts
+                    .parent()
+                    .map(|p| p.join("temp"))
+                    .unwrap_or_else(|| self.request.base_path.join("repx").join("temp"))
+            } else {
+                self.request.base_path.join("repx").join("temp")
+            }
+        } else if let Some(local) = &self.request.node_local_path {
             local.join("repx").join("temp")
         } else {
             self.request.base_path.join("repx").join("temp")
@@ -128,6 +151,16 @@ impl<'a> RuntimeContext<'a> {
     }
 
     pub fn get_images_cache_dir(&self) -> PathBuf {
+        if self.local_artifacts_path().is_some() {
+            if let Some(local) = &self.request.node_local_path {
+                return local.join("repx").join("cache").join("images");
+            }
+            if let Some(local_artifacts) = self.local_artifacts_path() {
+                if let Some(parent) = local_artifacts.parent() {
+                    return parent.join("cache").join("images");
+                }
+            }
+        }
         if let Some(local) = &self.request.node_local_path {
             local.join("repx").join("cache").join("images")
         } else {
@@ -136,11 +169,39 @@ impl<'a> RuntimeContext<'a> {
     }
 
     pub fn get_capabilities_cache_dir(&self) -> PathBuf {
+        if self.local_artifacts_path().is_some() {
+            if let Some(local) = &self.request.node_local_path {
+                return local.join("repx").join("cache").join("capabilities");
+            }
+            if let Some(local_artifacts) = self.local_artifacts_path() {
+                if let Some(parent) = local_artifacts.parent() {
+                    return parent.join("cache").join("capabilities");
+                }
+            }
+        }
         if let Some(local) = &self.request.node_local_path {
             local.join("repx").join("cache").join("capabilities")
         } else {
             self.request.base_path.join("cache").join("capabilities")
         }
+    }
+
+    pub async fn resolve_to_local(&self, shared_path: &std::path::Path) -> PathBuf {
+        if let Some(local) = self.local_artifacts_path() {
+            let artifacts_base = self.request.base_path.join("artifacts");
+            if let Ok(suffix) = shared_path.strip_prefix(&artifacts_base) {
+                let local_path = local.join(suffix);
+                if tokio::fs::metadata(&local_path).await.is_ok() {
+                    tracing::debug!(
+                        "Resolved to local: {} -> {}",
+                        shared_path.display(),
+                        local_path.display()
+                    );
+                    return local_path;
+                }
+            }
+        }
+        shared_path.to_path_buf()
     }
 
     pub async fn calculate_restricted_path(

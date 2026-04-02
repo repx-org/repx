@@ -81,6 +81,7 @@ fn test_local_target_smart_sync() {
                 local_concurrency: None,
             }),
             slurm: None,
+            artifact_store: None,
         },
     );
 

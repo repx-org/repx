@@ -424,8 +424,85 @@ impl ArtifactSync for SshTarget {
         Ok(())
     }
 
+    fn sync_lab_root_metadata_only(&self, local_lab_path: &Path) -> Result<()> {
+        let remote_artifacts_base = self.artifacts_base_path();
+        let remote_rsync_path = self.deploy_rsync_binary()?;
+
+        let resolved = local_lab_path
+            .canonicalize()
+            .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
+
+        let mut rsync_cmd = Command::new(self.local_tool("rsync"));
+        rsync_cmd
+            .arg("-rltpz")
+            .arg("--chmod=Du+w")
+            .arg("--mkpath")
+            .arg("--exclude=/jobs")
+            .arg(format!("--rsync-path={}", remote_rsync_path))
+            .arg(format!("{}/", resolved.display()))
+            .arg(format!(
+                "{}:{}",
+                self.address,
+                remote_artifacts_base.display()
+            ));
+
+        logging::log_and_print_command(&rsync_cmd);
+        let output = rsync_cmd
+            .output()
+            .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(ClientError::Config(CoreError::CommandFailed(format!(
+                "rsync metadata sync failed: {}",
+                stderr
+            ))));
+        }
+
+        let chmod_bin = self.remote_tool("chmod");
+        let cmd = RemoteCommand::new(&chmod_bin)
+            .arg("u+w")
+            .arg(&remote_artifacts_base.to_string_lossy());
+        self.run_command("sh", &["-c", &cmd.to_shell_string()])?;
+
+        Ok(())
+    }
+
     fn sync_directory(&self, local_path: &Path, remote_path: &Path) -> Result<()> {
         self.sync_directory_impl(local_path, remote_path, false)
+    }
+
+    fn sync_file(&self, local_path: &Path, remote_path: &Path) -> Result<()> {
+        let remote_rsync_path = self.deploy_rsync_binary()?;
+
+        if let Some(parent) = remote_path.parent() {
+            let mkdir_cmd = RemoteCommand::new("mkdir")
+                .arg("-p")
+                .arg(&parent.to_string_lossy());
+            self.run_command("sh", &["-c", &mkdir_cmd.to_shell_string()])?;
+        }
+
+        let mut rsync_cmd = Command::new(self.local_tool("rsync"));
+        rsync_cmd
+            .arg("-Ltpz")
+            .arg(format!("--rsync-path={}", remote_rsync_path))
+            .arg(local_path.to_string_lossy().as_ref())
+            .arg(format!("{}:{}", self.address, remote_path.display()));
+
+        logging::log_and_print_command(&rsync_cmd);
+        let output = rsync_cmd
+            .output()
+            .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(ClientError::Config(CoreError::CommandFailed(format!(
+                "rsync file sync failed: {}",
+                stderr
+            ))));
+        }
+
+        Ok(())
     }
 
     fn sync_image_incrementally(

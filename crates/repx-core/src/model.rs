@@ -99,6 +99,38 @@ impl FromStr for SchedulerType {
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Hash, Serialize, Deserialize, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum ArtifactStore {
+    #[default]
+    Shared,
+    NodeLocal,
+}
+
+impl fmt::Display for ArtifactStore {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ArtifactStore::Shared => write!(f, "shared"),
+            ArtifactStore::NodeLocal => write!(f, "node-local"),
+        }
+    }
+}
+
+impl FromStr for ArtifactStore {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "shared" => Ok(ArtifactStore::Shared),
+            "node-local" => Ok(ArtifactStore::NodeLocal),
+            _ => Err(format!(
+                "invalid artifact store: '{}'. Valid values are: shared, node-local",
+                s
+            )),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Hash, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum ExecutionType {
     #[default]

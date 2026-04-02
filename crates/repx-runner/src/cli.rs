@@ -340,6 +340,30 @@ pub struct RunArgs {
 
     #[arg(long, help = "Disable wall clock timing on job completion messages.")]
     pub no_timing: bool,
+
+    #[arg(
+        long,
+        value_enum,
+        help = "How lab artifacts are delivered to compute nodes. \
+                'shared' (default): artifacts on shared FS. \
+                'node-local': tar + extract to each node's local disk (requires node_local_path)."
+    )]
+    pub artifact_store: Option<ArtifactStoreArg>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum ArtifactStoreArg {
+    Shared,
+    NodeLocal,
+}
+
+impl From<ArtifactStoreArg> for repx_core::model::ArtifactStore {
+    fn from(arg: ArtifactStoreArg) -> Self {
+        match arg {
+            ArtifactStoreArg::Shared => repx_core::model::ArtifactStore::Shared,
+            ArtifactStoreArg::NodeLocal => repx_core::model::ArtifactStore::NodeLocal,
+        }
+    }
 }
 
 #[derive(Args)]
@@ -360,6 +384,11 @@ pub struct InternalExecuteArgs {
     pub base_path: PathBuf,
     #[arg(long)]
     pub node_local_path: Option<PathBuf>,
+    #[arg(
+        long,
+        help = "Node-local path to extracted lab artifacts (lab-tar mode)."
+    )]
+    pub local_artifacts_path: Option<PathBuf>,
     #[arg(long)]
     pub host_tools_dir: String,
     #[arg(long, default_value_t = false)]
@@ -405,6 +434,16 @@ pub struct InternalScatterGatherArgs {
     pub base_path: PathBuf,
     #[arg(long)]
     pub node_local_path: Option<PathBuf>,
+    #[arg(
+        long,
+        help = "Node-local path to extracted lab artifacts (lab-tar mode)."
+    )]
+    pub local_artifacts_path: Option<PathBuf>,
+    #[arg(
+        long,
+        help = "Path to the lab tar on shared storage (for worker bootstrap)."
+    )]
+    pub lab_tar_path: Option<PathBuf>,
     #[arg(long)]
     pub host_tools_dir: String,
     #[arg(long)]

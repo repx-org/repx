@@ -185,6 +185,8 @@ let
 
   autoParametersDependencies =
     let
+      flatParameters = builtins.attrValues allParameters;
+
       extractDeps =
         val:
         if pkgs.lib.isDerivation val then
@@ -196,9 +198,37 @@ let
         else
           [ ];
 
-      flatParameters = builtins.attrValues allParameters;
+      flattenStrings =
+        val:
+        if builtins.isString val then
+          [ val ]
+        else if builtins.isList val then
+          pkgs.lib.concatMap flattenStrings val
+        else if builtins.isAttrs val && !(pkgs.lib.isDerivation val) then
+          pkgs.lib.concatMap flattenStrings (builtins.attrValues val)
+        else
+          [ ];
+
+      nixStoreStrings = builtins.filter builtins.hasContext (
+        pkgs.lib.concatMap flattenStrings flatParameters
+      );
+
+      paramPathsClosure =
+        if nixStoreStrings == [ ] then
+          [ ]
+        else
+          [
+            (pkgs.runCommand "param-store-paths" { } ''
+              mkdir -p $out/share/repx
+              cat > $out/share/repx/param-paths.txt <<'REPX_PATHS_EOF'
+              ${builtins.concatStringsSep "\n" nixStoreStrings}
+              REPX_PATHS_EOF
+            '')
+          ];
     in
-    common.uniqueDrvs ((pkgs.lib.flatten (map extractDeps flatParameters)) ++ smartParameterContext);
+    common.uniqueDrvs (
+      (pkgs.lib.flatten (map extractDeps flatParameters)) ++ paramPathsClosure ++ smartParameterContext
+    );
 
   allCombinations =
     let
@@ -360,7 +390,11 @@ else
 
     pipelineScriptDrvs = pkgs.lib.flatten (map getDrvsFromPipeline loadedPipelines);
 
-    runImageContents = pipelineScriptDrvs ++ (common.mkRuntimePackages pkgs) ++ [ paramDepsClosure ];
+    runImageContents =
+      pipelineScriptDrvs
+      ++ (common.mkRuntimePackages pkgs)
+      ++ autoParametersDependencies
+      ++ [ paramDepsClosure ];
   in
   {
     inherit name interRunDepTypes;

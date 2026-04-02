@@ -155,6 +155,42 @@ impl ArtifactSync for LocalTarget {
         Ok(())
     }
 
+    fn sync_lab_root_metadata_only(&self, local_lab_path: &Path) -> Result<()> {
+        let dest_path = self.artifacts_base_path();
+        fs_err::create_dir_all(&dest_path).map_err(|e| ClientError::Config(CoreError::Io(e)))?;
+
+        let resolved = local_lab_path
+            .canonicalize()
+            .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
+        let mut cmd = Command::new(self.tool("rsync"));
+        cmd.arg("-rltp")
+            .arg("--exclude=/jobs")
+            .arg(format!("{}/", resolved.display()))
+            .arg(&dest_path);
+
+        repx_core::logging::log_and_print_command(&cmd);
+        let output = cmd
+            .output()
+            .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(ClientError::Config(CoreError::CommandFailed(format!(
+                "rsync metadata sync failed: {}",
+                stderr
+            ))));
+        }
+        Ok(())
+    }
+
+    fn sync_file(&self, local_path: &Path, remote_path: &Path) -> Result<()> {
+        if let Some(parent) = remote_path.parent() {
+            fs_err::create_dir_all(parent).map_err(|e| ClientError::Config(CoreError::Io(e)))?;
+        }
+        self.copy_file_with_permissions(local_path, remote_path)?;
+        Ok(())
+    }
+
     fn sync_directory(&self, local_path: &Path, remote_path: &Path) -> Result<()> {
         fs_err::create_dir_all(remote_path).map_err(|e| ClientError::Config(CoreError::Io(e)))?;
 

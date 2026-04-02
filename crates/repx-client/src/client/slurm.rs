@@ -3,7 +3,6 @@ use crate::error::{ClientError, Result};
 use crate::orchestration::OrchestrationPlan;
 use crate::resources::{self, SbatchDirectives};
 use crate::targets::common::shell_quote;
-use crate::targets::Target;
 use fs_err;
 use repx_core::{
     constants::{dirs, targets},
@@ -15,13 +14,13 @@ use std::collections::{HashMap, HashSet};
 use std::io::Write;
 use std::path::Path;
 use std::str::FromStr;
-use std::sync::Arc;
 
 fn generate_repx_invoker_script(
     job_id: &JobId,
     job_root_on_target: &Path,
     directives: &SbatchDirectives,
     repx_command_to_wrap: String,
+    lab_tar_info: Option<&super::LabTarInfo>,
 ) -> Result<String> {
     let mut s = String::from("#!/usr/bin/env bash\n");
     s.push_str(&format!("#SBATCH --job-name={}\n", job_id.as_str()));
@@ -50,6 +49,36 @@ fn generate_repx_invoker_script(
     }
 
     s.push_str("\nset -e\n\n");
+
+    if let Some(info) = lab_tar_info {
+        s.push_str("# -- Node-local lab tar bootstrap --\n");
+        s.push_str(&format!("LAB_TAR=\"{}\"\n", info.remote_tar_path.display()));
+        s.push_str(&format!(
+            "LOCAL_BASE=\"{}\"\n",
+            info.node_local_base.display()
+        ));
+        s.push_str(&format!(
+            "MARKER=\"$LOCAL_BASE/.extracted-{}\"\n",
+            info.content_hash
+        ));
+        s.push_str("LOCK_FILE=\"$LOCAL_BASE/.lock\"\n");
+        s.push_str("mkdir -p \"$LOCAL_BASE\"\n");
+        s.push_str("(\n");
+        s.push_str("  flock -x 200\n");
+        s.push_str("  if [ ! -f \"$MARKER\" ]; then\n");
+        s.push_str("    echo \"[repx] Extracting lab tar to node-local storage...\"\n");
+        s.push_str("    tar xf \"$LAB_TAR\" -C \"$LOCAL_BASE/\"\n");
+        s.push_str("    touch \"$MARKER\"\n");
+        s.push_str("    echo \"[repx] Lab tar extraction complete.\"\n");
+        s.push_str("  fi\n");
+        s.push_str(") 200>\"$LOCK_FILE\"\n");
+        s.push_str(&format!(
+            "export REPX_LOCAL_ARTIFACTS=\"$LOCAL_BASE/{}\"\n",
+            info.lab_dir_name
+        ));
+        s.push('\n');
+    }
+
     s.push_str("# This script invokes the repx binary to handle execution.\n");
     s.push_str(&repx_command_to_wrap);
     s.push('\n');
@@ -61,13 +90,14 @@ fn generate_repx_invoker_script(
 pub fn submit_slurm_batch_run(
     client: &Client,
     jobs_to_submit: HashMap<JobId, &Job>,
-    target: Arc<dyn Target>,
-    target_name: &str,
-    remote_repx_binary_path: &Path,
+    sub_target: &super::SubmissionTarget,
     options: &SubmitOptions,
+    lab_tar_info: Option<&super::LabTarInfo>,
     send: impl Fn(ClientEvent),
 ) -> Result<String> {
-    let remote_repx_binary = remote_repx_binary_path.to_string_lossy();
+    let target = &sub_target.target;
+    let target_name = &sub_target.target_name;
+    let remote_repx_binary = sub_target.repx_binary_path.to_string_lossy();
     let verbose_flags = options.verbose.as_flag_str();
     let remote_repx_command = format!("{} {}", remote_repx_binary, verbose_flags);
     let remote_repx_command = remote_repx_command.trim_end();
@@ -126,6 +156,9 @@ pub fn submit_slurm_batch_run(
                 " --node-local-path {}",
                 shell_quote(&local_path.to_string_lossy())
             ));
+        }
+        if lab_tar_info.is_some() {
+            repx_args.push_str(" --local-artifacts-path \"$REPX_LOCAL_ARTIFACTS\"");
         }
         match target.config().mount_policy() {
             repx_core::model::MountPolicy::AllHostPaths => {
@@ -228,9 +261,17 @@ pub fn submit_slurm_batch_run(
             );
             let step_opts_str = step_directives.to_shell_string();
 
+            let lab_tar_flag = lab_tar_info
+                .map(|info| {
+                    format!(
+                        " --lab-tar-path {}",
+                        shell_quote(&info.remote_tar_path.to_string_lossy())
+                    )
+                })
+                .unwrap_or_default();
             let command = format!(
-                "{} internal-scatter-gather {} {} --step-sbatch-opts='{}' --scheduler slurm --anchor-id $REPX_ANCHOR_ID",
-                remote_repx_command, repx_args, scatter_gather_args, step_opts_str
+                "{} internal-scatter-gather {} {}{} --step-sbatch-opts='{}' --scheduler slurm --anchor-id $REPX_ANCHOR_ID",
+                remote_repx_command, repx_args, scatter_gather_args, lab_tar_flag, step_opts_str
             );
             (command, main_directives)
         } else {
@@ -260,6 +301,7 @@ pub fn submit_slurm_batch_run(
             &job_root_on_target,
             &directives,
             repx_command_to_wrap,
+            lab_tar_info,
         )?;
 
         let mut hasher = Sha256::new();

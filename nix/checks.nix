@@ -52,6 +52,9 @@ let
     e2e-local-bwrap-node-local-path = import ./checks/runtime/e2e-local-bwrap-node-local-path.nix {
       inherit pkgs repx referenceLab;
     };
+    e2e-local-bwrap-lab-tar = import ./checks/runtime/e2e-local-bwrap-lab-tar.nix {
+      inherit pkgs repx referenceLab;
+    };
 
     e2e-remote-bwrap-pure = import ./checks/runtime/e2e-remote-bwrap-pure.nix {
       inherit pkgs repx referenceLab;
@@ -84,6 +87,40 @@ let
       referenceLab = referenceLabMountPaths;
     };
     e2e-remote-slurm = import ./checks/runtime/e2e-remote-slurm.nix { inherit pkgs repx referenceLab; };
+    e2e-remote-slurm-lab-tar = import ./checks/runtime/e2e-remote-slurm-lab-tar.nix {
+      inherit pkgs repx referenceLab;
+    };
+    e2e-slurm-multi-node-lab-tar = import ./checks/runtime/e2e-slurm-multi-node-lab-tar.nix {
+      inherit pkgs repx referenceLab;
+    };
+    e2e-slurm-scatter-gather-lab-tar = import ./checks/runtime/e2e-slurm-scatter-gather-lab-tar.nix {
+      inherit pkgs repx referenceLab;
+    };
+    e2e-local-lab-tar-rerun = import ./checks/runtime/e2e-local-lab-tar-rerun.nix {
+      inherit pkgs repx referenceLab;
+    };
+    e2e-slurm-lab-tar-shared-default = import ./checks/runtime/e2e-slurm-lab-tar-shared-default.nix {
+      inherit pkgs repx referenceLab;
+    };
+    e2e-slurm-multi-node-scatter-gather-lab-tar =
+      import ./checks/runtime/e2e-slurm-multi-node-scatter-gather-lab-tar.nix
+        {
+          inherit pkgs repx referenceLab;
+        };
+    e2e-slurm-bwrap-scatter-gather-lab-tar =
+      import ./checks/runtime/e2e-slurm-bwrap-scatter-gather-lab-tar.nix
+        {
+          inherit pkgs repx referenceLab;
+        };
+    e2e-local-lab-tar-symlink = import ./checks/runtime/e2e-local-lab-tar-symlink.nix {
+      inherit pkgs repx referenceLab;
+    };
+    e2e-local-lab-tar-retry = import ./checks/runtime/e2e-local-lab-tar-retry.nix {
+      inherit pkgs repx referenceLab;
+    };
+    e2e-local-lab-tar-io-errors = import ./checks/runtime/e2e-local-lab-tar-io-errors.nix {
+      inherit pkgs repx referenceLab;
+    };
 
     non-nixos-local-bwrap-impure = import ./checks/runtime/non-nixos-local-bwrap-impure.nix {
       inherit pkgs repx referenceLab;

@@ -14,6 +14,7 @@ fn create_test_request(base_path: PathBuf) -> ExecutionRequest {
         runtime: Runtime::Native,
         base_path: base_path.clone(),
         node_local_path: None,
+        local_artifacts_path: None,
         job_package_path: base_path.join("jobs/test-job"),
         inputs_json_path: base_path.join("inputs.json"),
         user_out_dir: base_path.join("outputs/out"),
@@ -32,6 +33,7 @@ fn create_test_request_with_host_tools(
         runtime: Runtime::Native,
         base_path: base_path.clone(),
         node_local_path: None,
+        local_artifacts_path: None,
         job_package_path: base_path.join("jobs/test-job"),
         inputs_json_path: base_path.join("inputs.json"),
         user_out_dir: base_path.join("outputs/out"),
@@ -280,7 +282,11 @@ fn test_build_native_command_empty_args() {
 #[test]
 fn test_executor_error_io_display() {
     let io_err = std::io::Error::new(std::io::ErrorKind::NotFound, "file not found");
-    let err = ExecutorError::Io(io_err);
+    let err = ExecutorError::Io {
+        operation: "read",
+        path: std::path::PathBuf::from("/tmp/missing"),
+        source: io_err,
+    };
     let display = format!("{}", err);
     assert!(display.contains("I/O error"));
 }
@@ -475,6 +481,7 @@ fn create_runnable_request(temp: &tempfile::TempDir) -> (ExecutionRequest, PathB
         runtime: Runtime::Native,
         base_path: base.clone(),
         node_local_path: None,
+        local_artifacts_path: None,
         job_package_path: job_pkg,
         inputs_json_path: base.join("inputs.json"),
         user_out_dir: user_out,

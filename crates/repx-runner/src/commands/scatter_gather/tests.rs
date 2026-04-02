@@ -507,6 +507,8 @@ async fn run_branch(
             image_tag: None,
             base_path: tmp.to_path_buf(),
             node_local_path: None,
+            local_artifacts_path: None,
+            lab_tar_path: None,
             host_tools_dir: String::new(),
             scheduler: repx_core::model::SchedulerType::Local,
             step_sbatch_opts: String::new(),
@@ -623,6 +625,8 @@ async fn test_scatter_skipped_on_rerun_if_already_succeeded() {
         static_inputs: Value::Object(Default::default()),
         host_tools_bin_dir: None,
         node_local_path: None,
+        local_artifacts_path: None,
+        lab_tar_path: None,
         mount_policy: repx_core::model::MountPolicy::Isolated,
     };
 

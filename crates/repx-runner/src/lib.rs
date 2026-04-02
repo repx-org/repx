@@ -74,7 +74,39 @@ pub fn run(cli: Cli) -> Result<(), CliError> {
             let config = config::load_config()?;
             let resources = config::load_resources(cli.resources.as_deref())?;
 
-            let client = create_client(&config, &cli.lab)?;
+            let (lab_path, _lab_tar_tempdir) = if cli.lab.is_file() {
+                let temp_dir =
+                    tempfile::tempdir().map_err(|e| CliError::Config(CoreError::Io(e)))?;
+                println!("- Extracting lab tar {} ...", cli.lab.display());
+                let status = std::process::Command::new("tar")
+                    .arg("xf")
+                    .arg(&cli.lab)
+                    .arg("-C")
+                    .arg(temp_dir.path())
+                    .status()
+                    .map_err(|e| CliError::Config(CoreError::Io(e)))?;
+                if !status.success() {
+                    return Err(CliError::Config(CoreError::InvalidConfig {
+                        detail: format!("Failed to extract lab tar: {}", cli.lab.display()),
+                    }));
+                }
+                let mut entries = std::fs::read_dir(temp_dir.path())
+                    .map_err(|e| CliError::Config(CoreError::Io(e)))?;
+                let extracted = entries
+                    .next()
+                    .ok_or_else(|| {
+                        CliError::Config(CoreError::InvalidConfig {
+                            detail: "Lab tar is empty".to_string(),
+                        })
+                    })?
+                    .map_err(|e| CliError::Config(CoreError::Io(e)))?
+                    .path();
+                (extracted, Some(temp_dir))
+            } else {
+                (cli.lab.clone(), None)
+            };
+
+            let client = create_client(&config, &lab_path)?;
 
             let target_name = match cli.target.as_ref().or(config.submission_target.as_ref()) {
                 Some(name) => name.clone(),
@@ -111,8 +143,14 @@ pub fn run(cli: Cli) -> Result<(), CliError> {
                 None
             };
 
+            let artifact_store = args
+                .artifact_store
+                .map(repx_core::model::ArtifactStore::from)
+                .or(target_config.artifact_store)
+                .unwrap_or_default();
+
             let context = AppContext {
-                lab_path: &cli.lab,
+                lab_path: &lab_path,
                 client: &client,
                 submission_target: &target_name,
             };
@@ -121,10 +159,13 @@ pub fn run(cli: Cli) -> Result<(), CliError> {
                 args,
                 &context,
                 resources,
-                &target_name,
-                scheduler,
-                num_jobs,
-                Verbosity::from(cli.verbose),
+                commands::run::RunConfig {
+                    target_name: target_name.clone(),
+                    scheduler,
+                    num_jobs,
+                    verbose: Verbosity::from(cli.verbose),
+                    artifact_store,
+                },
             )
         }
     }

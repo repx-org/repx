@@ -32,9 +32,13 @@ async fn async_handle_execute(args: InternalExecuteArgs) -> Result<(), CliError>
     let _ = fs::remove_file(repx_dir.join(markers::SUCCESS));
     let _ = fs::remove_file(repx_dir.join(markers::FAIL));
 
-    let script_path = args.executable_path;
+    let script_path = super::resolve_to_local_artifacts(
+        &args.executable_path,
+        &args.base_path,
+        &args.local_artifacts_path,
+    );
     let job_package_path = if let Some(pkg_path) = args.job_package_path {
-        pkg_path
+        super::resolve_to_local_artifacts(&pkg_path, &args.base_path, &args.local_artifacts_path)
     } else {
         script_path
             .parent()
@@ -61,11 +65,26 @@ async fn async_handle_execute(args: InternalExecuteArgs) -> Result<(), CliError>
         parameters_json_path.to_string_lossy().to_string(),
     ];
 
+    let host_tools_bin_dir = if let Some(ref local) = args.local_artifacts_path {
+        let local_tools = local
+            .join("host-tools")
+            .join(&args.host_tools_dir)
+            .join("bin");
+        if local_tools.exists() {
+            Some(local_tools)
+        } else {
+            host_tools_bin_dir
+        }
+    } else {
+        host_tools_bin_dir
+    };
+
     let request = ExecutionRequest {
         job_id: job_id.clone(),
         runtime,
         base_path: args.base_path,
         node_local_path: args.node_local_path,
+        local_artifacts_path: args.local_artifacts_path,
         job_package_path,
         inputs_json_path,
         user_out_dir,

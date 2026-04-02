@@ -1,5 +1,6 @@
 {
   repx-lib,
+  pkgs,
   ...
 }:
 let
@@ -35,5 +36,6 @@ in
     env = [
       (utils.env { OMP_NUM_THREADS = "1"; })
     ];
+    nix_tool_bin = [ "${pkgs.hello}/bin" ];
   };
 }

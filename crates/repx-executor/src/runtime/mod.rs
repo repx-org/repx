@@ -7,6 +7,7 @@ pub use container::ContainerRuntime;
 pub use native::NativeRuntime;
 
 use crate::error::ExecutorError;
+use crate::error::IoContext;
 use crate::util::ImageTag;
 use nix::fcntl::{Flock, FlockArg};
 
@@ -57,7 +58,7 @@ pub(crate) async fn acquire_flock(
     lock_path: &std::path::Path,
     context_name: &str,
 ) -> Result<Flock<std::fs::File>, ExecutorError> {
-    let mut lock_file = std::fs::File::create(lock_path)?;
+    let mut lock_file = std::fs::File::create(lock_path).io_ctx("create", lock_path)?;
     let timeout = lock_timeout();
     let lock_start = std::time::Instant::now();
     loop {

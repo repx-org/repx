@@ -1,5 +1,5 @@
 use crate::context::RuntimeContext;
-use crate::error::{ExecutorError, Result};
+use crate::error::{ExecutorError, IoContext, Result};
 use std::path::Path;
 use std::process::Stdio;
 use tokio::fs::File;
@@ -39,7 +39,13 @@ impl ContainerRuntime {
         ctx.restrict_command_environment(&mut check_cmd, &[binary])
             .await;
 
-        let check_output = check_cmd.output().await?;
+        let check_output = check_cmd
+            .output()
+            .await
+            .map_err(|e| ExecutorError::CommandFailed {
+                command: format!("{} images -q {}", binary, image_tag),
+                source: e,
+            })?;
 
         if check_output.stdout.is_empty() {
             tracing::info!("Image '{}' not found in cache. Loading...", image_tag);
@@ -59,12 +65,17 @@ impl ContainerRuntime {
             ctx.restrict_command_environment(&mut load_cmd, &[binary])
                 .await;
 
-            let mut child = load_cmd.spawn()?;
-            let mut load_stdin = child.stdin.take().ok_or_else(|| {
-                ExecutorError::Io(std::io::Error::new(
+            let mut child = load_cmd.spawn().map_err(|e| ExecutorError::CommandFailed {
+                command: format!("{} load", binary),
+                source: e,
+            })?;
+            let mut load_stdin = child.stdin.take().ok_or_else(|| ExecutorError::Io {
+                source: std::io::Error::new(
                     std::io::ErrorKind::BrokenPipe,
                     "Failed to open stdin for docker load",
-                ))
+                ),
+                operation: "spawn",
+                path: image_full_path.clone(),
             })?;
 
             if image_full_path.is_dir() {
@@ -79,12 +90,17 @@ impl ContainerRuntime {
                     .arg(".");
                 tar_cmd.stdout(Stdio::piped());
 
-                let mut tar_child = tar_cmd.spawn()?;
-                let mut tar_stdout = tar_child.stdout.take().ok_or_else(|| {
-                    ExecutorError::Io(std::io::Error::new(
+                let mut tar_child = tar_cmd.spawn().map_err(|e| ExecutorError::CommandFailed {
+                    command: "tar".to_string(),
+                    source: e,
+                })?;
+                let mut tar_stdout = tar_child.stdout.take().ok_or_else(|| ExecutorError::Io {
+                    source: std::io::Error::new(
                         std::io::ErrorKind::BrokenPipe,
                         "Failed to open stdout for tar",
-                    ))
+                    ),
+                    operation: "spawn",
+                    path: image_full_path.clone(),
                 })?;
 
                 let copy_task = tokio::spawn(async move {
@@ -94,7 +110,14 @@ impl ContainerRuntime {
                 });
 
                 let copy_result = copy_task.await;
-                let tar_status = tar_child.wait().await?;
+                let tar_status =
+                    tar_child
+                        .wait()
+                        .await
+                        .map_err(|e| ExecutorError::CommandFailed {
+                            command: "tar".to_string(),
+                            source: e,
+                        })?;
 
                 let tar_failed = !tar_status.success();
                 let tar_error_msg = if tar_failed {
@@ -112,14 +135,25 @@ impl ContainerRuntime {
                     Err(join_err) => Some(format!("tar-to-load copy task panicked: {}", join_err)),
                 };
 
-                let load_output = child.wait_with_output().await?;
+                let load_output =
+                    child
+                        .wait_with_output()
+                        .await
+                        .map_err(|e| ExecutorError::CommandFailed {
+                            command: format!("{} load", binary),
+                            source: e,
+                        })?;
                 if !load_output.status.success() {
                     let stderr = String::from_utf8_lossy(&load_output.stderr);
                     let stdout = String::from_utf8_lossy(&load_output.stdout);
-                    return Err(ExecutorError::Io(std::io::Error::other(format!(
-                        "'{} load' failed with status {}. Stderr:\n{}\nStdout:\n{}",
-                        binary, load_output.status, stderr, stdout
-                    ))));
+                    return Err(ExecutorError::Io {
+                        source: std::io::Error::other(format!(
+                            "'{} load' failed with status {}. Stderr:\n{}\nStdout:\n{}",
+                            binary, load_output.status, stderr, stdout
+                        )),
+                        operation: "load",
+                        path: image_full_path.clone(),
+                    });
                 }
 
                 if let Some(ref copy_err) = copy_error_msg {
@@ -127,7 +161,11 @@ impl ContainerRuntime {
                         || copy_err.contains("os error 32")
                         || copy_err.contains("BrokenPipe");
                     if !is_broken_pipe {
-                        return Err(ExecutorError::Io(std::io::Error::other(copy_err.clone())));
+                        return Err(ExecutorError::Io {
+                            source: std::io::Error::other(copy_err.clone()),
+                            operation: "load",
+                            path: image_full_path.clone(),
+                        });
                     } else {
                         tracing::warn!(
                             "Copy task got broken pipe but {} load succeeded. Continuing.",
@@ -145,12 +183,20 @@ impl ContainerRuntime {
                                 binary
                             );
                         } else {
-                            return Err(ExecutorError::Io(std::io::Error::other(tar_err)));
+                            return Err(ExecutorError::Io {
+                                source: std::io::Error::other(tar_err),
+                                operation: "load",
+                                path: image_full_path.clone(),
+                            });
                         }
                     }
                     #[cfg(not(unix))]
                     {
-                        return Err(ExecutorError::Io(std::io::Error::other(tar_err)));
+                        return Err(ExecutorError::Io {
+                            source: std::io::Error::other(tar_err),
+                            operation: "load",
+                            path: image_full_path.clone(),
+                        });
                     }
                 }
 
@@ -168,13 +214,24 @@ impl ContainerRuntime {
                     tag_cmd.args(["tag", &id, image_tag]);
                     ctx.restrict_command_environment(&mut tag_cmd, &[binary])
                         .await;
-                    let tag_output = tag_cmd.output().await?;
+                    let tag_output =
+                        tag_cmd
+                            .output()
+                            .await
+                            .map_err(|e| ExecutorError::CommandFailed {
+                                command: format!("{} tag {} {}", binary, id, image_tag),
+                                source: e,
+                            })?;
                     if !tag_output.status.success() {
                         let stderr = String::from_utf8_lossy(&tag_output.stderr);
-                        return Err(ExecutorError::Io(std::io::Error::other(format!(
-                            "'{} tag {} {}' failed with status {}. Stderr:\n{}",
-                            binary, id, image_tag, tag_output.status, stderr
-                        ))));
+                        return Err(ExecutorError::Io {
+                            source: std::io::Error::other(format!(
+                                "'{} tag {} {}' failed with status {}. Stderr:\n{}",
+                                binary, id, image_tag, tag_output.status, stderr
+                            )),
+                            operation: "tag",
+                            path: image_full_path.clone(),
+                        });
                     }
                     tracing::info!("Successfully loaded and tagged image '{}'", image_tag);
                 } else {
@@ -184,18 +241,33 @@ impl ContainerRuntime {
                 }
             } else {
                 tracing::debug!("Loading image tarball from {:?}...", image_full_path);
-                let mut file = File::open(&image_full_path).await?;
-                tokio::io::copy(&mut file, &mut load_stdin).await?;
+                let mut file = File::open(&image_full_path)
+                    .await
+                    .io_ctx("open", &image_full_path)?;
+                tokio::io::copy(&mut file, &mut load_stdin)
+                    .await
+                    .io_ctx("read", &image_full_path)?;
                 drop(load_stdin);
 
-                let load_output = child.wait_with_output().await?;
+                let load_output =
+                    child
+                        .wait_with_output()
+                        .await
+                        .map_err(|e| ExecutorError::CommandFailed {
+                            command: format!("{} load", binary),
+                            source: e,
+                        })?;
                 if !load_output.status.success() {
                     let stderr = String::from_utf8_lossy(&load_output.stderr);
                     let stdout = String::from_utf8_lossy(&load_output.stdout);
-                    return Err(ExecutorError::Io(std::io::Error::other(format!(
-                        "'{} load' failed with status {}. Stderr:\n{}\nStdout:\n{}",
-                        binary, load_output.status, stderr, stdout
-                    ))));
+                    return Err(ExecutorError::Io {
+                        source: std::io::Error::other(format!(
+                            "'{} load' failed with status {}. Stderr:\n{}\nStdout:\n{}",
+                            binary, load_output.status, stderr, stdout
+                        )),
+                        operation: "load",
+                        path: image_full_path.clone(),
+                    });
                 }
 
                 let output_str = String::from_utf8_lossy(&load_output.stdout);
@@ -212,13 +284,24 @@ impl ContainerRuntime {
                     tag_cmd.args(["tag", &id, image_tag]);
                     ctx.restrict_command_environment(&mut tag_cmd, &[binary])
                         .await;
-                    let tag_output = tag_cmd.output().await?;
+                    let tag_output =
+                        tag_cmd
+                            .output()
+                            .await
+                            .map_err(|e| ExecutorError::CommandFailed {
+                                command: format!("{} tag {} {}", binary, id, image_tag),
+                                source: e,
+                            })?;
                     if !tag_output.status.success() {
                         let stderr = String::from_utf8_lossy(&tag_output.stderr);
-                        return Err(ExecutorError::Io(std::io::Error::other(format!(
-                            "'{} tag {} {}' failed with status {}. Stderr:\n{}",
-                            binary, id, image_tag, tag_output.status, stderr
-                        ))));
+                        return Err(ExecutorError::Io {
+                            source: std::io::Error::other(format!(
+                                "'{} tag {} {}' failed with status {}. Stderr:\n{}",
+                                binary, id, image_tag, tag_output.status, stderr
+                            )),
+                            operation: "tag",
+                            path: image_full_path.clone(),
+                        });
                     }
                     tracing::info!("Successfully loaded and tagged image '{}'", image_tag);
                 } else {
@@ -260,7 +343,7 @@ impl ContainerRuntime {
         if !xdg_runtime_dir.exists() {
             tokio::fs::create_dir_all(&xdg_runtime_dir)
                 .await
-                .map_err(ExecutorError::Io)?;
+                .io_ctx("create_dir_all", &xdg_runtime_dir)?;
 
             #[cfg(unix)]
             {
@@ -268,7 +351,7 @@ impl ContainerRuntime {
                 let perms = std::fs::Permissions::from_mode(0o700);
                 tokio::fs::set_permissions(&xdg_runtime_dir, perms)
                     .await
-                    .map_err(ExecutorError::Io)?;
+                    .io_ctx("set_permissions", &xdg_runtime_dir)?;
             }
         }
 

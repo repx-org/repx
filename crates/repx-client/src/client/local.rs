@@ -12,7 +12,7 @@ use repx_core::{
 use serde_json::Value;
 use std::cmp::Reverse;
 use std::collections::{BinaryHeap, HashMap, HashSet};
-use std::path::Path;
+use std::path::PathBuf;
 use std::process::Child;
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
@@ -23,6 +23,16 @@ use sysinfo::System;
 const DEFAULT_JOB_MEM_BYTES: u64 = 1024 * 1024 * 1024;
 const DEFAULT_JOB_CPUS: u32 = 1;
 const POLL_INTERVAL_MS: u64 = 50;
+
+struct LocalJobContext<'job, 'run> {
+    job_id: &'run JobId,
+    job: &'job Job,
+    target: &'job dyn Target,
+    client: &'job Client,
+    execution_type: &'run str,
+    image_tag: Option<&'run str>,
+    local_artifacts_path: Option<&'job PathBuf>,
+}
 
 type ActiveHandle = (
     WorkUnitId,
@@ -352,58 +362,57 @@ fn build_run_affinity_index(lab: &Lab) -> HashMap<JobId, usize> {
 }
 
 fn build_sg_common_args(
-    job_id: &JobId,
-    job: &Job,
-    target: &dyn Target,
-    client: &Client,
-    execution_type: &str,
-    image_tag: Option<&str>,
+    ctx: &LocalJobContext<'_, '_>,
     verbose: repx_core::logging::Verbosity,
 ) -> std::result::Result<Vec<String>, ClientError> {
-    let artifacts_base = target.artifacts_base_path();
-    let scatter_exe = job.executables.get("scatter").ok_or_else(|| {
+    let artifacts_base = ctx.target.artifacts_base_path();
+    let scatter_exe = ctx.job.executables.get("scatter").ok_or_else(|| {
         ClientError::Config(CoreError::MissingExecutable {
-            job_id: job_id.to_string(),
+            job_id: ctx.job_id.to_string(),
             executable: "scatter".to_string(),
         })
     })?;
-    let gather_exe = job.executables.get("gather").ok_or_else(|| {
+    let gather_exe = ctx.job.executables.get("gather").ok_or_else(|| {
         ClientError::Config(CoreError::MissingExecutable {
-            job_id: job_id.to_string(),
+            job_id: ctx.job_id.to_string(),
             executable: "gather".to_string(),
         })
     })?;
-    let job_package_path = artifacts_base.join(format!("jobs/{}", job_id));
+    let job_package_path = artifacts_base.join(format!("jobs/{}", ctx.job_id));
     let scatter_exe_path = artifacts_base.join(&scatter_exe.path);
     let gather_exe_path = artifacts_base.join(&gather_exe.path);
 
-    let (steps_json, last_step_outputs_json) = build_steps_json(job, &artifacts_base)?;
+    let (steps_json, last_step_outputs_json) = build_steps_json(ctx.job, &artifacts_base)?;
 
     let mut args = verbose.as_args();
     args.extend_from_slice(&[
         "internal-scatter-gather".to_string(),
         "--job-id".to_string(),
-        job_id.to_string(),
+        ctx.job_id.to_string(),
         "--runtime".to_string(),
-        execution_type.to_string(),
+        ctx.execution_type.to_string(),
     ]);
-    if let Some(tag) = image_tag {
+    if let Some(tag) = ctx.image_tag {
         args.push("--image-tag".to_string());
         args.push(tag.to_string());
     }
     args.extend_from_slice(&[
         "--base-path".to_string(),
-        target.base_path().to_string_lossy().to_string(),
+        ctx.target.base_path().to_string_lossy().to_string(),
     ]);
-    if let Some(local_path) = &target.config().node_local_path {
+    if let Some(local_path) = &ctx.target.config().node_local_path {
         args.push("--node-local-path".to_string());
         args.push(local_path.to_string_lossy().to_string());
     }
+    if let Some(local_art) = ctx.local_artifacts_path {
+        args.push("--local-artifacts-path".to_string());
+        args.push(local_art.to_string_lossy().to_string());
+    }
     args.extend_from_slice(&[
         "--host-tools-dir".to_string(),
-        client.lab.host_tools_dir_name.clone(),
+        ctx.client.lab.host_tools_dir_name.clone(),
     ]);
-    match target.config().mount_policy() {
+    match ctx.target.config().mount_policy() {
         repx_core::model::MountPolicy::AllHostPaths => {
             args.push("--mount-host-paths".to_string());
         }
@@ -435,47 +444,46 @@ fn build_sg_common_args(
 }
 
 fn build_simple_job_args(
-    job_id: &JobId,
-    job: &Job,
-    target: &dyn Target,
-    client: &Client,
-    execution_type: &str,
-    image_tag: Option<&str>,
+    ctx: &LocalJobContext<'_, '_>,
     verbose: repx_core::logging::Verbosity,
 ) -> std::result::Result<Vec<String>, ClientError> {
-    let main_exe = job.executables.get("main").ok_or_else(|| {
+    let main_exe = ctx.job.executables.get("main").ok_or_else(|| {
         ClientError::Config(CoreError::MissingExecutable {
-            job_id: job_id.to_string(),
+            job_id: ctx.job_id.to_string(),
             executable: "main".to_string(),
         })
     })?;
-    let executable_path = target.artifacts_base_path().join(&main_exe.path);
+    let executable_path = ctx.target.artifacts_base_path().join(&main_exe.path);
 
     let mut args = verbose.as_args();
     args.extend_from_slice(&[
         "internal-execute".to_string(),
         "--job-id".to_string(),
-        job_id.to_string(),
+        ctx.job_id.to_string(),
         "--runtime".to_string(),
-        execution_type.to_string(),
+        ctx.execution_type.to_string(),
     ]);
-    if let Some(tag) = image_tag {
+    if let Some(tag) = ctx.image_tag {
         args.push("--image-tag".to_string());
         args.push(tag.to_string());
     }
     args.extend_from_slice(&[
         "--base-path".to_string(),
-        target.base_path().to_string_lossy().to_string(),
+        ctx.target.base_path().to_string_lossy().to_string(),
     ]);
-    if let Some(local_path) = &target.config().node_local_path {
+    if let Some(local_path) = &ctx.target.config().node_local_path {
         args.push("--node-local-path".to_string());
         args.push(local_path.to_string_lossy().to_string());
     }
+    if let Some(local_art) = ctx.local_artifacts_path {
+        args.push("--local-artifacts-path".to_string());
+        args.push(local_art.to_string_lossy().to_string());
+    }
     args.extend_from_slice(&[
         "--host-tools-dir".to_string(),
-        client.lab.host_tools_dir_name.clone(),
+        ctx.client.lab.host_tools_dir_name.clone(),
     ]);
-    match target.config().mount_policy() {
+    match ctx.target.config().mount_policy() {
         repx_core::model::MountPolicy::AllHostPaths => {
             args.push("--mount-host-paths".to_string());
         }
@@ -546,32 +554,28 @@ fn get_step_resources(
 }
 
 #[allow(clippy::expect_used)]
-fn expand_scatter_gather<'a>(
-    job_id: &JobId,
-    job: &'a Job,
-    target: &dyn Target,
-    client: &Client,
-    execution_type: &str,
-    image_tag: Option<&str>,
+fn expand_scatter_gather<'job>(
+    ctx: &LocalJobContext<'job, '_>,
     options: &SubmitOptions,
-) -> std::result::Result<Vec<(WorkUnitId, WorkUnit<'a>)>, ClientError> {
-    let base_path = target.base_path();
-    let job_root = base_path.join(dirs::OUTPUTS).join(job_id.as_str());
+) -> std::result::Result<Vec<(WorkUnitId, WorkUnit<'job>)>, ClientError> {
+    let base_path = ctx.target.base_path();
+    let job_root = base_path.join(dirs::OUTPUTS).join(ctx.job_id.as_str());
     let work_items_path = job_root.join("scatter").join("out").join("work_items.json");
-    let work_items_str = target.read_remote_file(&work_items_path).map_err(|e| {
+    let work_items_str = ctx.target.read_remote_file(&work_items_path).map_err(|e| {
         ClientError::Config(CoreError::CommandFailed(format!(
             "Failed to read work_items.json after scatter for '{}': {}",
-            job_id, e
+            ctx.job_id, e
         )))
     })?;
     let work_items: Vec<Value> = serde_json::from_str(&work_items_str).map_err(|e| {
         ClientError::Config(CoreError::SerializationError(format!(
             "Failed to parse work_items.json for '{}': {}",
-            job_id, e
+            ctx.job_id, e
         )))
     })?;
 
-    let step_exes: Vec<(String, &repx_core::model::Executable)> = job
+    let step_exes: Vec<(String, &repx_core::model::Executable)> = ctx
+        .job
         .executables
         .iter()
         .filter(|(k, _)| k.starts_with("step-"))
@@ -642,36 +646,28 @@ fn expand_scatter_gather<'a>(
         })?
         .to_string();
 
-    let scatter_id = WorkUnitId::scatter(job_id);
+    let scatter_id = WorkUnitId::scatter(ctx.job_id);
 
-    let sg_common = build_sg_common_args(
-        job_id,
-        job,
-        target,
-        client,
-        execution_type,
-        image_tag,
-        options.verbose,
-    )?;
+    let sg_common = build_sg_common_args(ctx, options.verbose)?;
 
     let mut units = Vec::new();
 
     for branch_idx in 0..work_items.len() {
         for step_name in &topo_order {
-            let step_id = WorkUnitId::step(job_id, branch_idx, step_name);
+            let step_id = WorkUnitId::step(ctx.job_id, branch_idx, step_name);
             let exe_key = format!("step-{}", step_name);
 
-            let step_exe = job.executables.get(&exe_key);
+            let step_exe = ctx.job.executables.get(&exe_key);
             let intra_deps: Vec<String> = step_exe.map(|e| e.deps.clone()).unwrap_or_default();
             let mut deps: Vec<WorkUnitId> = intra_deps
                 .iter()
-                .map(|dep| WorkUnitId::step(job_id, branch_idx, dep))
+                .map(|dep| WorkUnitId::step(ctx.job_id, branch_idx, dep))
                 .collect();
             if deps.is_empty() {
                 deps.push(scatter_id.clone());
             }
 
-            let (mem, cpus) = get_step_resources(job, &exe_key, &options.resources, job_id);
+            let (mem, cpus) = get_step_resources(ctx.job, &exe_key, &options.resources, ctx.job_id);
 
             let mut extra_args = sg_common.clone();
             extra_args.extend_from_slice(&[
@@ -689,8 +685,8 @@ fn expand_scatter_gather<'a>(
                     deps,
                     mem_bytes: mem,
                     cpus,
-                    job,
-                    job_id: job_id.clone(),
+                    job: ctx.job,
+                    job_id: ctx.job_id.clone(),
                     extra_args,
                 },
             ));
@@ -698,22 +694,22 @@ fn expand_scatter_gather<'a>(
     }
 
     let gather_deps: Vec<WorkUnitId> = (0..work_items.len())
-        .map(|b| WorkUnitId::step(job_id, b, &sink_step))
+        .map(|b| WorkUnitId::step(ctx.job_id, b, &sink_step))
         .collect();
-    let gather_mem = get_job_mem_bytes(job, &options.resources);
-    let gather_cpus = get_job_cpus(job, &options.resources);
+    let gather_mem = get_job_mem_bytes(ctx.job, &options.resources);
+    let gather_cpus = get_job_cpus(ctx.job, &options.resources);
 
     let mut gather_extra = sg_common;
     gather_extra.extend_from_slice(&["--phase".to_string(), "gather".to_string()]);
 
     units.push((
-        WorkUnitId::gather(job_id),
+        WorkUnitId::gather(ctx.job_id),
         WorkUnit {
             deps: gather_deps,
             mem_bytes: gather_mem,
             cpus: gather_cpus,
-            job,
-            job_id: job_id.clone(),
+            job: ctx.job,
+            job_id: ctx.job_id.clone(),
             extra_args: gather_extra,
         },
     ));
@@ -724,12 +720,13 @@ fn expand_scatter_gather<'a>(
 pub fn submit_local_batch_run(
     client: &Client,
     jobs_in_batch: HashMap<JobId, &Job>,
-    target: Arc<dyn Target>,
-    _target_name: &str,
-    repx_binary_path: &Path,
+    sub_target: &super::SubmissionTarget,
     options: &SubmitOptions,
+    local_artifacts_path: Option<&PathBuf>,
     send: impl Fn(ClientEvent),
 ) -> Result<String> {
+    let target = &sub_target.target;
+    let repx_binary_path = &sub_target.repx_binary_path;
     let total_jobs = jobs_in_batch.len();
     let concurrency = options.num_jobs.unwrap_or_else(num_cpus::get);
     send(ClientEvent::SubmittingJobs {
@@ -823,15 +820,16 @@ pub fn submit_local_batch_run(
             let mem = get_job_mem_bytes(job, &options.resources);
             let cpus = get_job_cpus(job, &options.resources);
 
-            let mut extra_args = build_sg_common_args(
-                &job_id,
+            let ctx = LocalJobContext {
+                job_id: &job_id,
                 job,
-                target.as_ref(),
+                target: target.as_ref(),
                 client,
-                &execution_type,
+                execution_type: &execution_type,
                 image_tag,
-                options.verbose,
-            )?;
+                local_artifacts_path,
+            };
+            let mut extra_args = build_sg_common_args(&ctx, options.verbose)?;
             extra_args.extend_from_slice(&["--phase".to_string(), "scatter-only".to_string()]);
 
             work_units.insert(
@@ -853,15 +851,16 @@ pub fn submit_local_batch_run(
             let mem = get_job_mem_bytes(job, &options.resources);
             let cpus = get_job_cpus(job, &options.resources);
 
-            let extra_args = build_simple_job_args(
-                &job_id,
+            let ctx = LocalJobContext {
+                job_id: &job_id,
                 job,
-                target.as_ref(),
+                target: target.as_ref(),
                 client,
-                &execution_type,
+                execution_type: &execution_type,
                 image_tag,
-                options.verbose,
-            )?;
+                local_artifacts_path,
+            };
+            let extra_args = build_simple_job_args(&ctx, options.verbose)?;
 
             work_units.insert(
                 unit_id.clone(),
@@ -1043,51 +1042,49 @@ pub fn submit_local_batch_run(
                         completed.insert(unit_id.clone());
                         succeeded_work_units += 1;
 
-                        let unit = work_units.get(&unit_id);
-                        if let Some(u) = unit {
+                        let scatter_expand_job = work_units.get(&unit_id).and_then(|u| {
                             let is_scatter = u.job.stage_type
                                 == repx_core::model::StageType::ScatterGather
                                 && unit_id == WorkUnitId::scatter(&u.job_id);
-                            if is_scatter {
-                                let image_tag = resolve_image_tag(&u.job_id, client);
-                                let execution_type = resolve_local_execution_type(
-                                    image_tag,
-                                    options,
-                                    target.as_ref(),
-                                );
-                                let expanded = expand_scatter_gather(
-                                    &u.job_id,
-                                    u.job,
-                                    target.as_ref(),
-                                    client,
-                                    &execution_type,
-                                    image_tag,
-                                    options,
-                                )?;
-                                let num_expanded = expanded.len();
-                                for (new_id, new_unit) in expanded {
-                                    for dep in &new_unit.deps {
-                                        dependents
-                                            .entry(dep.clone())
-                                            .or_default()
-                                            .push(new_id.clone());
-                                    }
-                                    let deps_met =
-                                        new_unit.deps.iter().all(|d| completed.contains(d));
-                                    let run_idx = run_affinity
-                                        .get(&new_unit.job_id)
-                                        .copied()
-                                        .unwrap_or(usize::MAX);
-                                    unit_priorities.insert(new_id.clone(), run_idx);
-                                    units_left.insert(new_id.clone());
-                                    work_units.insert(new_id.clone(), new_unit);
-                                    if deps_met && !in_ready_queue.contains(&new_id) {
-                                        ready_queue.push(Reverse((run_idx, new_id.clone())));
-                                        in_ready_queue.insert(new_id);
-                                    }
+                            is_scatter.then(|| (u.job_id.clone(), u.job))
+                        });
+
+                        if let Some((scat_job_id, scat_job)) = scatter_expand_job {
+                            let image_tag = resolve_image_tag(&scat_job_id, client);
+                            let execution_type =
+                                resolve_local_execution_type(image_tag, options, target.as_ref());
+                            let ctx = LocalJobContext {
+                                job_id: &scat_job_id,
+                                job: scat_job,
+                                target: target.as_ref(),
+                                client,
+                                execution_type: &execution_type,
+                                image_tag,
+                                local_artifacts_path,
+                            };
+                            let expanded = expand_scatter_gather(&ctx, options)?;
+                            let num_expanded = expanded.len();
+                            for (new_id, new_unit) in expanded {
+                                for dep in &new_unit.deps {
+                                    dependents
+                                        .entry(dep.clone())
+                                        .or_default()
+                                        .push(new_id.clone());
                                 }
-                                total_work_units += num_expanded;
+                                let deps_met = new_unit.deps.iter().all(|d| completed.contains(d));
+                                let run_idx = run_affinity
+                                    .get(&new_unit.job_id)
+                                    .copied()
+                                    .unwrap_or(usize::MAX);
+                                unit_priorities.insert(new_id.clone(), run_idx);
+                                units_left.insert(new_id.clone());
+                                work_units.insert(new_id.clone(), new_unit);
+                                if deps_met && !in_ready_queue.contains(&new_id) {
+                                    ready_queue.push(Reverse((run_idx, new_id.clone())));
+                                    in_ready_queue.insert(new_id);
+                                }
                             }
+                            total_work_units += num_expanded;
                         }
 
                         if let Some(dep_list) = dependents.get(&unit_id) {
