@@ -214,20 +214,36 @@ impl Client {
         fs_err::create_dir_all(&client_temp_dir)
             .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
 
+        let local_tools_path = if lab.host_tools_path.is_relative() {
+            if let LabSource::Tar(tar_path) = &source {
+                let tools_root = client_temp_dir.join("host-tools-cache");
+                let marker = tools_root.join(format!(".extracted-{}", lab.content_hash));
+                if !marker.exists() {
+                    crate::tar_extract::extract_host_tools_from_tar(tar_path, &tools_root)?;
+                    let _ = std::fs::write(&marker, "");
+                }
+                tools_root.join(&lab.host_tools_path)
+            } else {
+                lab.host_tools_path.clone()
+            }
+        } else {
+            lab.host_tools_path.clone()
+        };
+
         let mut targets: HashMap<String, Arc<dyn Target>> = HashMap::new();
         for (name, target_config) in &config.targets {
             let target: Arc<dyn Target> = if name == targets::LOCAL {
                 Arc::new(LocalTarget {
                     name: name.clone(),
                     config: target_config.clone(),
-                    local_tools_path: lab.host_tools_path.clone(),
+                    local_tools_path: local_tools_path.clone(),
                 })
             } else if let Some(address) = &target_config.address {
                 Arc::new(SshTarget {
                     name: name.clone(),
                     address: address.clone(),
                     config: target_config.clone(),
-                    local_tools_path: lab.host_tools_path.clone(),
+                    local_tools_path: local_tools_path.clone(),
                     local_temp_path: client_temp_dir.clone(),
                     host_tools_dir_name: lab.host_tools_dir_name.clone(),
                 })
@@ -494,11 +510,23 @@ impl Client {
 
         send(ClientEvent::SyncingArtifacts { total: 1 });
         match &self.lab_source {
-            LabSource::Tar(tar_path) => {
+            LabSource::Tar(_tar_path) => {
                 if use_node_local {
-                    tracing::info!("Node-local mode: skipping NAS sync (tar at {:?})", tar_path);
+                    let local_target = self
+                        .get_target(targets::LOCAL)
+                        .ok_or(ClientError::Config(CoreError::MissingLocalTarget))?;
+                    let local_ht_cache = local_target
+                        .base_path()
+                        .join("repx")
+                        .join("temp")
+                        .join("host-tools-cache")
+                        .join("host-tools");
+                    let remote_ht_dest = target.artifacts_base_path().join("host-tools");
+                    if local_ht_cache.exists() {
+                        target.sync_directory(&local_ht_cache, &remote_ht_dest)?;
+                    }
                 } else {
-                    target.sync_lab_from_tar_via_rsync(tar_path)?;
+                    target.sync_lab_from_tar_via_rsync(_tar_path)?;
                 }
             }
             LabSource::Directory(dir_path) => {

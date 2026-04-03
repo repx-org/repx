@@ -93,6 +93,9 @@ let
     e2e-slurm-multi-node-lab-tar = import ./checks/runtime/e2e-slurm-multi-node-lab-tar.nix {
       inherit pkgs repx referenceLab;
     };
+    e2e-slurm-multi-node-tar-source = import ./checks/runtime/e2e-slurm-multi-node-tar-source.nix {
+      inherit pkgs repx referenceLab;
+    };
     e2e-slurm-scatter-gather-lab-tar = import ./checks/runtime/e2e-slurm-scatter-gather-lab-tar.nix {
       inherit pkgs repx referenceLab;
     };
