@@ -232,8 +232,11 @@ fn test_gc_root_rotation_keeps_last_5() {
         ..Default::default()
     };
 
-    let client =
-        Client::new(config, repx_core::lab::LabSource::from_path(&harness.lab_path)).expect("creating client must succeed");
+    let client = Client::new(
+        config,
+        repx_core::lab::LabSource::from_path(&harness.lab_path),
+    )
+    .expect("creating client must succeed");
     let target = client
         .get_target("local")
         .expect("getting local target must succeed");
@@ -439,7 +442,8 @@ fn make_client_and_target(
         ..Default::default()
     };
 
-    let client = Client::new(config, repx_core::lab::LabSource::from_path(lab_path)).expect("creating client must succeed");
+    let client = Client::new(config, repx_core::lab::LabSource::from_path(lab_path))
+        .expect("creating client must succeed");
     let target = client
         .get_target("local")
         .expect("getting local target must succeed");
@@ -874,8 +878,11 @@ fn test_gc_remove_auto_roots() {
         ..Default::default()
     };
 
-    let client =
-        Client::new(config, repx_core::lab::LabSource::from_path(&harness.lab_path)).expect("creating client must succeed");
+    let client = Client::new(
+        config,
+        repx_core::lab::LabSource::from_path(&harness.lab_path),
+    )
+    .expect("creating client must succeed");
     let target = client
         .get_target("local")
         .expect("getting local target must succeed");

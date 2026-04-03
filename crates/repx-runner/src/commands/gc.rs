@@ -272,12 +272,11 @@ fn handle_gc_status(target_arg: Option<&str>, context: &AppContext) -> Result<()
         .get_target(target_name)
         .ok_or_else(|| CliError::Domain(DomainError::TargetNotFound(target_name.to_string())))?;
 
-    let current_lab =
-        lab::load(context.source).map_err(|e| CliError::ExecutionFailed {
-            message: "Failed to load lab metadata".to_string(),
-            log_path: None,
-            log_summary: e.to_string(),
-        })?;
+    let current_lab = lab::load(context.source).map_err(|e| CliError::ExecutionFailed {
+        message: "Failed to load lab metadata".to_string(),
+        log_path: None,
+        log_summary: e.to_string(),
+    })?;
     let lab_hash = &current_lab.content_hash;
     let hash_short = truncate_hash(lab_hash, 12);
 
@@ -345,13 +344,11 @@ fn handle_gc_pin(
     let lab_hash = match args.lab_hash {
         Some(h) => h,
         None => {
-            let lab =
-                lab::load(context.source).map_err(|e| CliError::ExecutionFailed {
-                    message: "Failed to load lab metadata. Provide a lab hash explicitly."
-                        .to_string(),
-                    log_path: None,
-                    log_summary: e.to_string(),
-                })?;
+            let lab = lab::load(context.source).map_err(|e| CliError::ExecutionFailed {
+                message: "Failed to load lab metadata. Provide a lab hash explicitly.".to_string(),
+                log_path: None,
+                log_summary: e.to_string(),
+            })?;
             lab.content_hash.clone()
         }
     };

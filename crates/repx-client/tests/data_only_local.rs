@@ -38,7 +38,8 @@ fn test_data_only_local_target_initialization() {
         targets,
     };
 
-    let _client = Client::new(config, repx_core::lab::LabSource::from_path(&lab_path)).expect("Client initialization failed");
+    let _client = Client::new(config, repx_core::lab::LabSource::from_path(&lab_path))
+        .expect("Client initialization failed");
 
     assert!(base_path.join("repx").join("state").exists());
 }

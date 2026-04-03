@@ -93,7 +93,8 @@ fn test_local_target_smart_sync() {
         targets,
     };
 
-    let client = Client::new(config, repx_core::lab::LabSource::from_path(&lab_path)).expect("Client initialization failed");
+    let client = Client::new(config, repx_core::lab::LabSource::from_path(&lab_path))
+        .expect("Client initialization failed");
     let target = client.get_target("local").expect("Local target not found");
 
     let image1_path = create_dummy_image(

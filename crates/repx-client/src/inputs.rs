@@ -137,10 +137,8 @@ pub fn generate_and_write_inputs_json(
                         Ok(entries) => entries
                             .into_iter()
                             .filter_map(|e| {
-                                let filename = std::path::Path::new(&e)
-                                    .file_name()?
-                                    .to_str()?
-                                    .to_string();
+                                let filename =
+                                    std::path::Path::new(&e).file_name()?.to_str()?.to_string();
                                 if filename.ends_with(&suffix) {
                                     Some(filename)
                                 } else {
