@@ -489,8 +489,8 @@ impl ArtifactSync for SshTarget {
             .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
 
         if let Some(ref mut stdin) = child.stdin {
-            let mut tar_file = std::fs::File::open(tar_path)
-                .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
+            let mut tar_file =
+                std::fs::File::open(tar_path).map_err(|e| ClientError::Config(CoreError::Io(e)))?;
             std::io::copy(&mut tar_file, stdin)
                 .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
         }
@@ -534,8 +534,8 @@ impl ArtifactSync for SshTarget {
             .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
 
         if let Some(ref mut stdin) = child.stdin {
-            let mut tar_file = std::fs::File::open(tar_path)
-                .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
+            let mut tar_file =
+                std::fs::File::open(tar_path).map_err(|e| ClientError::Config(CoreError::Io(e)))?;
             std::io::copy(&mut tar_file, stdin)
                 .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
         }

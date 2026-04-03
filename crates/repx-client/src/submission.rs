@@ -121,14 +121,14 @@ pub fn sync_images(
         } else {
             match source {
                 LabSource::Directory(dir) => {
-                    let dir_abs =
-                        fs_err::canonicalize(dir).unwrap_or_else(|_| dir.to_path_buf());
+                    let dir_abs = fs_err::canonicalize(dir).unwrap_or_else(|_| dir.to_path_buf());
                     dir_abs.join(relative_path)
                 }
                 LabSource::Tar(tar_path) => {
                     let image_cache = local_cache_root.join("lab-images");
-                    fs_err::create_dir_all(&image_cache)
-                        .map_err(|e| crate::error::ClientError::Config(repx_core::errors::CoreError::Io(e)))?;
+                    fs_err::create_dir_all(&image_cache).map_err(|e| {
+                        crate::error::ClientError::Config(repx_core::errors::CoreError::Io(e))
+                    })?;
                     let dest = image_cache.join(
                         relative_path
                             .file_name()
@@ -141,12 +141,13 @@ pub fn sync_images(
                             .arg("--strip-components=1")
                             .arg("-C")
                             .arg(&image_cache)
-                            .arg(format!(
-                                "*/{}",
-                                relative_path.to_string_lossy()
-                            ))
+                            .arg(format!("*/{}", relative_path.to_string_lossy()))
                             .status()
-                            .map_err(|e| crate::error::ClientError::Config(repx_core::errors::CoreError::Io(e)))?;
+                            .map_err(|e| {
+                                crate::error::ClientError::Config(repx_core::errors::CoreError::Io(
+                                    e,
+                                ))
+                            })?;
                         if !status.success() {
                             tracing::warn!(
                                 "Failed to extract image '{}' from tar, trying full path",

@@ -21,7 +21,6 @@ pkgs.testers.runNixOSTest {
   };
 
   testScript = ''
-    from get_subset_jobs import get_subset_jobs
     start_all()
 
     base_path = "/mnt/shared/repx-store"

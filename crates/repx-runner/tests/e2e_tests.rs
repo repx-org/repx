@@ -1,4 +1,4 @@
-#![allow(dead_code)]
+#![allow(dead_code, clippy::expect_used)]
 
 mod harness;
 use harness::TestHarness;
@@ -372,4 +372,130 @@ fn test_continue_on_failure_runs_independent_jobs() {
 
     assert!(stage_a_path.join("repx/SUCCESS").exists());
     assert!(stage_b_path.join("repx/SUCCESS").exists());
+}
+
+fn create_lab_tar(harness: &TestHarness) -> std::path::PathBuf {
+    let tar_path = harness.context.test_root.join("lab.tar");
+    let status = std::process::Command::new("tar")
+        .arg("cf")
+        .arg(&tar_path)
+        .arg("-C")
+        .arg(
+            harness
+                .context
+                .lab_path
+                .parent()
+                .unwrap_or(std::path::Path::new("/")),
+        )
+        .arg(
+            harness
+                .context
+                .lab_path
+                .file_name()
+                .unwrap_or(std::ffi::OsStr::new("result")),
+        )
+        .status()
+        .expect("tar command must succeed");
+    assert!(status.success(), "failed to create lab tar");
+    tar_path
+}
+
+fn tar_cmd(harness: &TestHarness, tar_path: &std::path::Path) -> assert_cmd::Command {
+    let mut cmd = assert_cmd::Command::new(env!("CARGO_BIN_EXE_repx-runner"));
+    cmd.env("XDG_CONFIG_HOME", &harness.context.config_dir);
+    cmd.env("RUST_BACKTRACE", "1");
+    cmd.arg("--lab").arg(tar_path);
+    cmd
+}
+
+fn extract_content_lines(output: &str) -> Vec<String> {
+    output
+        .lines()
+        .filter(|l| l.starts_with("  "))
+        .map(|l| l.to_string())
+        .collect()
+}
+
+fn run_both(harness: &TestHarness, tar_path: &std::path::Path, args: &[&str]) -> (String, String) {
+    let mut dir_cmd = harness.cmd();
+    for arg in args {
+        dir_cmd.arg(arg);
+    }
+    let dir_output = dir_cmd.output().expect("dir command must run");
+    assert!(
+        dir_output.status.success(),
+        "dir command failed: {}",
+        String::from_utf8_lossy(&dir_output.stderr)
+    );
+
+    let mut tar_cmd = tar_cmd(harness, tar_path);
+    for arg in args {
+        tar_cmd.arg(arg);
+    }
+    let tar_output = tar_cmd.output().expect("tar command must run");
+    assert!(
+        tar_output.status.success(),
+        "tar command failed: {}",
+        String::from_utf8_lossy(&tar_output.stderr)
+    );
+
+    (
+        String::from_utf8_lossy(&dir_output.stdout).to_string(),
+        String::from_utf8_lossy(&tar_output.stdout).to_string(),
+    )
+}
+
+#[test]
+fn test_tar_parity_list_runs() {
+    let harness = TestHarness::new();
+    let tar_path = create_lab_tar(&harness);
+
+    let (dir_out, tar_out) = run_both(&harness, &tar_path, &["list"]);
+
+    let dir_lines = extract_content_lines(&dir_out);
+    let tar_lines = extract_content_lines(&tar_out);
+    assert_eq!(dir_lines, tar_lines, "list runs must be identical");
+    assert!(
+        !dir_lines.is_empty(),
+        "list runs should produce non-empty output"
+    );
+}
+
+#[test]
+fn test_tar_parity_list_jobs() {
+    let harness = TestHarness::new();
+    let tar_path = create_lab_tar(&harness);
+
+    let (dir_out, tar_out) = run_both(&harness, &tar_path, &["list", "jobs", "simulation-run"]);
+
+    let dir_lines = extract_content_lines(&dir_out);
+    let tar_lines = extract_content_lines(&tar_out);
+    assert_eq!(dir_lines, tar_lines, "list jobs must be identical");
+    assert!(
+        dir_lines.iter().any(|l| l.contains("stage-A-producer")),
+        "expected stage-A-producer in output"
+    );
+}
+
+#[test]
+fn test_tar_parity_list_deps() {
+    let harness = TestHarness::new();
+    let tar_path = create_lab_tar(&harness);
+    let job_id = harness.job_id_by_name("stage-C-consumer");
+
+    let (dir_out, tar_out) = run_both(&harness, &tar_path, &["list", "deps", &job_id]);
+
+    let dir_lines = extract_content_lines(&dir_out);
+    let tar_lines = extract_content_lines(&tar_out);
+    assert_eq!(dir_lines, tar_lines, "list deps must be identical");
+}
+
+#[test]
+fn test_tar_parity_trace_params() {
+    let harness = TestHarness::new();
+    let tar_path = create_lab_tar(&harness);
+
+    let (dir_out, tar_out) = run_both(&harness, &tar_path, &["trace-params"]);
+
+    assert_eq!(dir_out, tar_out, "trace-params output must be identical");
 }

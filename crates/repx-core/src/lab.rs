@@ -15,12 +15,12 @@ const HASH_BUFFER_SIZE: usize = 8192;
 
 #[derive(Debug, Clone)]
 pub enum LabSource {
-        Directory(PathBuf),
-        Tar(PathBuf),
+    Directory(PathBuf),
+    Tar(PathBuf),
 }
 
 impl LabSource {
-        pub fn from_path(path: &Path) -> Self {
+    pub fn from_path(path: &Path) -> Self {
         if path.is_file() {
             LabSource::Tar(path.to_path_buf())
         } else {
@@ -28,13 +28,13 @@ impl LabSource {
         }
     }
 
-        pub fn path(&self) -> &Path {
+    pub fn path(&self) -> &Path {
         match self {
             LabSource::Directory(p) | LabSource::Tar(p) => p,
         }
     }
 
-        pub fn is_tar(&self) -> bool {
+    pub fn is_tar(&self) -> bool {
         matches!(self, LabSource::Tar(_))
     }
 }
@@ -442,35 +442,62 @@ fn load_from_path_inner(initial_path: &Path, verify_integrity: bool) -> Result<L
     Ok(lab)
 }
 
-
 fn strip_tar_prefix<'a>(path: &'a str, prefix: &str) -> Option<&'a str> {
     path.strip_prefix(prefix)
         .map(|s| s.strip_prefix('/').unwrap_or(s))
 }
 
+fn detect_tar_prefix(tar_path: &Path) -> Result<String, CoreError> {
+    let probe_file = File::open(tar_path).map_err(|e| {
+        CoreError::Io(std::io::Error::new(
+            e.kind(),
+            format!("Failed to open tar '{}': {}", tar_path.display(), e),
+        ))
+    })?;
+    let mut probe = tar::Archive::new(probe_file);
+    let detected = probe.entries().ok().and_then(|entries| {
+        entries.flatten().find_map(|entry| {
+            let path = entry.path().ok()?;
+            let s = path.to_string_lossy();
+            let idx = s.find("lab/")?;
+            if s[idx + 4..].ends_with("-lab-metadata.json") {
+                Some(s[..idx].to_string())
+            } else {
+                None
+            }
+        })
+    });
+    detected.ok_or_else(|| CoreError::MetadataNotFound(tar_path.to_path_buf()))
+}
+
 pub fn load_from_tar(tar_path: &Path) -> Result<Lab, CoreError> {
     tracing::debug!("Loading lab from tar: '{}'", tar_path.display());
 
-    let file = File::open(tar_path).map_err(|e| {
+    let mut file_hashes: HashMap<String, String> = HashMap::new();
+    let mut file_contents: HashMap<String, Vec<u8>> = HashMap::new();
+    let mut known_paths: HashSet<String> = HashSet::new();
+    let mut dir_paths: HashSet<String> = HashSet::new();
+    let mut symlinks: HashMap<String, PathBuf> = HashMap::new();
+    let mut hardlinks: Vec<(String, String)> = Vec::new();
+
+    let tar_prefix = detect_tar_prefix(tar_path)?;
+
+    let main_file = File::open(tar_path).map_err(|e| {
         CoreError::Io(std::io::Error::new(
             e.kind(),
             format!("Failed to open lab tar '{}': {}", tar_path.display(), e),
         ))
     })?;
-    let mut archive = tar::Archive::new(file);
-
-    let mut file_hashes: HashMap<String, String> = HashMap::new(); 
-    let mut file_contents: HashMap<String, Vec<u8>> = HashMap::new(); 
-    let mut known_paths: HashSet<String> = HashSet::new(); 
-    let mut dir_paths: HashSet<String> = HashSet::new(); 
-    let mut symlinks: HashMap<String, PathBuf> = HashMap::new(); 
-
-    let mut tar_prefix: Option<String> = None;
+    let mut archive = tar::Archive::new(main_file);
 
     let entries = archive.entries().map_err(|e| {
         CoreError::Io(std::io::Error::new(
             e.kind(),
-            format!("Failed to read tar entries from '{}': {}", tar_path.display(), e),
+            format!(
+                "Failed to read tar entries from '{}': {}",
+                tar_path.display(),
+                e
+            ),
         ))
     })?;
 
@@ -493,20 +520,7 @@ pub fn load_from_tar(tar_path: &Path) -> Result<Lab, CoreError> {
             .to_path_buf();
         let raw_path_str = raw_path.to_string_lossy().to_string();
 
-        if tar_prefix.is_none() {
-            if let Some(first_component) = raw_path.components().next() {
-                let component_str = first_component.as_os_str().to_string_lossy().to_string();
-                if raw_path.components().count() > 1 {
-                    tar_prefix = Some(format!("{}/", component_str));
-                } else if entry.header().entry_type().is_dir() {
-                    tar_prefix = Some(format!("{}/", component_str.trim_end_matches('/')));
-                } else {
-                    tar_prefix = Some(String::new());
-                }
-            }
-        }
-
-        let prefix = tar_prefix.as_deref().unwrap_or("");
+        let prefix = &tar_prefix;
         let rel_path = match strip_tar_prefix(&raw_path_str, prefix) {
             Some(p) if !p.is_empty() => p.to_string(),
             _ => {
@@ -528,6 +542,30 @@ pub fn load_from_tar(tar_path: &Path) -> Result<Lab, CoreError> {
                 symlinks.insert(rel_path.clone(), target.to_path_buf());
             }
             known_paths.insert(rel_path);
+            continue;
+        }
+
+        if entry_type == tar::EntryType::Link {
+            if let Ok(Some(link_target)) = entry.link_name() {
+                let target_str = link_target.to_string_lossy().to_string();
+                let target_rel = match strip_tar_prefix(&target_str, prefix) {
+                    Some(p) if !p.is_empty() => p.to_string(),
+                    _ => target_str,
+                };
+                hardlinks.push((rel_path.clone(), target_rel));
+            }
+            known_paths.insert(rel_path.clone());
+            let p = Path::new(&rel_path);
+            let mut ancestor = p.parent();
+            while let Some(dir) = ancestor {
+                let dir_str = dir.to_string_lossy().to_string();
+                if dir_str.is_empty() {
+                    break;
+                }
+                dir_paths.insert(dir_str.clone());
+                known_paths.insert(dir_str);
+                ancestor = dir.parent();
+            }
             continue;
         }
 
@@ -587,9 +625,19 @@ pub fn load_from_tar(tar_path: &Path) -> Result<Lab, CoreError> {
         }
     }
 
+    for (link_path, target_path) in &hardlinks {
+        if let Some(hash) = file_hashes.get(target_path) {
+            file_hashes.insert(link_path.clone(), hash.clone());
+        }
+        if let Some(content) = file_contents.get(target_path) {
+            file_contents.insert(link_path.clone(), content.clone());
+        }
+    }
+
     tracing::debug!(
-        "Tar scan complete: {} files hashed, {} metadata files buffered, {} paths known",
+        "Tar scan complete: {} files hashed, {} hardlinks resolved, {} metadata files buffered, {} paths known",
         file_hashes.len(),
+        hardlinks.len(),
         file_contents.len(),
         known_paths.len()
     );
@@ -603,8 +651,7 @@ pub fn load_from_tar(tar_path: &Path) -> Result<Lab, CoreError> {
     let manifest_bytes = file_contents
         .get(&manifest_key)
         .ok_or_else(|| CoreError::MetadataNotFound(tar_path.to_path_buf()))?;
-    let manifest: LabManifest = serde_json::from_slice(manifest_bytes)
-        .map_err(CoreError::Json)?;
+    let manifest: LabManifest = serde_json::from_slice(manifest_bytes).map_err(CoreError::Json)?;
     let content_hash = manifest.lab_id.clone();
     let lab_version = manifest.lab_version.clone();
 
@@ -633,16 +680,14 @@ pub fn load_from_tar(tar_path: &Path) -> Result<Lab, CoreError> {
     }
     tracing::debug!("File integrity verification passed.");
 
-    let root_meta_bytes = file_contents
-        .get(&manifest.metadata)
-        .ok_or_else(|| {
-            CoreError::Io(std::io::Error::new(
-                std::io::ErrorKind::NotFound,
-                format!("Root metadata '{}' not found in tar", manifest.metadata),
-            ))
-        })?;
-    let root_meta: RootMetadata = serde_json::from_slice(root_meta_bytes)
-        .map_err(CoreError::Json)?;
+    let root_meta_bytes = file_contents.get(&manifest.metadata).ok_or_else(|| {
+        CoreError::Io(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            format!("Root metadata '{}' not found in tar", manifest.metadata),
+        ))
+    })?;
+    let root_meta: RootMetadata =
+        serde_json::from_slice(root_meta_bytes).map_err(CoreError::Json)?;
 
     if root_meta.repx_version != EXPECTED_REPX_VERSION {
         tracing::warn!(
@@ -682,9 +727,7 @@ pub fn load_from_tar(tar_path: &Path) -> Result<Lab, CoreError> {
     let mut referenced_files = Vec::new();
     referenced_files.push(PathBuf::from(&manifest_key));
     referenced_files.push(PathBuf::from(&manifest.metadata));
-    referenced_files.push(
-        PathBuf::from("host-tools").join(&host_tools_dir_name),
-    );
+    referenced_files.push(PathBuf::from("host-tools").join(&host_tools_dir_name));
 
     {
         let mut seen = HashSet::new();
@@ -725,17 +768,15 @@ pub fn load_from_tar(tar_path: &Path) -> Result<Lab, CoreError> {
     for run_rel_path in root_meta.runs {
         lab.referenced_files.push(PathBuf::from(&run_rel_path));
 
-        let run_meta_bytes = file_contents
-            .get(&run_rel_path)
-            .ok_or_else(|| {
-                CoreError::Io(std::io::Error::new(
-                    std::io::ErrorKind::NotFound,
-                    format!("Run metadata '{}' not found in tar", run_rel_path),
-                ))
-            })?;
+        let run_meta_bytes = file_contents.get(&run_rel_path).ok_or_else(|| {
+            CoreError::Io(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                format!("Run metadata '{}' not found in tar", run_rel_path),
+            ))
+        })?;
 
-        let mut run_meta: RunMetadataForLoading = serde_json::from_slice(run_meta_bytes)
-            .map_err(CoreError::Json)?;
+        let mut run_meta: RunMetadataForLoading =
+            serde_json::from_slice(run_meta_bytes).map_err(CoreError::Json)?;
         let run_id = run_meta.name.clone();
         let job_ids_for_run: Vec<_> = run_meta.jobs.keys().cloned().collect();
 
@@ -792,9 +833,7 @@ pub fn load_from_tar(tar_path: &Path) -> Result<Lab, CoreError> {
     }
 
     for (link_path, target) in &symlinks {
-        let link_parent = Path::new(link_path)
-            .parent()
-            .unwrap_or(Path::new(""));
+        let link_parent = Path::new(link_path).parent().unwrap_or(Path::new(""));
         let resolved = if target.is_absolute() {
             return Err(CoreError::SymlinkEscape {
                 link: PathBuf::from(link_path),
@@ -828,6 +867,8 @@ pub fn load_from_tar(tar_path: &Path) -> Result<Lab, CoreError> {
 }
 
 pub fn list_tar_entries(tar_path: &Path, prefix: &str) -> Result<Vec<String>, CoreError> {
+    let tar_prefix = detect_tar_prefix(tar_path)?;
+
     let file = File::open(tar_path).map_err(|e| {
         CoreError::Io(std::io::Error::new(
             e.kind(),
@@ -836,7 +877,6 @@ pub fn list_tar_entries(tar_path: &Path, prefix: &str) -> Result<Vec<String>, Co
     })?;
     let mut archive = tar::Archive::new(file);
     let mut result = Vec::new();
-    let mut tar_prefix: Option<String> = None;
 
     let entries = archive.entries().map_err(|e| {
         CoreError::Io(std::io::Error::new(
@@ -864,21 +904,7 @@ pub fn list_tar_entries(tar_path: &Path, prefix: &str) -> Result<Vec<String>, Co
             .to_path_buf();
         let raw_path_str = raw_path.to_string_lossy().to_string();
 
-        if tar_prefix.is_none() {
-            if let Some(first_component) = raw_path.components().next() {
-                let component_str = first_component.as_os_str().to_string_lossy().to_string();
-                if raw_path.components().count() > 1 {
-                    tar_prefix = Some(format!("{}/", component_str));
-                } else if entry.header().entry_type().is_dir() {
-                    tar_prefix = Some(format!("{}/", component_str.trim_end_matches('/')));
-                } else {
-                    tar_prefix = Some(String::new());
-                }
-            }
-        }
-
-        let pfx = tar_prefix.as_deref().unwrap_or("");
-        if let Some(rel) = strip_tar_prefix(&raw_path_str, pfx) {
+        if let Some(rel) = strip_tar_prefix(&raw_path_str, &tar_prefix) {
             if !rel.is_empty() && rel.starts_with(prefix) {
                 result.push(rel.to_string());
             }
@@ -886,4 +912,680 @@ pub fn list_tar_entries(tar_path: &Path, prefix: &str) -> Result<Vec<String>, Co
     }
 
     Ok(result)
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::useless_vec)]
+mod tests {
+    use super::*;
+    use sha2::{Digest, Sha256};
+
+    const TEST_VERSION: &str = env!("CARGO_PKG_VERSION");
+
+    fn sha256_hex(data: &[u8]) -> String {
+        format!("{:x}", Sha256::digest(data))
+    }
+
+    fn build_test_lab_tar(path: &Path) {
+        build_test_lab_tar_with_options(path, TestLabOptions::default());
+    }
+
+    #[derive(Default)]
+    struct TestLabOptions {
+        add_escaping_symlink: Option<String>,
+        add_hardlink: Option<(String, String)>,
+        extra_files: Vec<(String, Vec<u8>)>,
+        flat: bool,
+    }
+
+    fn build_test_lab_tar_with_options(path: &Path, opts: TestLabOptions) {
+        let prefix = if opts.flat { "" } else { "result/" };
+
+        let job_id = "abc123-test-job-1.0";
+        let run_name = "test-run";
+        let run_exe_content = b"#!/bin/sh\necho hello\n";
+        let run_exe_path = format!("jobs/{}/run.sh", job_id);
+
+        let run_metadata = serde_json::json!({
+            "name": run_name,
+            "jobs": {
+                job_id: {
+                    "name": "test-job",
+                    "params": {},
+                    "executables": {
+                        "main": {
+                            "path": run_exe_path,
+                            "inputs": [],
+                            "outputs": {}
+                        }
+                    }
+                }
+            }
+        });
+        let run_meta_bytes = serde_json::to_vec_pretty(&run_metadata).unwrap();
+        let run_meta_hash = sha256_hex(&run_meta_bytes);
+        let run_meta_rel = format!(
+            "revision/{}-metadata-{}.json",
+            &run_meta_hash[..16],
+            run_name
+        );
+
+        let root_metadata = serde_json::json!({
+            "repx_version": TEST_VERSION,
+            "gitHash": "deadbeef",
+            "runs": [run_meta_rel],
+            "groups": {}
+        });
+        let root_meta_bytes = serde_json::to_vec_pretty(&root_metadata).unwrap();
+        let root_meta_hash = sha256_hex(&root_meta_bytes);
+        let root_meta_rel = format!("{}-metadata.json", &root_meta_hash[..16]);
+
+        let files = vec![
+            (root_meta_rel.clone(), root_meta_bytes.clone()),
+            (run_meta_rel.clone(), run_meta_bytes.clone()),
+            (run_exe_path.clone(), run_exe_content.to_vec()),
+        ];
+
+        let file_entries: Vec<serde_json::Value> = files
+            .iter()
+            .map(|(p, content)| {
+                serde_json::json!({
+                    "path": p,
+                    "sha256": sha256_hex(content),
+                })
+            })
+            .collect();
+
+        let manifest = serde_json::json!({
+            "labId": "test-lab-content-hash",
+            "lab_version": "1.0",
+            "metadata": root_meta_rel,
+            "files": file_entries,
+        });
+        let manifest_bytes = serde_json::to_vec_pretty(&manifest).unwrap();
+        let manifest_hash = sha256_hex(&manifest_bytes);
+        let manifest_rel = format!("lab/{}-lab-metadata.json", &manifest_hash[..16]);
+
+        let file = File::create(path).unwrap();
+        let mut builder = tar::Builder::new(file);
+
+        let add_dir = |builder: &mut tar::Builder<File>, dir_path: &str| {
+            let mut header = tar::Header::new_gnu();
+            header.set_entry_type(tar::EntryType::Directory);
+            header.set_size(0);
+            header.set_mode(0o755);
+            header.set_cksum();
+            builder.append_data(&mut header, dir_path, &[][..]).unwrap();
+        };
+
+        let add_file =
+            |builder: &mut tar::Builder<File>, file_path: &str, content: &[u8], mode: u32| {
+                let mut header = tar::Header::new_gnu();
+                header.set_entry_type(tar::EntryType::Regular);
+                header.set_size(content.len() as u64);
+                header.set_mode(mode);
+                header.set_cksum();
+                builder
+                    .append_data(&mut header, file_path, content)
+                    .unwrap();
+            };
+
+        if !opts.flat {
+            add_dir(&mut builder, &format!("{}.", prefix).replace("/.", ""));
+        }
+        add_dir(&mut builder, &format!("{}lab", prefix));
+        add_dir(&mut builder, &format!("{}revision", prefix));
+        add_dir(&mut builder, &format!("{}host-tools", prefix));
+        add_dir(&mut builder, &format!("{}host-tools/default", prefix));
+        add_dir(&mut builder, &format!("{}host-tools/default/bin", prefix));
+        add_dir(&mut builder, &format!("{}jobs", prefix));
+        add_dir(&mut builder, &format!("{}jobs/{}", prefix, job_id));
+
+        add_file(
+            &mut builder,
+            &format!("{}{}", prefix, manifest_rel),
+            &manifest_bytes,
+            0o644,
+        );
+        add_file(
+            &mut builder,
+            &format!("{}{}", prefix, root_meta_rel),
+            &root_meta_bytes,
+            0o644,
+        );
+        add_file(
+            &mut builder,
+            &format!("{}{}", prefix, run_meta_rel),
+            &run_meta_bytes,
+            0o644,
+        );
+        add_file(
+            &mut builder,
+            &format!("{}{}", prefix, run_exe_path),
+            run_exe_content,
+            0o755,
+        );
+
+        if let Some((link_path, target_path)) = &opts.add_hardlink {
+            let mut header = tar::Header::new_gnu();
+            header.set_entry_type(tar::EntryType::Link);
+            header.set_size(0);
+            header.set_mode(0o644);
+            header.set_cksum();
+            builder
+                .append_link(
+                    &mut header,
+                    format!("{}{}", prefix, link_path),
+                    format!("{}{}", prefix, target_path),
+                )
+                .unwrap();
+        }
+
+        if let Some(target) = &opts.add_escaping_symlink {
+            let mut header = tar::Header::new_gnu();
+            header.set_entry_type(tar::EntryType::Symlink);
+            header.set_size(0);
+            header.set_mode(0o777);
+            header.set_cksum();
+            builder
+                .append_link(&mut header, format!("{}badlink", prefix), target)
+                .unwrap();
+        }
+
+        for (rel_path, content) in &opts.extra_files {
+            add_file(
+                &mut builder,
+                &format!("{}{}", prefix, rel_path),
+                content,
+                0o644,
+            );
+        }
+
+        builder.finish().unwrap();
+    }
+
+    #[test]
+    fn test_lab_source_from_path_directory() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = LabSource::from_path(dir.path());
+        assert!(matches!(source, LabSource::Directory(_)));
+        assert!(!source.is_tar());
+        assert_eq!(source.path(), dir.path());
+    }
+
+    #[test]
+    fn test_lab_source_from_path_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let file_path = dir.path().join("test.tar");
+        File::create(&file_path).unwrap();
+        let source = LabSource::from_path(&file_path);
+        assert!(matches!(source, LabSource::Tar(_)));
+        assert!(source.is_tar());
+        assert_eq!(source.path(), file_path);
+    }
+
+    #[test]
+    fn test_lab_source_display() {
+        let source = LabSource::Directory(PathBuf::from("/some/path"));
+        assert_eq!(format!("{}", source), "/some/path");
+        let source = LabSource::Tar(PathBuf::from("/some/file.tar"));
+        assert_eq!(format!("{}", source), "/some/file.tar");
+    }
+
+    #[test]
+    fn test_load_from_tar_basic() {
+        let dir = tempfile::tempdir().unwrap();
+        let tar_path = dir.path().join("lab.tar");
+        build_test_lab_tar(&tar_path);
+
+        let lab = load_from_tar(&tar_path).unwrap();
+
+        assert_eq!(lab.content_hash, "test-lab-content-hash");
+        assert_eq!(lab.lab_version, "1.0");
+        assert_eq!(lab.repx_version, TEST_VERSION);
+        assert_eq!(lab.git_hash, "deadbeef");
+        assert_eq!(lab.runs.len(), 1);
+        assert!(lab.runs.contains_key(&RunId::from("test-run".to_string())));
+        assert_eq!(lab.jobs.len(), 1);
+        assert!(lab.jobs.contains_key(&"abc123-test-job-1.0".into()));
+        assert_eq!(lab.host_tools_dir_name, "default");
+    }
+
+    #[test]
+    fn test_load_from_tar_dot_prefix() {
+        let dir = tempfile::tempdir().unwrap();
+
+        let tar_path = dir.path().join("lab.tar");
+        build_test_lab_tar(&tar_path);
+
+        let extract_dir = dir.path().join("extracted");
+        fs::create_dir_all(&extract_dir).unwrap();
+        assert!(std::process::Command::new("tar")
+            .arg("xf")
+            .arg(&tar_path)
+            .arg("--strip-components=1")
+            .arg("-C")
+            .arg(&extract_dir)
+            .status()
+            .unwrap()
+            .success());
+
+        let dot_tar_path = dir.path().join("dot.tar");
+        assert!(std::process::Command::new("tar")
+            .arg("cf")
+            .arg(&dot_tar_path)
+            .arg("-C")
+            .arg(&extract_dir)
+            .arg(".")
+            .status()
+            .unwrap()
+            .success());
+
+        let lab = load_from_tar(&dot_tar_path).unwrap();
+        assert_eq!(lab.content_hash, "test-lab-content-hash");
+        assert_eq!(lab.runs.len(), 1);
+        assert_eq!(lab.jobs.len(), 1);
+    }
+
+    #[test]
+    fn test_load_from_tar_flat_layout() {
+        let dir = tempfile::tempdir().unwrap();
+        let tar_path = dir.path().join("flat.tar");
+        build_test_lab_tar_with_options(
+            &tar_path,
+            TestLabOptions {
+                flat: true,
+                ..Default::default()
+            },
+        );
+
+        let lab = load_from_tar(&tar_path).unwrap();
+        assert_eq!(lab.content_hash, "test-lab-content-hash");
+        assert_eq!(lab.runs.len(), 1);
+        assert_eq!(lab.jobs.len(), 1);
+    }
+
+    #[test]
+    fn test_load_from_tar_integrity_check() {
+        let dir = tempfile::tempdir().unwrap();
+        let tar_path = dir.path().join("bad.tar");
+
+        let file = File::create(&tar_path).unwrap();
+        let mut builder = tar::Builder::new(file);
+
+        let job_id = "abc123-test-job-1.0";
+        let run_exe_path = format!("jobs/{}/run.sh", job_id);
+
+        let run_metadata = serde_json::json!({
+            "name": "test-run",
+            "jobs": {
+                job_id: {
+                    "name": "test-job",
+                    "params": {},
+                    "executables": {
+                        "main": {
+                            "path": run_exe_path,
+                            "inputs": [],
+                            "outputs": {}
+                        }
+                    }
+                }
+            }
+        });
+        let run_meta_bytes = serde_json::to_vec_pretty(&run_metadata).unwrap();
+        let run_meta_hash = sha256_hex(&run_meta_bytes);
+        let run_meta_rel = format!("revision/{}-metadata-test-run.json", &run_meta_hash[..16]);
+
+        let root_metadata = serde_json::json!({
+            "repx_version": TEST_VERSION,
+            "gitHash": "deadbeef",
+            "runs": [run_meta_rel],
+            "groups": {}
+        });
+        let root_meta_bytes = serde_json::to_vec_pretty(&root_metadata).unwrap();
+        let root_meta_hash = sha256_hex(&root_meta_bytes);
+        let root_meta_rel = format!("{}-metadata.json", &root_meta_hash[..16]);
+
+        let original_exe_content = b"#!/bin/sh\necho hello\n";
+        let file_entries = serde_json::json!([
+            {"path": root_meta_rel, "sha256": sha256_hex(&root_meta_bytes)},
+            {"path": run_meta_rel, "sha256": sha256_hex(&run_meta_bytes)},
+            {"path": run_exe_path, "sha256": sha256_hex(original_exe_content)},
+        ]);
+
+        let manifest = serde_json::json!({
+            "labId": "test-lab-content-hash",
+            "lab_version": "1.0",
+            "metadata": root_meta_rel,
+            "files": file_entries,
+        });
+        let manifest_bytes = serde_json::to_vec_pretty(&manifest).unwrap();
+        let manifest_hash = sha256_hex(&manifest_bytes);
+
+        let add_dir = |b: &mut tar::Builder<File>, p: &str| {
+            let mut h = tar::Header::new_gnu();
+            h.set_entry_type(tar::EntryType::Directory);
+            h.set_size(0);
+            h.set_mode(0o755);
+            h.set_cksum();
+            b.append_data(&mut h, p, &[][..]).unwrap();
+        };
+        let add_file = |b: &mut tar::Builder<File>, p: &str, c: &[u8]| {
+            let mut h = tar::Header::new_gnu();
+            h.set_entry_type(tar::EntryType::Regular);
+            h.set_size(c.len() as u64);
+            h.set_mode(0o644);
+            h.set_cksum();
+            b.append_data(&mut h, p, c).unwrap();
+        };
+
+        add_dir(&mut builder, "result");
+        add_dir(&mut builder, "result/lab");
+        add_dir(&mut builder, "result/revision");
+        add_dir(&mut builder, "result/host-tools");
+        add_dir(&mut builder, "result/host-tools/default");
+        add_dir(&mut builder, "result/host-tools/default/bin");
+        add_dir(&mut builder, "result/jobs");
+        add_dir(&mut builder, &format!("result/jobs/{}", job_id));
+
+        add_file(
+            &mut builder,
+            &format!("result/lab/{}-lab-metadata.json", &manifest_hash[..16]),
+            &manifest_bytes,
+        );
+        add_file(
+            &mut builder,
+            &format!("result/{}", root_meta_rel),
+            &root_meta_bytes,
+        );
+        add_file(
+            &mut builder,
+            &format!("result/{}", run_meta_rel),
+            &run_meta_bytes,
+        );
+        add_file(
+            &mut builder,
+            &format!("result/{}", run_exe_path),
+            b"CORRUPTED CONTENT",
+        );
+
+        builder.finish().unwrap();
+
+        let result = load_from_tar(&tar_path);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        match err {
+            CoreError::IntegrityHashMismatch { path, .. } => {
+                assert!(path.contains("run.sh"));
+            }
+            other => panic!("Expected IntegrityHashMismatch, got: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_load_from_tar_hardlinks() {
+        let dir = tempfile::tempdir().unwrap();
+        let tar_path = dir.path().join("hardlink.tar");
+
+        let params_content = b"{\"key\": \"value\"}";
+        let extra_path = "jobs/abc123-test-job-1.0/params-original.json";
+
+        build_test_lab_tar_with_options(
+            &tar_path,
+            TestLabOptions {
+                extra_files: vec![(extra_path.to_string(), params_content.to_vec())],
+                add_hardlink: Some((
+                    "jobs/abc123-test-job-1.0/params-link.json".to_string(),
+                    extra_path.to_string(),
+                )),
+                ..Default::default()
+            },
+        );
+
+        let lab = load_from_tar(&tar_path).unwrap();
+        assert_eq!(lab.content_hash, "test-lab-content-hash");
+    }
+
+    #[test]
+    fn test_load_from_tar_symlink_escape_absolute() {
+        let dir = tempfile::tempdir().unwrap();
+        let tar_path = dir.path().join("escape.tar");
+        build_test_lab_tar_with_options(
+            &tar_path,
+            TestLabOptions {
+                add_escaping_symlink: Some("/etc/passwd".to_string()),
+                ..Default::default()
+            },
+        );
+
+        let result = load_from_tar(&tar_path);
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            CoreError::SymlinkEscape { link, target } => {
+                assert!(link.to_string_lossy().contains("badlink"));
+                assert_eq!(target, PathBuf::from("/etc/passwd"));
+            }
+            other => panic!("Expected SymlinkEscape, got: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_load_from_tar_symlink_escape_relative() {
+        let dir = tempfile::tempdir().unwrap();
+        let tar_path = dir.path().join("escape_rel.tar");
+        build_test_lab_tar_with_options(
+            &tar_path,
+            TestLabOptions {
+                add_escaping_symlink: Some("../../etc/passwd".to_string()),
+                ..Default::default()
+            },
+        );
+
+        let result = load_from_tar(&tar_path);
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            CoreError::SymlinkEscape { .. } => {}
+            other => panic!("Expected SymlinkEscape, got: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_load_from_tar_missing_manifest() {
+        let dir = tempfile::tempdir().unwrap();
+        let tar_path = dir.path().join("no_manifest.tar");
+
+        let file = File::create(&tar_path).unwrap();
+        let mut builder = tar::Builder::new(file);
+
+        let mut header = tar::Header::new_gnu();
+        header.set_entry_type(tar::EntryType::Directory);
+        header.set_size(0);
+        header.set_mode(0o755);
+        header.set_cksum();
+        builder.append_data(&mut header, "result", &[][..]).unwrap();
+        builder.finish().unwrap();
+
+        let result = load_from_tar(&tar_path);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_load_from_tar_missing_jobs_dir() {
+        let dir = tempfile::tempdir().unwrap();
+        let tar_path = dir.path().join("no_jobs.tar");
+
+        let job_id = "abc123-test-job-1.0";
+        let run_exe_path = format!("jobs/{}/run.sh", job_id);
+        let run_metadata = serde_json::json!({
+            "name": "test-run",
+            "jobs": {
+                job_id: {
+                    "name": "test-job",
+                    "params": {},
+                    "executables": {"main": {"path": run_exe_path, "inputs": [], "outputs": {}}}
+                }
+            }
+        });
+        let run_meta_bytes = serde_json::to_vec_pretty(&run_metadata).unwrap();
+        let run_meta_hash = sha256_hex(&run_meta_bytes);
+        let run_meta_rel = format!("revision/{}-metadata-test-run.json", &run_meta_hash[..16]);
+
+        let root_metadata = serde_json::json!({
+            "repx_version": TEST_VERSION,
+            "gitHash": "deadbeef",
+            "runs": [run_meta_rel],
+            "groups": {}
+        });
+        let root_meta_bytes = serde_json::to_vec_pretty(&root_metadata).unwrap();
+        let root_meta_hash = sha256_hex(&root_meta_bytes);
+        let root_meta_rel = format!("{}-metadata.json", &root_meta_hash[..16]);
+
+        let run_exe_content = b"#!/bin/sh\necho hello\n";
+        let file_entries = serde_json::json!([
+            {"path": root_meta_rel, "sha256": sha256_hex(&root_meta_bytes)},
+            {"path": run_meta_rel, "sha256": sha256_hex(&run_meta_bytes)},
+            {"path": run_exe_path, "sha256": sha256_hex(run_exe_content)},
+        ]);
+        let manifest = serde_json::json!({
+            "labId": "test-lab-content-hash",
+            "lab_version": "1.0",
+            "metadata": root_meta_rel,
+            "files": file_entries,
+        });
+        let manifest_bytes = serde_json::to_vec_pretty(&manifest).unwrap();
+        let manifest_hash = sha256_hex(&manifest_bytes);
+
+        let file = File::create(&tar_path).unwrap();
+        let mut builder = tar::Builder::new(file);
+        let add_dir = |b: &mut tar::Builder<File>, p: &str| {
+            let mut h = tar::Header::new_gnu();
+            h.set_entry_type(tar::EntryType::Directory);
+            h.set_size(0);
+            h.set_mode(0o755);
+            h.set_cksum();
+            b.append_data(&mut h, p, &[][..]).unwrap();
+        };
+        let add_file = |b: &mut tar::Builder<File>, p: &str, c: &[u8]| {
+            let mut h = tar::Header::new_gnu();
+            h.set_entry_type(tar::EntryType::Regular);
+            h.set_size(c.len() as u64);
+            h.set_mode(0o644);
+            h.set_cksum();
+            b.append_data(&mut h, p, c).unwrap();
+        };
+
+        add_dir(&mut builder, "result");
+        add_dir(&mut builder, "result/lab");
+        add_dir(&mut builder, "result/revision");
+        add_dir(&mut builder, "result/host-tools");
+        add_dir(&mut builder, "result/host-tools/default");
+        add_dir(&mut builder, "result/host-tools/default/bin");
+
+        add_file(
+            &mut builder,
+            &format!("result/lab/{}-lab-metadata.json", &manifest_hash[..16]),
+            &manifest_bytes,
+        );
+        add_file(
+            &mut builder,
+            &format!("result/{}", root_meta_rel),
+            &root_meta_bytes,
+        );
+        add_file(
+            &mut builder,
+            &format!("result/{}", run_meta_rel),
+            &run_meta_bytes,
+        );
+        builder.finish().unwrap();
+
+        let result = load_from_tar(&tar_path);
+        assert!(result.is_err(), "Expected error when jobs/ dir is missing");
+    }
+
+    #[test]
+    fn test_load_dispatches_to_tar() {
+        let dir = tempfile::tempdir().unwrap();
+        let tar_path = dir.path().join("lab.tar");
+        build_test_lab_tar(&tar_path);
+
+        let source = LabSource::Tar(tar_path);
+        let lab = load(&source).unwrap();
+        assert_eq!(lab.content_hash, "test-lab-content-hash");
+    }
+
+    #[test]
+    fn test_list_tar_entries_revision() {
+        let dir = tempfile::tempdir().unwrap();
+        let tar_path = dir.path().join("lab.tar");
+        build_test_lab_tar(&tar_path);
+
+        let entries = list_tar_entries(&tar_path, "revision/").unwrap();
+        assert!(!entries.is_empty());
+        assert!(entries.iter().all(|e| e.starts_with("revision/")));
+        assert!(entries.iter().any(|e| e.contains("metadata-test-run.json")));
+    }
+
+    #[test]
+    fn test_list_tar_entries_jobs() {
+        let dir = tempfile::tempdir().unwrap();
+        let tar_path = dir.path().join("lab.tar");
+        build_test_lab_tar(&tar_path);
+
+        let entries = list_tar_entries(&tar_path, "jobs/").unwrap();
+        assert!(!entries.is_empty());
+        assert!(entries.iter().any(|e| e.contains("abc123-test-job")));
+    }
+
+    #[test]
+    fn test_list_tar_entries_nonexistent_prefix() {
+        let dir = tempfile::tempdir().unwrap();
+        let tar_path = dir.path().join("lab.tar");
+        build_test_lab_tar(&tar_path);
+
+        let entries = list_tar_entries(&tar_path, "nonexistent/").unwrap();
+        assert!(entries.is_empty());
+    }
+
+    #[test]
+    fn test_tar_and_directory_produce_same_lab() {
+        let dir = tempfile::tempdir().unwrap();
+        let tar_path = dir.path().join("lab.tar");
+        build_test_lab_tar(&tar_path);
+
+        let extract_dir = dir.path().join("extracted");
+        fs::create_dir_all(&extract_dir).unwrap();
+        let status = std::process::Command::new("tar")
+            .arg("xf")
+            .arg(&tar_path)
+            .arg("--strip-components=1")
+            .arg("-C")
+            .arg(&extract_dir)
+            .status()
+            .unwrap();
+        assert!(status.success());
+
+        let lab_tar = load_from_tar(&tar_path).unwrap();
+        let lab_dir = load_from_path(&extract_dir).unwrap();
+
+        assert_eq!(lab_tar.content_hash, lab_dir.content_hash);
+        assert_eq!(lab_tar.lab_version, lab_dir.lab_version);
+        assert_eq!(lab_tar.repx_version, lab_dir.repx_version);
+        assert_eq!(lab_tar.git_hash, lab_dir.git_hash);
+        assert_eq!(lab_tar.host_tools_dir_name, lab_dir.host_tools_dir_name);
+        assert_eq!(lab_tar.runs.len(), lab_dir.runs.len());
+        assert_eq!(lab_tar.jobs.len(), lab_dir.jobs.len());
+
+        for (run_id, run_tar) in &lab_tar.runs {
+            let run_dir = lab_dir.runs.get(run_id).unwrap();
+            assert_eq!(run_tar.image, run_dir.image);
+            assert_eq!(run_tar.jobs.len(), run_dir.jobs.len());
+        }
+
+        for (job_id, job_tar) in &lab_tar.jobs {
+            let job_dir = lab_dir.jobs.get(job_id).unwrap();
+            assert_eq!(job_tar.name, job_dir.name);
+            assert_eq!(job_tar.path_in_lab, job_dir.path_in_lab);
+            assert_eq!(job_tar.params, job_dir.params);
+        }
+    }
 }

@@ -114,9 +114,9 @@ pub trait ArtifactSync: TargetInfo {
 
     fn sync_lab_root_metadata_only(&self, local_lab_path: &Path) -> Result<()>;
 
-        fn sync_lab_from_tar(&self, tar_path: &Path) -> Result<()>;
+    fn sync_lab_from_tar(&self, tar_path: &Path) -> Result<()>;
 
-        fn sync_lab_metadata_from_tar(&self, tar_path: &Path) -> Result<()>;
+    fn sync_lab_metadata_from_tar(&self, tar_path: &Path) -> Result<()>;
 
     fn sync_directory(&self, local_path: &Path, remote_path: &Path) -> Result<()>;
 

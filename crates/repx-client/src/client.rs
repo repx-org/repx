@@ -243,7 +243,8 @@ impl Client {
         }
 
         let source_path = source.path();
-        let source_path_abs = fs_err::canonicalize(source_path).unwrap_or(source_path.to_path_buf());
+        let source_path_abs =
+            fs_err::canonicalize(source_path).unwrap_or(source_path.to_path_buf());
         let lab_hash = {
             let mut hasher = Sha256::new();
             hasher.update(source_path_abs.to_string_lossy().as_bytes());
@@ -312,7 +313,8 @@ impl Client {
             .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
 
         let source_path = self.lab_source.path();
-        let source_path_abs = fs_err::canonicalize(source_path).unwrap_or(source_path.to_path_buf());
+        let source_path_abs =
+            fs_err::canonicalize(source_path).unwrap_or(source_path.to_path_buf());
         let lab_hash = {
             let mut hasher = Sha256::new();
             hasher.update(source_path_abs.to_string_lossy().as_bytes());
