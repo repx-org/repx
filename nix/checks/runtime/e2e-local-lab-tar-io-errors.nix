@@ -67,8 +67,9 @@ pkgs.testers.runNixOSTest {
     if not run_args:
         raise Exception("No simple leaf job found!")
 
-    machine.succeed("mkdir -p /read-only-local")
-    machine.succeed("chmod 555 /read-only-local")
+    machine.succeed("mkdir -p /read-only-local /read-only-source")
+    machine.succeed("mount --bind /read-only-source /read-only-local")
+    machine.succeed("mount -o remount,ro,bind /read-only-local")
 
     config = f"""
     submission_target = "local"
@@ -98,7 +99,7 @@ pkgs.testers.runNixOSTest {
 
         error_lower = output.lower()
         has_path = "/read-only-local" in output
-        has_permission = "permission denied" in error_lower or "read-only" in error_lower
+        has_permission = "permission denied" in error_lower or "read-only" in error_lower or "read-only file system" in error_lower
         has_context = any(op in error_lower for op in [
             "create_dir", "mkdir", "extract", "write", "tar",
             "permission", "read-only", "failed"
