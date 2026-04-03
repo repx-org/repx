@@ -3,10 +3,6 @@ name = "repx-runner"
 version = { workspace = true }
 edition = { workspace = true }
 
-[[bin]]
-name = "repx-runner"
-path = "src/main.rs"
-
 [dependencies]
 repx-core = { workspace = true }
 repx-client = { workspace = true }

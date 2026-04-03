@@ -114,14 +114,14 @@ pkgs.testers.runNixOSTest {
 
     with subtest("Node-local extraction has real files, not dangling symlinks"):
         lab_entries = machine.succeed(
-            f"find {node_local}/repx/labs -maxdepth 3 -type f | head -5 2>/dev/null"
+            f"find {node_local}/repx/labs -maxdepth 3 -type f 2>/dev/null | head -5; true"
         ).strip()
         print(f"Sample real files in extraction: {lab_entries}")
         if not lab_entries:
             raise Exception("No real files in extraction — tar may have packaged a symlink!")
 
         host_tools = machine.succeed(
-            f"find {node_local}/repx/labs -path '*/host-tools/*/bin/*' -type f -o -path '*/host-tools/*/bin/*' -type l 2>/dev/null | head -3"
+            f"find {node_local}/repx/labs \\( -path '*/host-tools/*/bin/*' -type f -o -path '*/host-tools/*/bin/*' -type l \\) 2>/dev/null | head -3; true"
         ).strip()
         print(f"Host-tools in extraction: {host_tools}")
         if not host_tools:
