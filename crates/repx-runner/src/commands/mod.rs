@@ -1,6 +1,6 @@
 use crate::error::CliError;
 use repx_client::Client;
-use repx_core::{errors::CoreError, model::ExecutionType};
+use repx_core::{errors::CoreError, lab::LabSource, model::ExecutionType};
 use repx_executor::{ImageTag, Runtime};
 use std::path::Path;
 
@@ -60,7 +60,7 @@ pub(crate) fn parse_runtime(
 }
 
 pub struct AppContext<'a> {
-    pub lab_path: &'a Path,
+    pub source: &'a LabSource,
     pub client: &'a Client,
     pub submission_target: &'a str,
 }

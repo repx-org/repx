@@ -183,6 +183,59 @@ impl ArtifactSync for LocalTarget {
         Ok(())
     }
 
+    fn sync_lab_from_tar(&self, tar_path: &Path) -> Result<()> {
+        let dest_path = self.artifacts_base_path();
+        fs_err::create_dir_all(&dest_path).map_err(|e| ClientError::Config(CoreError::Io(e)))?;
+
+        let mut cmd = Command::new(self.tool("tar"));
+        cmd.arg("xf")
+            .arg(tar_path)
+            .arg("--strip-components=1")
+            .arg("-C")
+            .arg(&dest_path);
+
+        repx_core::logging::log_and_print_command(&cmd);
+        let output = cmd
+            .output()
+            .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(ClientError::Config(CoreError::CommandFailed(format!(
+                "tar extraction for lab sync failed: {}",
+                stderr
+            ))));
+        }
+        Ok(())
+    }
+
+    fn sync_lab_metadata_from_tar(&self, tar_path: &Path) -> Result<()> {
+        let dest_path = self.artifacts_base_path();
+        fs_err::create_dir_all(&dest_path).map_err(|e| ClientError::Config(CoreError::Io(e)))?;
+
+        let mut cmd = Command::new(self.tool("tar"));
+        cmd.arg("xf")
+            .arg(tar_path)
+            .arg("--strip-components=1")
+            .arg("--exclude=*/jobs")
+            .arg("-C")
+            .arg(&dest_path);
+
+        repx_core::logging::log_and_print_command(&cmd);
+        let output = cmd
+            .output()
+            .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(ClientError::Config(CoreError::CommandFailed(format!(
+                "tar extraction for lab metadata sync failed: {}",
+                stderr
+            ))));
+        }
+        Ok(())
+    }
+
     fn sync_file(&self, local_path: &Path, remote_path: &Path) -> Result<()> {
         if let Some(parent) = remote_path.parent() {
             fs_err::create_dir_all(parent).map_err(|e| ClientError::Config(CoreError::Io(e)))?;

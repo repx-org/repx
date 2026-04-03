@@ -3,6 +3,7 @@ use crate::error::Result;
 use crate::targets::Target;
 use repx_core::{
     engine,
+    lab::LabSource,
     model::{Job, JobId, Lab, RunId, StageType},
 };
 use sha2::{Digest, Sha256};
@@ -11,18 +12,25 @@ use std::path::Path;
 use std::process::Command;
 use std::sync::Arc;
 
-pub fn generate_project_id(lab_path: &Path) -> String {
-    let lab_path_abs = fs_err::canonicalize(lab_path).unwrap_or_else(|_| lab_path.to_path_buf());
+pub fn generate_project_id(source: &LabSource) -> String {
+    let source_path = source.path();
+    let source_path_abs =
+        fs_err::canonicalize(source_path).unwrap_or_else(|_| source_path.to_path_buf());
     let abs_hash = format!(
         "{:x}",
-        Sha256::digest(lab_path_abs.to_string_lossy().as_bytes())
+        Sha256::digest(source_path_abs.to_string_lossy().as_bytes())
     );
+
+    let git_dir = match source {
+        LabSource::Directory(p) => p.clone(),
+        LabSource::Tar(p) => p.parent().unwrap_or(Path::new(".")).to_path_buf(),
+    };
 
     let remote_hash = match Command::new("git")
         .arg("remote")
         .arg("get-url")
         .arg("origin")
-        .current_dir(lab_path)
+        .current_dir(&git_dir)
         .output()
     {
         Ok(output) if output.status.success() => {
@@ -95,7 +103,7 @@ pub fn collect_images_to_sync(
 }
 
 pub fn sync_images(
-    lab_path: &Path,
+    source: &LabSource,
     target: &Arc<dyn Target>,
     local_target: &Arc<dyn Target>,
     images_to_sync: &HashSet<(std::path::PathBuf, String)>,
@@ -105,14 +113,50 @@ pub fn sync_images(
         return Ok(());
     }
 
-    let lab_path_abs = fs_err::canonicalize(lab_path).unwrap_or_else(|_| lab_path.to_path_buf());
     let local_cache_root = local_target.base_path().join("cache");
 
     for (relative_path, tag) in images_to_sync {
         let full_path = if relative_path.is_absolute() {
             relative_path.clone()
         } else {
-            lab_path_abs.join(relative_path)
+            match source {
+                LabSource::Directory(dir) => {
+                    let dir_abs =
+                        fs_err::canonicalize(dir).unwrap_or_else(|_| dir.to_path_buf());
+                    dir_abs.join(relative_path)
+                }
+                LabSource::Tar(tar_path) => {
+                    let image_cache = local_cache_root.join("lab-images");
+                    fs_err::create_dir_all(&image_cache)
+                        .map_err(|e| crate::error::ClientError::Config(repx_core::errors::CoreError::Io(e)))?;
+                    let dest = image_cache.join(
+                        relative_path
+                            .file_name()
+                            .unwrap_or(std::ffi::OsStr::new("image")),
+                    );
+                    if !dest.exists() {
+                        let status = std::process::Command::new("tar")
+                            .arg("xf")
+                            .arg(tar_path)
+                            .arg("--strip-components=1")
+                            .arg("-C")
+                            .arg(&image_cache)
+                            .arg(format!(
+                                "*/{}",
+                                relative_path.to_string_lossy()
+                            ))
+                            .status()
+                            .map_err(|e| crate::error::ClientError::Config(repx_core::errors::CoreError::Io(e)))?;
+                        if !status.success() {
+                            tracing::warn!(
+                                "Failed to extract image '{}' from tar, trying full path",
+                                relative_path.display()
+                            );
+                        }
+                    }
+                    dest
+                }
+            }
         };
         target.sync_image_incrementally(&full_path, tag, &local_cache_root)?;
         if let Some(sender) = event_sender {
@@ -129,7 +173,7 @@ pub fn sync_images(
 
 pub fn generate_inputs_for_jobs(
     lab: &Lab,
-    lab_path: &Path,
+    source: &LabSource,
     jobs_to_run: &HashMap<JobId, &Job>,
     target: Arc<dyn Target>,
 ) -> Result<()> {
@@ -141,7 +185,7 @@ pub fn generate_inputs_for_jobs(
         };
         crate::inputs::generate_and_write_inputs_json(
             lab,
-            lab_path,
+            source,
             job,
             job_id,
             target.clone(),

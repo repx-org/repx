@@ -38,7 +38,7 @@ fn test_data_only_local_target_initialization() {
         targets,
     };
 
-    let _client = Client::new(config, lab_path.clone()).expect("Client initialization failed");
+    let _client = Client::new(config, repx_core::lab::LabSource::from_path(&lab_path)).expect("Client initialization failed");
 
     assert!(base_path.join("repx").join("state").exists());
 }
@@ -56,7 +56,7 @@ fn test_missing_local_target_error() {
         targets: BTreeMap::new(),
     };
 
-    match Client::new(config, lab_path) {
+    match Client::new(config, repx_core::lab::LabSource::from_path(&lab_path)) {
         Ok(_) => panic!("Client initialization should have failed"),
         Err(e) => {
             let err_msg = e.to_string();

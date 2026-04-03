@@ -7,22 +7,24 @@ use repx_core::{
     constants::{dirs, targets},
     engine::JobStatus,
     errors::{CoreError, DomainError},
-    lab,
+    lab::LabSource,
     model::{JobId, Lab, RunId},
     resolver,
 };
 use serde_json::Value;
 use std::collections::HashMap;
-use std::path::Path;
 use std::str::FromStr;
 
-pub fn handle_list(args: ListArgs, lab_path: &Path, target: Option<&str>) -> Result<(), CliError> {
-    let lab = lab::load_from_path(lab_path)?;
-
+pub fn handle_list(
+    args: ListArgs,
+    lab: &Lab,
+    source: &LabSource,
+    target: Option<&str>,
+) -> Result<(), CliError> {
     match args.entity.unwrap_or(ListEntity::Runs { name: None }) {
         ListEntity::Runs { name } => match name {
             Some(n) => list_jobs(
-                &lab,
+                lab,
                 &ListJobsArgs {
                     name: Some(n),
                     stage: None,
@@ -31,19 +33,19 @@ pub fn handle_list(args: ListArgs, lab_path: &Path, target: Option<&str>) -> Res
                     param: vec![],
                     group_by_stage: false,
                 },
-                lab_path,
+                source,
                 target,
             ),
-            None => list_runs(&lab, lab_path),
+            None => list_runs(lab, source),
         },
-        ListEntity::Jobs(job_args) => list_jobs(&lab, &job_args, lab_path, target),
-        ListEntity::Dependencies { job_id } => list_dependencies(&lab, &job_id),
-        ListEntity::Groups { name } => list_groups(&lab, name.as_deref()),
+        ListEntity::Jobs(job_args) => list_jobs(lab, &job_args, source, target),
+        ListEntity::Dependencies { job_id } => list_dependencies(lab, &job_id),
+        ListEntity::Groups { name } => list_groups(lab, name.as_deref()),
     }
 }
 
-fn list_runs(lab: &Lab, lab_path: &Path) -> Result<(), CliError> {
-    println!("Available runs in '{}':", lab_path.display());
+fn list_runs(lab: &Lab, source: &LabSource) -> Result<(), CliError> {
+    println!("Available runs in '{}':", source);
 
     let mut run_ids: Vec<_> = lab.runs.keys().collect();
     run_ids.sort();
@@ -66,7 +68,7 @@ struct ListJobsContext {
 fn list_jobs(
     lab: &Lab,
     args: &ListJobsArgs,
-    lab_path: &Path,
+    source: &LabSource,
     target: Option<&str>,
 ) -> Result<(), CliError> {
     let needs_config = args.output_paths || !args.status.is_empty();
@@ -89,7 +91,7 @@ fn list_jobs(
         };
 
         let statuses = if !args.status.is_empty() {
-            let client = Client::new(config.clone(), lab_path.to_path_buf()).map_err(|e| {
+            let client = Client::new(config.clone(), source.clone()).map_err(|e| {
                 CliError::Config(CoreError::InvalidConfig {
                     detail: format!("Failed to initialize client: {}", e),
                 })
@@ -258,7 +260,7 @@ fn list_jobs(
                         param: args.param.clone(),
                         group_by_stage: args.group_by_stage,
                     };
-                    return list_jobs(lab, &new_args, lab_path, target);
+                    return list_jobs(lab, &new_args, source, target);
                 }
                 return Ok(());
             }

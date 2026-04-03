@@ -2,9 +2,9 @@ use crate::error::{ClientError, Result};
 use repx_core::{
     constants::dirs,
     errors::CoreError,
+    lab::LabSource,
     model::{Job, JobId, Lab},
 };
-use std::path::Path;
 use std::sync::Arc;
 
 pub fn generate_and_write_parameters_json(
@@ -38,7 +38,7 @@ pub fn generate_and_write_parameters_json(
 
 pub fn generate_and_write_inputs_json(
     lab: &Lab,
-    local_lab_path: &Path,
+    source: &LabSource,
     job: &Job,
     job_id: &JobId,
     target: Arc<dyn crate::targets::Target>,
@@ -114,21 +114,47 @@ pub fn generate_and_write_inputs_json(
                 serde_json::Value::String(store_path),
             );
         } else if let Some(run_id) = &mapping.source_run {
-            let revision_dir = local_lab_path.join("revision");
             let suffix = format!("metadata-{}.json", run_id.as_str());
 
-            let mut found_filename = None;
-
-            if let Ok(entries) = fs_err::read_dir(&revision_dir) {
-                for entry in entries.flatten() {
-                    if let Some(name) = entry.file_name().to_str() {
-                        if name.ends_with(&suffix) {
-                            found_filename = Some(name.to_string());
-                            break;
+            let found_filename = match source {
+                LabSource::Directory(dir) => {
+                    let revision_dir = dir.join("revision");
+                    let mut found = None;
+                    if let Ok(entries) = fs_err::read_dir(&revision_dir) {
+                        for entry in entries.flatten() {
+                            if let Some(name) = entry.file_name().to_str() {
+                                if name.ends_with(&suffix) {
+                                    found = Some(name.to_string());
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    found
+                }
+                LabSource::Tar(tar_path) => {
+                    match repx_core::lab::list_tar_entries(tar_path, "revision/") {
+                        Ok(entries) => entries
+                            .into_iter()
+                            .filter_map(|e| {
+                                let filename = std::path::Path::new(&e)
+                                    .file_name()?
+                                    .to_str()?
+                                    .to_string();
+                                if filename.ends_with(&suffix) {
+                                    Some(filename)
+                                } else {
+                                    None
+                                }
+                            })
+                            .next(),
+                        Err(e) => {
+                            tracing::warn!("Failed to list tar entries for revision/: {}", e);
+                            None
                         }
                     }
                 }
-            }
+            };
 
             if let Some(filename) = found_filename {
                 let remote_path = target.artifacts_base_path().join("revision").join(filename);
