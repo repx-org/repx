@@ -505,6 +505,8 @@ pub struct Lab {
     pub host_tools_dir_name: String,
     #[serde(skip)]
     pub referenced_files: Vec<PathBuf>,
+    #[serde(skip)]
+    pub tar_dir_name: Option<String>,
 }
 
 impl Job {

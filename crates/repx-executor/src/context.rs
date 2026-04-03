@@ -129,17 +129,11 @@ impl<'a> RuntimeContext<'a> {
     }
 
     pub async fn get_temp_path(&self) -> PathBuf {
-        let temp_root = if self.local_artifacts_path().is_some() {
-            if let Some(local) = &self.request.node_local_path {
-                local.join("repx").join("temp")
-            } else if let Some(local_artifacts) = self.local_artifacts_path() {
-                local_artifacts
-                    .parent()
-                    .map(|p| p.join("temp"))
-                    .unwrap_or_else(|| self.request.base_path.join("repx").join("temp"))
-            } else {
-                self.request.base_path.join("repx").join("temp")
-            }
+        let temp_root = if let Some(local_artifacts) = self.local_artifacts_path() {
+            local_artifacts
+                .parent()
+                .map(|p| p.join("temp"))
+                .unwrap_or_else(|| self.request.base_path.join("repx").join("temp"))
         } else if let Some(local) = &self.request.node_local_path {
             local.join("repx").join("temp")
         } else {
@@ -151,14 +145,9 @@ impl<'a> RuntimeContext<'a> {
     }
 
     pub fn get_images_cache_dir(&self) -> PathBuf {
-        if self.local_artifacts_path().is_some() {
-            if let Some(local) = &self.request.node_local_path {
-                return local.join("repx").join("cache").join("images");
-            }
-            if let Some(local_artifacts) = self.local_artifacts_path() {
-                if let Some(parent) = local_artifacts.parent() {
-                    return parent.join("cache").join("images");
-                }
+        if let Some(local_artifacts) = self.local_artifacts_path() {
+            if let Some(parent) = local_artifacts.parent() {
+                return parent.join("cache").join("images");
             }
         }
         if let Some(local) = &self.request.node_local_path {
@@ -169,14 +158,9 @@ impl<'a> RuntimeContext<'a> {
     }
 
     pub fn get_capabilities_cache_dir(&self) -> PathBuf {
-        if self.local_artifacts_path().is_some() {
-            if let Some(local) = &self.request.node_local_path {
-                return local.join("repx").join("cache").join("capabilities");
-            }
-            if let Some(local_artifacts) = self.local_artifacts_path() {
-                if let Some(parent) = local_artifacts.parent() {
-                    return parent.join("cache").join("capabilities");
-                }
+        if let Some(local_artifacts) = self.local_artifacts_path() {
+            if let Some(parent) = local_artifacts.parent() {
+                return parent.join("cache").join("capabilities");
             }
         }
         if let Some(local) = &self.request.node_local_path {
@@ -199,6 +183,13 @@ impl<'a> RuntimeContext<'a> {
                     );
                     return local_path;
                 }
+                tracing::error!(
+                    "Local artifact not found: {} (expected at {}). \
+                     Check that the lab tar was extracted correctly to {:?}.",
+                    shared_path.display(),
+                    local_path.display(),
+                    local,
+                );
             }
         }
         shared_path.to_path_buf()

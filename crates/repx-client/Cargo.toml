@@ -16,6 +16,7 @@ whoami = { workspace = true }
 wildmatch = "2.6"
 tempfile = { workspace = true }
 sha2 = { workspace = true }
+tar = { workspace = true }
 toml = { workspace = true }
 num_cpus.workspace = true
 comfy-table = { workspace = true }

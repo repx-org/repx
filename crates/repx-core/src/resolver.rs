@@ -197,6 +197,7 @@ mod tests {
             host_tools_path: PathBuf::from("host-tools"),
             host_tools_dir_name: "host-tools".to_string(),
             referenced_files: Vec::new(),
+            tar_dir_name: None,
         }
     }
     #[test]

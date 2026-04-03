@@ -82,6 +82,13 @@ pub(crate) fn resolve_to_local_artifacts(
                 );
                 return local_path;
             }
+            tracing::error!(
+                "Local artifact not found: {} (expected at {}). \
+                 Check that the lab tar was extracted correctly to {:?}.",
+                path.display(),
+                local_path.display(),
+                local,
+            );
         }
     }
     path.to_path_buf()

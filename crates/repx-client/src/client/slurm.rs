@@ -52,26 +52,27 @@ fn generate_repx_invoker_script(
 
     if let Some(info) = lab_tar_info {
         s.push_str("# -- Node-local lab tar bootstrap --\n");
-        s.push_str(&format!("LAB_TAR=\"{}\"\n", info.remote_tar_path.display()));
         s.push_str(&format!(
-            "LOCAL_BASE=\"{}\"\n",
+            "export LAB_TAR=\"{}\"\n",
+            info.remote_tar_path.display()
+        ));
+        s.push_str(&format!(
+            "export LOCAL_BASE=\"{}\"\n",
             info.node_local_base.display()
         ));
         s.push_str(&format!(
-            "MARKER=\"$LOCAL_BASE/.extracted-{}\"\n",
+            "export MARKER=\"$LOCAL_BASE/.extracted-{}\"\n",
             info.content_hash
         ));
-        s.push_str("LOCK_FILE=\"$LOCAL_BASE/.lock\"\n");
         s.push_str("mkdir -p \"$LOCAL_BASE\"\n");
-        s.push_str("(\n");
-        s.push_str("  flock -x 200\n");
+        s.push_str("flock -x \"$LOCAL_BASE/.lock\" sh -c '\n");
         s.push_str("  if [ ! -f \"$MARKER\" ]; then\n");
         s.push_str("    echo \"[repx] Extracting lab tar to node-local storage...\"\n");
         s.push_str("    tar xf \"$LAB_TAR\" -C \"$LOCAL_BASE/\"\n");
         s.push_str("    touch \"$MARKER\"\n");
         s.push_str("    echo \"[repx] Lab tar extraction complete.\"\n");
         s.push_str("  fi\n");
-        s.push_str(") 200>\"$LOCK_FILE\"\n");
+        s.push_str("'\n");
         s.push_str(&format!(
             "export REPX_LOCAL_ARTIFACTS=\"$LOCAL_BASE/{}\"\n",
             info.lab_dir_name
