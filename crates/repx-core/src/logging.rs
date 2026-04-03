@@ -317,6 +317,10 @@ pub fn init_session_logger(config: &LoggingConfig) -> Result<(), CoreError> {
     init_logger(config, "repx_", "repx.log")
 }
 
+pub fn init_internal_logger(config: &LoggingConfig) -> Result<(), CoreError> {
+    init_logger(config, "repx-internal_", "repx-internal.log")
+}
+
 pub fn init_stderr_logger() {
     let env_filter = EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| EnvFilter::new(get_default_log_level().to_string()));

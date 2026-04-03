@@ -19,6 +19,46 @@ fn create_client(config: &config::Config, lab_path: &std::path::Path) -> Result<
     })
 }
 
+fn resolve_lab_path(
+    lab: &std::path::Path,
+) -> Result<(std::path::PathBuf, Option<tempfile::TempDir>), CliError> {
+    if lab.is_file() {
+        let temp_dir = tempfile::tempdir().map_err(|e| CliError::Config(CoreError::Io(e)))?;
+        tracing::debug!("Extracting lab tar {} ...", lab.display());
+        let status = std::process::Command::new("tar")
+            .arg("xf")
+            .arg(lab)
+            .arg("-C")
+            .arg(temp_dir.path())
+            .status()
+            .map_err(|e| CliError::Config(CoreError::Io(e)))?;
+        if !status.success() {
+            return Err(CliError::Config(CoreError::InvalidConfig {
+                detail: format!("Failed to extract lab tar: {}", lab.display()),
+            }));
+        }
+        let mut entries =
+            std::fs::read_dir(temp_dir.path()).map_err(|e| CliError::Config(CoreError::Io(e)))?;
+        let first = entries
+            .next()
+            .ok_or_else(|| {
+                CliError::Config(CoreError::InvalidConfig {
+                    detail: "Lab tar is empty".to_string(),
+                })
+            })?
+            .map_err(|e| CliError::Config(CoreError::Io(e)))?;
+        let has_more = entries.next().is_some();
+        let extracted = if !has_more && first.path().is_dir() {
+            first.path()
+        } else {
+            temp_dir.path().to_path_buf()
+        };
+        Ok((extracted, Some(temp_dir)))
+    } else {
+        Ok((lab.to_path_buf(), None))
+    }
+}
+
 pub fn run(cli: Cli) -> Result<(), CliError> {
     tracing::trace!(
         "repx invoked with: {:?}",
@@ -37,34 +77,45 @@ pub fn run(cli: Cli) -> Result<(), CliError> {
             let rt = commands::create_tokio_runtime()?;
             rt.block_on(commands::gc::async_handle_internal_gc(args))
         }
-        Commands::List(args) => commands::list::handle_list(args, &cli.lab, cli.target.as_deref()),
-        Commands::Show(args) => commands::show::handle_show(args, &cli.lab, cli.target.as_deref()),
-        Commands::TraceParams(args) => commands::trace::handle_trace_params(args, &cli.lab),
+        Commands::List(args) => {
+            let (lab_path, _tempdir) = resolve_lab_path(&cli.lab)?;
+            commands::list::handle_list(args, &lab_path, cli.target.as_deref())
+        }
+        Commands::Show(args) => {
+            let (lab_path, _tempdir) = resolve_lab_path(&cli.lab)?;
+            commands::show::handle_show(args, &lab_path, cli.target.as_deref())
+        }
+        Commands::TraceParams(args) => {
+            let (lab_path, _tempdir) = resolve_lab_path(&cli.lab)?;
+            commands::trace::handle_trace_params(args, &lab_path)
+        }
         Commands::Log(args) => {
+            let (lab_path, _tempdir) = resolve_lab_path(&cli.lab)?;
             let config = config::load_config()?;
-            let client = create_client(&config, &cli.lab)?;
+            let client = create_client(&config, &lab_path)?;
             let target_name = cli
                 .target
                 .as_deref()
                 .or(config.submission_target.as_deref())
                 .unwrap_or(targets::LOCAL);
             let context = AppContext {
-                lab_path: &cli.lab,
+                lab_path: &lab_path,
                 client: &client,
                 submission_target: target_name,
             };
             commands::log::handle_log(args, &context)
         }
         Commands::Gc(args) => {
+            let (lab_path, _tempdir) = resolve_lab_path(&cli.lab)?;
             let config = config::load_config()?;
-            let client = create_client(&config, &cli.lab)?;
+            let client = create_client(&config, &lab_path)?;
             let submission_target = args
                 .target
                 .clone()
                 .or(config.submission_target.clone())
                 .unwrap_or_else(|| targets::LOCAL.to_string());
             let context = AppContext {
-                lab_path: &cli.lab,
+                lab_path: &lab_path,
                 client: &client,
                 submission_target: &submission_target,
             };
@@ -74,37 +125,7 @@ pub fn run(cli: Cli) -> Result<(), CliError> {
             let config = config::load_config()?;
             let resources = config::load_resources(cli.resources.as_deref())?;
 
-            let (lab_path, _lab_tar_tempdir) = if cli.lab.is_file() {
-                let temp_dir =
-                    tempfile::tempdir().map_err(|e| CliError::Config(CoreError::Io(e)))?;
-                println!("- Extracting lab tar {} ...", cli.lab.display());
-                let status = std::process::Command::new("tar")
-                    .arg("xf")
-                    .arg(&cli.lab)
-                    .arg("-C")
-                    .arg(temp_dir.path())
-                    .status()
-                    .map_err(|e| CliError::Config(CoreError::Io(e)))?;
-                if !status.success() {
-                    return Err(CliError::Config(CoreError::InvalidConfig {
-                        detail: format!("Failed to extract lab tar: {}", cli.lab.display()),
-                    }));
-                }
-                let mut entries = std::fs::read_dir(temp_dir.path())
-                    .map_err(|e| CliError::Config(CoreError::Io(e)))?;
-                let extracted = entries
-                    .next()
-                    .ok_or_else(|| {
-                        CliError::Config(CoreError::InvalidConfig {
-                            detail: "Lab tar is empty".to_string(),
-                        })
-                    })?
-                    .map_err(|e| CliError::Config(CoreError::Io(e)))?
-                    .path();
-                (extracted, Some(temp_dir))
-            } else {
-                (cli.lab.clone(), None)
-            };
+            let (lab_path, _lab_tar_tempdir) = resolve_lab_path(&cli.lab)?;
 
             let client = create_client(&config, &lab_path)?;
 
