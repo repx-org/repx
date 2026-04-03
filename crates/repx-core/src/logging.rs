@@ -360,7 +360,7 @@ fn format_command_for_display(command: &Command) -> String {
 
 pub fn log_and_print_command(command: &Command) {
     let command_str = format_command_for_display(command);
-    tracing::debug!("[CMD] {}", command_str);
+    tracing::info!("[CMD] {}", command_str);
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]

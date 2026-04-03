@@ -1,4 +1,5 @@
 #![allow(dead_code)]
+
 use assert_cmd::Command as AssertCommand;
 use repx_test_utils::harness::TestContext;
 use std::ops::{Deref, DerefMut};
@@ -26,8 +27,10 @@ impl TestHarness {
         }
     }
 
+    #[allow(clippy::expect_used, deprecated)]
     pub fn cmd(&self) -> AssertCommand {
-        let mut cmd = AssertCommand::new(env!("CARGO_BIN_EXE_repx-runner"));
+        let mut cmd = AssertCommand::cargo_bin("repx")
+            .expect("repx binary not found — ensure repx-cli is built");
         cmd.env("XDG_CONFIG_HOME", &self.context.config_dir);
         cmd.env("RUST_BACKTRACE", "1");
         cmd.arg("--lab").arg(&self.context.lab_path);

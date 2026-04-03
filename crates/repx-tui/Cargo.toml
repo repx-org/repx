@@ -7,10 +7,6 @@ edition = { workspace = true }
 name = "repx_tui"
 path = "src/lib.rs"
 
-[[bin]]
-name = "repx-tui"
-path = "src/main.rs"
-
 [dependencies]
 repx-core = { workspace = true }
 repx-client = { workspace = true }

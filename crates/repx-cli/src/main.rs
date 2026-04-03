@@ -212,6 +212,12 @@ fn main() {
         }
     };
 
+    repx_core::logging::set_log_level_from_env();
+
+    if cli.verbose > 0 {
+        repx_core::logging::set_log_level(repx_core::logging::LogLevel::from(cli.verbose + 1));
+    }
+
     match command {
         Commands::Runner(cmd) => {
             let is_internal = matches!(
@@ -231,6 +237,22 @@ fn main() {
                     eprintln!(
                         "{}",
                         format!("[ERROR] Failed to initialize session logger: {}", e).red()
+                    );
+                }
+            } else {
+                let logging_config = repx_core::config::load_config()
+                    .map(|c| c.logging)
+                    .unwrap_or_default();
+
+                if let Err(e) = repx_core::logging::init_internal_logger(&logging_config) {
+                    repx_core::logging::init_stderr_logger();
+                    eprintln!(
+                        "{}",
+                        format!(
+                            "[WARN] Failed to initialize internal logger (falling back to stderr): {}",
+                            e
+                        )
+                        .red()
                     );
                 }
             }

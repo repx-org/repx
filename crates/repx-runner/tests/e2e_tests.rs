@@ -1,4 +1,4 @@
-#![allow(dead_code, clippy::expect_used)]
+#![allow(clippy::expect_used)]
 
 mod harness;
 use harness::TestHarness;
@@ -400,8 +400,10 @@ fn create_lab_tar(harness: &TestHarness) -> std::path::PathBuf {
     tar_path
 }
 
+#[allow(deprecated)]
 fn tar_cmd(harness: &TestHarness, tar_path: &std::path::Path) -> assert_cmd::Command {
-    let mut cmd = assert_cmd::Command::new(env!("CARGO_BIN_EXE_repx-runner"));
+    let mut cmd = assert_cmd::Command::cargo_bin("repx")
+        .expect("repx binary not found — ensure repx-cli is built");
     cmd.env("XDG_CONFIG_HOME", &harness.context.config_dir);
     cmd.env("RUST_BACKTRACE", "1");
     cmd.arg("--lab").arg(tar_path);
