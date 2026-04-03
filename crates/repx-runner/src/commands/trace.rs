@@ -1,13 +1,11 @@
 use crate::cli::TraceParamsArgs;
 use crate::error::CliError;
 use repx_core::{
-    lab,
     model::{Job, JobId, Lab},
     resolver,
 };
 use serde_json::{Map, Value};
 use std::collections::{HashMap, HashSet};
-use std::path::Path;
 
 pub fn compute_effective_params(lab: &Lab, job_id: &JobId) -> Value {
     let mut memo: HashMap<&JobId, Value> = HashMap::new();
@@ -98,19 +96,17 @@ pub fn compute_all_effective_params(lab: &Lab) -> HashMap<JobId, Value> {
     result
 }
 
-pub fn handle_trace_params(args: TraceParamsArgs, lab_path: &Path) -> Result<(), CliError> {
-    let lab = lab::load_from_path(lab_path)?;
-
+pub fn handle_trace_params(args: TraceParamsArgs, lab: &Lab) -> Result<(), CliError> {
     let results: HashMap<JobId, Value> = if let Some(job_id_query) = &args.job_id {
         let run_id = repx_core::model::RunId::from(job_id_query.clone());
-        let job_id = resolver::resolve_target_job_id(&lab, &run_id)?;
+        let job_id = resolver::resolve_target_job_id(lab, &run_id)?;
 
-        let effective = compute_effective_params(&lab, job_id);
+        let effective = compute_effective_params(lab, job_id);
         let mut map = HashMap::new();
         map.insert(job_id.clone(), effective);
         map
     } else {
-        compute_all_effective_params(&lab)
+        compute_all_effective_params(lab)
     };
 
     let output: HashMap<String, Value> = results

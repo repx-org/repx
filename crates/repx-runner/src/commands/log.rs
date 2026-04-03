@@ -2,12 +2,12 @@ use crate::cli::LogArgs;
 use crate::commands::AppContext;
 use crate::error::CliError;
 use repx_client::client::LogType;
-use repx_core::{lab, model::RunId, resolver};
+use repx_core::{model::RunId, resolver};
 
 pub fn handle_log(args: LogArgs, context: &AppContext) -> Result<(), CliError> {
-    let lab = lab::load_from_path(context.lab_path)?;
+    let lab = context.client.lab();
     let target_input = RunId::from(args.job_id.clone());
-    let job_id = resolver::resolve_target_job_id(&lab, &target_input)?;
+    let job_id = resolver::resolve_target_job_id(lab, &target_input)?;
 
     let log_type = if args.stderr {
         LogType::Stderr

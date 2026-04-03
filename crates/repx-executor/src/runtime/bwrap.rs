@@ -677,7 +677,7 @@ impl BwrapRuntime {
             rootfs_path = %rootfs_path.display(),
             "Building bwrap command"
         );
-        tracing::debug!(command = ?cmd.as_std(), "Full bwrap command");
+        tracing::info!(command = ?cmd.as_std(), "Full bwrap command");
 
         Ok(cmd)
     }

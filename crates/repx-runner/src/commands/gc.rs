@@ -273,7 +273,7 @@ fn handle_gc_status(target_arg: Option<&str>, context: &AppContext) -> Result<()
         .ok_or_else(|| CliError::Domain(DomainError::TargetNotFound(target_name.to_string())))?;
 
     let current_lab =
-        lab::load_from_path(context.lab_path).map_err(|e| CliError::ExecutionFailed {
+        lab::load(context.source).map_err(|e| CliError::ExecutionFailed {
             message: "Failed to load lab metadata".to_string(),
             log_path: None,
             log_summary: e.to_string(),
@@ -346,7 +346,7 @@ fn handle_gc_pin(
         Some(h) => h,
         None => {
             let lab =
-                lab::load_from_path(context.lab_path).map_err(|e| CliError::ExecutionFailed {
+                lab::load(context.source).map_err(|e| CliError::ExecutionFailed {
                     message: "Failed to load lab metadata. Provide a lab hash explicitly."
                         .to_string(),
                     log_path: None,

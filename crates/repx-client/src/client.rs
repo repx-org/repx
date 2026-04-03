@@ -10,6 +10,7 @@ use repx_core::{
     engine,
     errors::CoreError,
     lab,
+    lab::LabSource,
     model::{Job, JobId, Lab, RunId, SchedulerType},
 };
 use sha2::{Digest, Sha256};
@@ -190,15 +191,15 @@ pub struct SubmissionTarget {
 #[derive(Clone)]
 pub struct Client {
     pub(crate) config: Config,
-    pub(crate) lab_path: PathBuf,
+    pub(crate) lab_source: LabSource,
     pub(crate) lab: Lab,
     pub(crate) targets: HashMap<String, Arc<dyn Target>>,
     pub(crate) slurm_map: SlurmIdMap,
 }
 
 impl Client {
-    pub fn new(config: Config, lab_path: PathBuf) -> Result<Self> {
-        let lab = lab::load_from_path(&lab_path)?;
+    pub fn new(config: Config, source: LabSource) -> Result<Self> {
+        let lab = lab::load(&source)?;
 
         let local_base_path = if let Some(local_target) = config.targets.get(targets::LOCAL) {
             local_target.base_path.clone()
@@ -241,10 +242,11 @@ impl Client {
             targets.insert(name.clone(), target);
         }
 
-        let lab_path_abs = fs_err::canonicalize(&lab_path).unwrap_or(lab_path.clone());
+        let source_path = source.path();
+        let source_path_abs = fs_err::canonicalize(source_path).unwrap_or(source_path.to_path_buf());
         let lab_hash = {
             let mut hasher = Sha256::new();
-            hasher.update(lab_path_abs.to_string_lossy().as_bytes());
+            hasher.update(source_path_abs.to_string_lossy().as_bytes());
             format!("{:x}", hasher.finalize())
         };
         let map_filename = format!("slurm_map_{}.json", lab_hash);
@@ -275,7 +277,7 @@ impl Client {
 
         Ok(Self {
             config,
-            lab_path,
+            lab_source: source,
             lab,
             targets,
             slurm_map: Arc::new(Mutex::new(slurm_map_data)),
@@ -290,8 +292,8 @@ impl Client {
         &self.lab
     }
 
-    pub fn lab_path(&self) -> &Path {
-        &self.lab_path
+    pub fn lab_source(&self) -> &LabSource {
+        &self.lab_source
     }
 
     pub fn get_target(&self, name: &str) -> Option<Arc<dyn Target>> {
@@ -309,10 +311,11 @@ impl Client {
         fs_err::create_dir_all(&client_state_dir)
             .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
 
-        let lab_path_abs = fs_err::canonicalize(&self.lab_path).unwrap_or(self.lab_path.clone());
+        let source_path = self.lab_source.path();
+        let source_path_abs = fs_err::canonicalize(source_path).unwrap_or(source_path.to_path_buf());
         let lab_hash = {
             let mut hasher = Sha256::new();
-            hasher.update(lab_path_abs.to_string_lossy().as_bytes());
+            hasher.update(source_path_abs.to_string_lossy().as_bytes());
             format!("{:x}", hasher.finalize())
         };
         let map_filename = format!("slurm_map_{}.json", lab_hash);
@@ -384,7 +387,7 @@ impl Client {
             .get(target_name)
             .ok_or_else(|| ClientError::TargetNotFound(target_name.to_string()))?;
 
-        let project_id = submission::generate_project_id(&self.lab_path);
+        let project_id = submission::generate_project_id(&self.lab_source);
 
         let full_dependency_set = submission::resolve_dependency_graph(&self.lab, &run_specs)?;
         if full_dependency_set.is_empty() {
@@ -413,42 +416,41 @@ impl Client {
                 .get_target(targets::LOCAL)
                 .ok_or(ClientError::Config(CoreError::MissingLocalTarget))?;
 
-            let lab_is_tar = self.lab_path.is_file();
             let tar_filename = format!("{}.tar", self.lab.content_hash);
 
-            let local_tar_path = if lab_is_tar {
-                self.lab_path.clone()
-            } else {
-                let local_temp_dir = local_target.base_path().join("repx").join("temp");
-                std::fs::create_dir_all(&local_temp_dir)
-                    .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
-                let tar_path = local_temp_dir.join(&tar_filename);
+            let local_tar_path = match &self.lab_source {
+                LabSource::Tar(tar_path) => tar_path.clone(),
+                LabSource::Directory(dir_path) => {
+                    let local_temp_dir = local_target.base_path().join("repx").join("temp");
+                    std::fs::create_dir_all(&local_temp_dir)
+                        .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
+                    let tar_path = local_temp_dir.join(&tar_filename);
 
-                if !tar_path.exists() {
-                    let resolved_lab = self
-                        .lab_path
-                        .canonicalize()
-                        .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
-                    let status = std::process::Command::new("tar")
-                        .arg("cf")
-                        .arg(&tar_path)
-                        .arg("-C")
-                        .arg(resolved_lab.parent().unwrap_or(Path::new("/")))
-                        .arg(
-                            resolved_lab
-                                .file_name()
-                                .unwrap_or(std::ffi::OsStr::new("result")),
-                        )
-                        .status()
-                        .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
-                    if !status.success() {
-                        return Err(ClientError::Config(CoreError::InvalidConfig {
-                            detail: format!("Failed to create lab tar at {:?}", tar_path),
-                        }));
+                    if !tar_path.exists() {
+                        let resolved_lab = dir_path
+                            .canonicalize()
+                            .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
+                        let status = std::process::Command::new("tar")
+                            .arg("cf")
+                            .arg(&tar_path)
+                            .arg("-C")
+                            .arg(resolved_lab.parent().unwrap_or(Path::new("/")))
+                            .arg(
+                                resolved_lab
+                                    .file_name()
+                                    .unwrap_or(std::ffi::OsStr::new("result")),
+                            )
+                            .status()
+                            .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
+                        if !status.success() {
+                            return Err(ClientError::Config(CoreError::InvalidConfig {
+                                detail: format!("Failed to create lab tar at {:?}", tar_path),
+                            }));
+                        }
+                        tracing::info!("Created lab tar: {:?}", tar_path);
                     }
-                    tracing::info!("Created lab tar: {:?}", tar_path);
+                    tar_path
                 }
-                tar_path
             };
 
             send(ClientEvent::SyncingLabTar);
@@ -463,14 +465,15 @@ impl Client {
                     .join("labs")
                     .join(&self.lab.content_hash),
                 content_hash: self.lab.content_hash.clone(),
-                lab_dir_name: self
-                    .lab_path
-                    .canonicalize()
-                    .unwrap_or_else(|_| self.lab_path.clone())
-                    .file_name()
-                    .unwrap_or(std::ffi::OsStr::new("result"))
-                    .to_string_lossy()
-                    .into_owned(),
+                lab_dir_name: {
+                    let p = self.lab_source.path();
+                    let canonical = p.canonicalize().unwrap_or_else(|_| p.to_path_buf());
+                    canonical
+                        .file_name()
+                        .unwrap_or(std::ffi::OsStr::new("result"))
+                        .to_string_lossy()
+                        .into_owned()
+                },
             };
             Some(lab_tar_info)
         } else {
@@ -478,10 +481,21 @@ impl Client {
         };
 
         send(ClientEvent::SyncingArtifacts { total: 1 });
-        if use_node_local {
-            target.sync_lab_root_metadata_only(&self.lab_path)?;
-        } else {
-            target.sync_lab_root(&self.lab_path)?;
+        match &self.lab_source {
+            LabSource::Tar(tar_path) => {
+                if use_node_local {
+                    target.sync_lab_metadata_from_tar(tar_path)?;
+                } else {
+                    target.sync_lab_from_tar(tar_path)?;
+                }
+            }
+            LabSource::Directory(dir_path) => {
+                if use_node_local {
+                    target.sync_lab_root_metadata_only(dir_path)?;
+                } else {
+                    target.sync_lab_root(dir_path)?;
+                }
+            }
         }
         send(ClientEvent::SyncingArtifactProgress {
             path: PathBuf::from("lab"),
@@ -518,7 +532,7 @@ impl Client {
                     .get(targets::LOCAL)
                     .ok_or(ClientError::Config(CoreError::MissingLocalTarget))?;
                 submission::sync_images(
-                    &self.lab_path,
+                    &self.lab_source,
                     target,
                     local_target,
                     &images_to_sync,
@@ -545,7 +559,7 @@ impl Client {
 
         submission::generate_inputs_for_jobs(
             &self.lab,
-            &self.lab_path,
+            &self.lab_source,
             &jobs_to_run,
             target.clone(),
         )?;

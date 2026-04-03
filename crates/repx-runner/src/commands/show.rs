@@ -4,8 +4,8 @@ use repx_core::{
     config::{self, Config},
     constants::{dirs, logs},
     errors::CoreError,
-    lab,
-    model::{JobId, RunId},
+    lab::LabSource,
+    model::{JobId, Lab, RunId},
     resolver,
     store::outcomes::{get_job_outcomes, JobOutcome},
 };
@@ -14,24 +14,24 @@ use std::fs;
 use std::path::Path;
 
 #[allow(clippy::expect_used)]
-pub fn handle_show(args: ShowArgs, lab_path: &Path, target: Option<&str>) -> Result<(), CliError> {
+pub fn handle_show(
+    args: ShowArgs,
+    lab: &Lab,
+    _source: &LabSource,
+    target: Option<&str>,
+) -> Result<(), CliError> {
     match args.entity {
-        ShowEntity::Job(job_args) => handle_show_job(job_args, lab_path, target),
-        ShowEntity::Output(output_args) => handle_show_output(output_args, lab_path, target),
+        ShowEntity::Job(job_args) => handle_show_job(job_args, lab, target),
+        ShowEntity::Output(output_args) => handle_show_output(output_args, lab, target),
     }
 }
 
 #[allow(clippy::expect_used)]
-fn handle_show_job(
-    args: ShowJobArgs,
-    lab_path: &Path,
-    target: Option<&str>,
-) -> Result<(), CliError> {
-    let lab = lab::load_from_path(lab_path)?;
+fn handle_show_job(args: ShowJobArgs, lab: &Lab, target: Option<&str>) -> Result<(), CliError> {
     let config = config::load_config()?;
 
     let target_input = RunId::from(args.job_id.clone());
-    let job_id = resolver::resolve_target_job_id(&lab, &target_input)?;
+    let job_id = resolver::resolve_target_job_id(lab, &target_input)?;
 
     let job = lab.jobs.get(job_id).ok_or_else(|| {
         CliError::Config(CoreError::InvalidConfig {
@@ -298,14 +298,13 @@ fn format_size(bytes: u64) -> String {
 
 fn handle_show_output(
     args: ShowOutputArgs,
-    lab_path: &Path,
+    lab: &Lab,
     target: Option<&str>,
 ) -> Result<(), CliError> {
-    let lab = lab::load_from_path(lab_path)?;
     let config = config::load_config()?;
 
     let target_input = RunId::from(args.job_id.clone());
-    let job_id = resolver::resolve_target_job_id(&lab, &target_input)?;
+    let job_id = resolver::resolve_target_job_id(lab, &target_input)?;
 
     let store_path = get_store_path(&config, target)?;
     let output_dir = store_path.join(dirs::OUTPUTS).join(job_id.as_str());

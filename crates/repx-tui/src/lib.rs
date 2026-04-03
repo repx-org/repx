@@ -74,16 +74,13 @@ pub fn run(args: TuiArgs) -> Result<(), TuiError> {
     repx_core::logging::init_tui_logger(&logging_config)?;
     tracing::info!("--- Repx TUI Started ---");
 
-    let lab_path = fs::canonicalize(&args.lab).map_err(|e| TuiError::PathIo {
-        path: args.lab.clone(),
-        source: e,
-    })?;
+    let lab_source = repx_core::lab::LabSource::from_path(&args.lab);
     let config = config::load_config()?;
     let theme = theme::load_theme(&config)?;
     let resources = config::load_resources(None)?;
     let client =
         Arc::new(
-            Client::new(config.clone(), lab_path).map_err(|e| TuiError::ExecutionFailed {
+            Client::new(config.clone(), lab_source).map_err(|e| TuiError::ExecutionFailed {
                 message: "TUI failed to initialize client".to_string(),
                 log_path: None,
                 log_summary: e.to_string(),
@@ -392,16 +389,13 @@ fn run_screenshot(args: &TuiArgs, output_path: PathBuf) -> Result<(), TuiError> 
         eprintln!("[WARN] Failed to initialize logger: {}", e);
     }
 
-    let lab_path = fs::canonicalize(&args.lab).map_err(|e| TuiError::PathIo {
-        path: args.lab.clone(),
-        source: e,
-    })?;
+    let lab_source = repx_core::lab::LabSource::from_path(&args.lab);
     let config = config::load_config()?;
     let theme = theme::load_theme(&config)?;
     let resources = config::load_resources(None)?;
     let client =
         Arc::new(
-            Client::new(config.clone(), lab_path).map_err(|e| TuiError::ExecutionFailed {
+            Client::new(config.clone(), lab_source).map_err(|e| TuiError::ExecutionFailed {
                 message: "TUI failed to initialize client".to_string(),
                 log_path: None,
                 log_summary: e.to_string(),
