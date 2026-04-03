@@ -135,25 +135,11 @@ pub fn sync_images(
                             .unwrap_or(std::ffi::OsStr::new("image")),
                     );
                     if !dest.exists() {
-                        let status = std::process::Command::new("tar")
-                            .arg("xf")
-                            .arg(tar_path)
-                            .arg("--strip-components=1")
-                            .arg("-C")
-                            .arg(&image_cache)
-                            .arg(format!("*/{}", relative_path.to_string_lossy()))
-                            .status()
-                            .map_err(|e| {
-                                crate::error::ClientError::Config(repx_core::errors::CoreError::Io(
-                                    e,
-                                ))
-                            })?;
-                        if !status.success() {
-                            tracing::warn!(
-                                "Failed to extract image '{}' from tar, trying full path",
-                                relative_path.display()
-                            );
-                        }
+                        crate::tar_extract::extract_image_from_tar(
+                            tar_path,
+                            &relative_path.to_string_lossy(),
+                            &image_cache,
+                        )?;
                     }
                     dest
                 }

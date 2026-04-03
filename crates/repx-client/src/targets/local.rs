@@ -183,15 +183,24 @@ impl ArtifactSync for LocalTarget {
         Ok(())
     }
 
-    fn sync_lab_from_tar(&self, tar_path: &Path) -> Result<()> {
+    fn sync_lab_from_tar_via_rsync(&self, tar_path: &Path) -> Result<()> {
         let dest_path = self.artifacts_base_path();
         fs_err::create_dir_all(&dest_path).map_err(|e| ClientError::Config(CoreError::Io(e)))?;
 
-        let mut cmd = Command::new(self.tool("tar"));
-        cmd.arg("xf")
-            .arg(tar_path)
-            .arg("--strip-components=1")
-            .arg("-C")
+        let tmp_dir = tempfile::tempdir().map_err(|e| ClientError::Config(CoreError::Io(e)))?;
+        let extract_root = tmp_dir.path();
+
+        tracing::info!(
+            "Extracting tar {:?} to tempdir {:?} for rsync to {:?}",
+            tar_path,
+            extract_root,
+            dest_path
+        );
+        crate::tar_extract::extract_tar_to_dir(tar_path, extract_root)?;
+
+        let mut cmd = Command::new(self.tool("rsync"));
+        cmd.arg("-rltp")
+            .arg(format!("{}/", extract_root.display()))
             .arg(&dest_path);
 
         repx_core::logging::log_and_print_command(&cmd);
@@ -202,34 +211,7 @@ impl ArtifactSync for LocalTarget {
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
             return Err(ClientError::Config(CoreError::CommandFailed(format!(
-                "tar extraction for lab sync failed: {}",
-                stderr
-            ))));
-        }
-        Ok(())
-    }
-
-    fn sync_lab_metadata_from_tar(&self, tar_path: &Path) -> Result<()> {
-        let dest_path = self.artifacts_base_path();
-        fs_err::create_dir_all(&dest_path).map_err(|e| ClientError::Config(CoreError::Io(e)))?;
-
-        let mut cmd = Command::new(self.tool("tar"));
-        cmd.arg("xf")
-            .arg(tar_path)
-            .arg("--strip-components=1")
-            .arg("--exclude=*/jobs")
-            .arg("-C")
-            .arg(&dest_path);
-
-        repx_core::logging::log_and_print_command(&cmd);
-        let output = cmd
-            .output()
-            .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
-
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(ClientError::Config(CoreError::CommandFailed(format!(
-                "tar extraction for lab metadata sync failed: {}",
+                "rsync from tar extraction failed: {}",
                 stderr
             ))));
         }

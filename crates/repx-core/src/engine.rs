@@ -199,6 +199,7 @@ mod tests {
             host_tools_path: std::path::PathBuf::new(),
             host_tools_dir_name: "tools".to_string(),
             referenced_files: vec![],
+            tar_dir_name: None,
         };
 
         let define_job = |id: &str, inputs: Vec<&str>| {

@@ -1463,6 +1463,7 @@ mod tests {
             host_tools_path: PathBuf::new(),
             host_tools_dir_name: String::new(),
             referenced_files: Vec::new(),
+            tar_dir_name: None,
         };
 
         for (run_name, job_names) in runs {

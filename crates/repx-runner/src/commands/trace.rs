@@ -109,7 +109,7 @@ pub fn handle_trace_params(args: TraceParamsArgs, lab: &Lab) -> Result<(), CliEr
         compute_all_effective_params(lab)
     };
 
-    let output: HashMap<String, Value> = results
+    let output: std::collections::BTreeMap<String, Value> = results
         .into_iter()
         .map(|(k, v)| (k.into_inner(), v))
         .collect();

@@ -468,85 +468,46 @@ impl ArtifactSync for SshTarget {
         Ok(())
     }
 
-    fn sync_lab_from_tar(&self, tar_path: &Path) -> Result<()> {
+    fn sync_lab_from_tar_via_rsync(&self, tar_path: &Path) -> Result<()> {
         let remote_artifacts_base = self.artifacts_base_path();
+        let remote_rsync_path = self.deploy_rsync_binary()?;
 
-        let remote_cmd = format!(
-            "mkdir -p '{}' && tar xf - --strip-components=1 -C '{}'",
-            remote_artifacts_base.display(),
+        let tmp_dir = tempfile::tempdir().map_err(|e| ClientError::Config(CoreError::Io(e)))?;
+        let extract_root = tmp_dir.path();
+
+        tracing::info!(
+            "Extracting tar {:?} to tempdir {:?} for rsync to {}:{}",
+            tar_path,
+            extract_root,
+            self.address,
             remote_artifacts_base.display()
         );
+        crate::tar_extract::extract_tar_to_dir(tar_path, extract_root)?;
 
-        let mut cmd = Command::new(self.local_tool("ssh"));
-        cmd.arg(&self.address)
-            .arg(&remote_cmd)
-            .stdin(std::process::Stdio::piped());
+        let mut rsync_cmd = Command::new(self.local_tool("rsync"));
+        rsync_cmd
+            .arg("-rltpz")
+            .arg("--chmod=Du+w")
+            .arg("--mkpath")
+            .arg(format!("--rsync-path={}", remote_rsync_path))
+            .arg(format!("{}/", extract_root.display()))
+            .arg(format!(
+                "{}:{}",
+                self.address,
+                remote_artifacts_base.display()
+            ));
 
-        repx_core::logging::log_and_print_command(&cmd);
-
-        let mut child = cmd
-            .spawn()
+        logging::log_and_print_command(&rsync_cmd);
+        let output = rsync_cmd
+            .output()
             .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
 
-        if let Some(ref mut stdin) = child.stdin {
-            let mut tar_file =
-                std::fs::File::open(tar_path).map_err(|e| ClientError::Config(CoreError::Io(e)))?;
-            std::io::copy(&mut tar_file, stdin)
-                .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
-        }
-
-        let status = child
-            .wait()
-            .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
-        if !status.success() {
-            return Err(ClientError::Config(CoreError::CommandFailed(
-                "ssh tar pipe for lab sync failed".to_string(),
-            )));
-        }
-
-        let chmod_bin = self.remote_tool("chmod");
-        let chmod_cmd = RemoteCommand::new(&chmod_bin)
-            .arg("u+w")
-            .arg(&remote_artifacts_base.to_string_lossy());
-        self.run_command("sh", &["-c", &chmod_cmd.to_shell_string()])?;
-
-        Ok(())
-    }
-
-    fn sync_lab_metadata_from_tar(&self, tar_path: &Path) -> Result<()> {
-        let remote_artifacts_base = self.artifacts_base_path();
-
-        let remote_cmd = format!(
-            "mkdir -p '{}' && tar xf - --strip-components=1 --exclude='*/jobs' -C '{}'",
-            remote_artifacts_base.display(),
-            remote_artifacts_base.display()
-        );
-
-        let mut cmd = Command::new(self.local_tool("ssh"));
-        cmd.arg(&self.address)
-            .arg(&remote_cmd)
-            .stdin(std::process::Stdio::piped());
-
-        repx_core::logging::log_and_print_command(&cmd);
-
-        let mut child = cmd
-            .spawn()
-            .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
-
-        if let Some(ref mut stdin) = child.stdin {
-            let mut tar_file =
-                std::fs::File::open(tar_path).map_err(|e| ClientError::Config(CoreError::Io(e)))?;
-            std::io::copy(&mut tar_file, stdin)
-                .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
-        }
-
-        let status = child
-            .wait()
-            .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
-        if !status.success() {
-            return Err(ClientError::Config(CoreError::CommandFailed(
-                "ssh tar pipe for lab metadata sync failed".to_string(),
-            )));
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(ClientError::Config(CoreError::CommandFailed(format!(
+                "rsync from tar extraction failed: {}",
+                stderr
+            ))));
         }
 
         let chmod_bin = self.remote_tool("chmod");

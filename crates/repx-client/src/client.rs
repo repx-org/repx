@@ -458,7 +458,14 @@ impl Client {
             send(ClientEvent::SyncingLabTar);
             let remote_tar_dir = target.base_path().join("lab-tars");
             let remote_tar_path = remote_tar_dir.join(&tar_filename);
-            target.sync_file(&local_tar_path, &remote_tar_path)?;
+            if !remote_tar_path.exists() {
+                target.sync_file(&local_tar_path, &remote_tar_path)?;
+            } else {
+                tracing::info!(
+                    "Lab tar already exists at {:?}, skipping copy",
+                    remote_tar_path
+                );
+            }
 
             let lab_tar_info = LabTarInfo {
                 remote_tar_path: remote_tar_path.clone(),
@@ -467,14 +474,17 @@ impl Client {
                     .join("labs")
                     .join(&self.lab.content_hash),
                 content_hash: self.lab.content_hash.clone(),
-                lab_dir_name: {
-                    let p = self.lab_source.path();
-                    let canonical = p.canonicalize().unwrap_or_else(|_| p.to_path_buf());
-                    canonical
-                        .file_name()
-                        .unwrap_or(std::ffi::OsStr::new("result"))
-                        .to_string_lossy()
-                        .into_owned()
+                lab_dir_name: match &self.lab.tar_dir_name {
+                    Some(name) => name.clone(),
+                    None => {
+                        let p = self.lab_source.path();
+                        let canonical = p.canonicalize().unwrap_or_else(|_| p.to_path_buf());
+                        canonical
+                            .file_name()
+                            .unwrap_or(std::ffi::OsStr::new("result"))
+                            .to_string_lossy()
+                            .into_owned()
+                    }
                 },
             };
             Some(lab_tar_info)
@@ -486,9 +496,9 @@ impl Client {
         match &self.lab_source {
             LabSource::Tar(tar_path) => {
                 if use_node_local {
-                    target.sync_lab_metadata_from_tar(tar_path)?;
+                    tracing::info!("Node-local mode: skipping NAS sync (tar at {:?})", tar_path);
                 } else {
-                    target.sync_lab_from_tar(tar_path)?;
+                    target.sync_lab_from_tar_via_rsync(tar_path)?;
                 }
             }
             LabSource::Directory(dir_path) => {
