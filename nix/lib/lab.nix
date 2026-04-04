@@ -177,7 +177,10 @@ let
     if !(builtins.isAttrs placeholder) || (placeholder._repx_type or "") != "run_placeholder" then
       throw "Group '${groupName}' contains an element that is not a run placeholder."
     else
-      findRunName placeholder;
+      let
+        attrKey = findRunName placeholder;
+      in
+      runActualNames.${attrKey};
 
   resolvedGroups = pkgs.lib.mapAttrs (
     groupName: groupValue:
