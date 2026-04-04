@@ -227,45 +227,20 @@ impl SlurmOps for SshTarget {
 
 impl SshTarget {
     fn find_lab_manifest_remote(&self, lab_hash: &str) -> Result<String> {
-        let artifacts_base = self.artifacts_base_path();
-        let lab_dir = artifacts_base.join("lab");
+        let lab_dir = self.artifacts_base_path().join("lab");
+        let lab_dir_str = lab_dir.to_string_lossy().to_string();
 
-        let find_manifest_cmd = RemoteCommand::new("find")
-            .arg(&lab_dir.to_string_lossy())
-            .arg("-name")
-            .arg(&format!("*{}*-lab-metadata.json", lab_hash))
-            .pipe(RemoteCommand::new("head").arg("-n").arg("1"));
-
-        if let Ok(output) = self.run_command("sh", &["-c", &find_manifest_cmd.to_shell_string()]) {
-            let path = output.trim();
-            if !path.is_empty() {
-                return Ok(path.to_string());
-            }
-        }
-
-        let grep_script = format!(
-            r#"for f in {0}/*-lab-metadata.json; do
-                [ -f "$f" ] || continue
-                if grep -q '"labId"' "$f" 2>/dev/null && grep -q {1} "$f" 2>/dev/null; then
-                    echo "$f"
-                    exit 0
-                fi
-            done"#,
-            shell_quote(&lab_dir.to_string_lossy()),
+        let check_script = format!(
+            r#"for f in {0}/*lab-metadata.json; do test -f "$f" && grep -q {1} "$f" && echo "$f" && exit 0; done; exit 1"#,
+            shell_quote(&lab_dir_str),
             shell_quote(lab_hash),
         );
 
-        if let Ok(output) = self.run_command("sh", &["-c", &grep_script]) {
+        if let Ok(output) = self.run_command("sh", &["-c", &check_script]) {
             let path = output.trim();
             if !path.is_empty() {
                 return Ok(path.to_string());
             }
-        }
-
-        let fallback = artifacts_base.join(lab_hash).to_string_lossy().to_string();
-        let check_script = format!("test -e {}", shell_quote(&fallback));
-        if self.run_command("sh", &["-c", &check_script]).is_ok() {
-            return Ok(fallback);
         }
 
         Err(ClientError::Config(CoreError::ManifestNotFound {

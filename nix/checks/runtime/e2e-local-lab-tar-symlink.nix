@@ -114,26 +114,26 @@ pkgs.testers.runNixOSTest {
 
     with subtest("Node-local extraction has real files, not dangling symlinks"):
         lab_entries = machine.succeed(
-            f"find {node_local}/repx/labs -maxdepth 3 -type f 2>/dev/null | head -5; true"
+            f"find {node_local}/repx/labs -maxdepth 3 -type f 2>/dev/null || true"
         ).strip()
         print(f"Sample real files in extraction: {lab_entries}")
         if not lab_entries:
             raise Exception("No real files in extraction — tar may have packaged a symlink!")
 
         host_tools = machine.succeed(
-            f"find {node_local}/repx/labs \\( -path '*/host-tools/*/bin/*' -type f -o -path '*/host-tools/*/bin/*' -type l \\) 2>/dev/null | head -3; true"
+            f"find {node_local}/repx/labs -path '*/host-tools/*/bin/*' 2>/dev/null || true"
         ).strip()
         print(f"Host-tools in extraction: {host_tools}")
         if not host_tools:
             print("WARNING: No host-tools found in extraction")
 
-    with subtest("Extraction marker exists"):
+    with subtest("Extraction cache marker exists"):
         markers = machine.succeed(
-            f"find {node_local}/repx/labs -name '.extracted-*' 2>/dev/null"
+            f"find {node_local}/repx/labs -maxdepth 1 -name '.*.repx-cache.json' 2>/dev/null"
         ).strip()
-        print(f"Extraction markers: {markers}")
+        print(f"Extraction cache markers: {markers}")
         if not markers:
-            raise Exception("No extraction marker!")
+            raise Exception("No extraction cache marker!")
 
     print("\n" + "=" * 60)
     print("E2E LOCAL LAB-TAR SYMLINK TEST COMPLETED")

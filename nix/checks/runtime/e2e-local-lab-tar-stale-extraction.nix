@@ -96,19 +96,19 @@ pkgs.testers.runNixOSTest {
         if success_1 == 0:
             raise Exception("Run 1 produced no SUCCESS markers!")
 
-    with subtest("Verify extraction marker exists"):
+    with subtest("Verify extraction cache marker exists"):
         markers = machine.succeed(
-            f"find {node_local}/repx/labs -name '.extracted-*' 2>/dev/null"
+            f"find {node_local}/repx/labs -maxdepth 1 -name '.*.repx-cache.json' 2>/dev/null"
         ).strip()
-        print(f"Extraction markers: {markers}")
+        print(f"Extraction cache markers: {markers}")
         if not markers:
-            raise Exception("No extraction marker after Run 1!")
+            raise Exception("No extraction cache marker after Run 1!")
 
     with subtest("Simulate interrupted extraction: remove marker, make files read-only"):
         machine.succeed(
-            f"find {node_local}/repx/labs -name '.extracted-*' -delete"
+            f"find {node_local}/repx/labs -maxdepth 1 -name '.*.repx-cache.json' -delete"
         )
-        print("Removed extraction markers")
+        print("Removed extraction cache markers")
 
         machine.succeed(
             f"find {node_local}/repx -name 'SUCCESS' -path '*/labs/*' -delete 2>/dev/null || true"
@@ -138,8 +138,9 @@ pkgs.testers.runNixOSTest {
         ).strip())
         print(f"Files remaining after attempted rm: {leftover} (expected > 0)")
 
-    with subtest("Remove output markers to force re-run"):
+    with subtest("Remove output markers and completion log to force re-run"):
         machine.succeed(f"find {base_path}/outputs -name SUCCESS -delete")
+        machine.succeed(f"rm -f {base_path}/outputs/completions.jsonl")
 
     with subtest("Run 2: re-run succeeds despite stale read-only extraction"):
         machine.succeed(f"repx run {run_args} --lab ${referenceLab} --artifact-store node-local")
@@ -152,13 +153,13 @@ pkgs.testers.runNixOSTest {
                 "Run 2 failed! repx could not recover from stale read-only extraction."
             )
 
-    with subtest("New extraction marker exists"):
+    with subtest("New extraction cache marker exists"):
         new_markers = machine.succeed(
-            f"find {node_local}/repx/labs -name '.extracted-*' 2>/dev/null"
+            f"find {node_local}/repx/labs -maxdepth 1 -name '.*.repx-cache.json' 2>/dev/null"
         ).strip()
-        print(f"New extraction markers: {new_markers}")
+        print(f"New extraction cache markers: {new_markers}")
         if not new_markers:
-            raise Exception("No extraction marker after recovery run!")
+            raise Exception("No extraction cache marker after recovery run!")
 
     print("\n" + "=" * 60)
     print("E2E LOCAL LAB-TAR STALE EXTRACTION RECOVERY TEST COMPLETED")

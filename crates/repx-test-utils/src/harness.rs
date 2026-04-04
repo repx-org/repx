@@ -318,12 +318,11 @@ local_concurrency = 2
             .expect("Could not read lab/ subdirectory in artifacts")
             .filter_map(|e| e.ok())
             .find(|e| {
-                e.file_name()
-                    .to_string_lossy()
-                    .ends_with("-lab-metadata.json")
+                let name = e.file_name().to_string_lossy().to_string();
+                name == "lab-metadata.json" || name.ends_with("-lab-metadata.json")
             })
             .map(|e| e.path())
-            .expect("Could not find *-lab-metadata.json in artifacts/lab/");
+            .expect("Could not find lab-metadata.json in artifacts/lab/");
 
         let content = fs::read_to_string(&manifest_path).expect("Failed to read manifest");
         let manifest: serde_json::Value =

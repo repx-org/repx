@@ -6,6 +6,7 @@ use repx_core::{
     constants::{dirs, manifests, markers},
     errors::CoreError,
     model::{JobId, Memory, MountPolicy, SlurmTime},
+    store::completion_log,
 };
 use repx_executor::{CancellationToken, ExecutionRequest, Executor, Runtime};
 use serde::{Deserialize, Serialize};
@@ -528,6 +529,9 @@ async fn handle_phase_gather(
     {
         Ok(_) => {
             write_marker(&orch.repx_dir.join(markers::SUCCESS))?;
+            if let Err(e) = completion_log::append_completion(&orch.base_path, &orch.job_id, true) {
+                tracing::debug!("Failed to append to completion log: {}", e);
+            }
             if let Some(anchor) = args.anchor_id {
                 tracing::info!("Releasing anchor job {}", anchor);
                 let _ = TokioCommand::new("scontrol")
@@ -539,6 +543,11 @@ async fn handle_phase_gather(
         }
         Err(e) => {
             write_marker(&orch.repx_dir.join(markers::FAIL))?;
+            if let Err(err) =
+                completion_log::append_completion(&orch.base_path, &orch.job_id, false)
+            {
+                tracing::debug!("Failed to append to completion log: {}", err);
+            }
             slurm::cancel_workers_from_manifest(&orch.repx_dir).await;
             if let Some(anchor) = args.anchor_id {
                 let _ = TokioCommand::new("scancel")

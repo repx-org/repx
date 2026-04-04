@@ -77,19 +77,19 @@ pkgs.testers.runNixOSTest {
         if not tar_files_1:
             raise Exception("No tar file created in repx/temp after Run 1!")
 
-    with subtest("Run 1: extraction marker exists"):
+    with subtest("Run 1: extraction cache marker exists"):
         markers_1 = machine.succeed(
-            f"find {node_local}/repx/labs -name '.extracted-*' 2>/dev/null"
+            f"find {node_local}/repx/labs -maxdepth 1 -name '.*.repx-cache.json' 2>/dev/null"
         ).strip()
-        print(f"Run 1 markers: {markers_1}")
+        print(f"Run 1 cache markers: {markers_1}")
         if not markers_1:
-            raise Exception("No extraction marker after Run 1!")
+            raise Exception("No extraction cache marker after Run 1!")
 
     tar_stat_1 = machine.succeed(
         f"find {base_path}/repx/temp -maxdepth 1 -name '*.tar' -exec stat --format='%Y %n' {{}} \\; 2>/dev/null | sort"
     ).strip()
     marker_stat_1 = machine.succeed(
-        f"find {node_local}/repx/labs -name '.extracted-*' -exec stat --format='%Y %n' {{}} \\; 2>/dev/null | sort"
+        f"find {node_local}/repx/labs -maxdepth 1 -name '.*.repx-cache.json' -exec stat --format='%Y %n' {{}} \\; 2>/dev/null | sort"
     ).strip()
     print(f"Tar stat after run 1: {tar_stat_1}")
     print(f"Marker stat after run 1: {marker_stat_1}")
@@ -119,26 +119,26 @@ pkgs.testers.runNixOSTest {
             )
         print("Tar file was reused (same mtime) - content hash dedup works!")
 
-    with subtest("Extraction was NOT re-done (marker-based dedup)"):
+    with subtest("Extraction was NOT re-done (cache-marker-based dedup)"):
         marker_stat_2 = machine.succeed(
-            f"find {node_local}/repx/labs -name '.extracted-*' -exec stat --format='%Y %n' {{}} \\; 2>/dev/null | sort"
+            f"find {node_local}/repx/labs -maxdepth 1 -name '.*.repx-cache.json' -exec stat --format='%Y %n' {{}} \\; 2>/dev/null | sort"
         ).strip()
         print(f"Marker stat after run 2: {marker_stat_2}")
 
         if marker_stat_1 != marker_stat_2:
             raise Exception(
-                f"Extraction marker was re-created!\n"
+                f"Extraction cache marker was re-created!\n"
                 f"Before: {marker_stat_1}\nAfter:  {marker_stat_2}"
             )
-        print("Extraction was skipped (same marker mtime) - marker dedup works!")
+        print("Extraction was skipped (same cache marker mtime) - dedup works!")
 
-    with subtest("Still exactly 1 extraction marker"):
+    with subtest("Still exactly 1 extraction cache marker"):
         marker_count = int(machine.succeed(
-            f"find {node_local}/repx/labs -name '.extracted-*' | wc -l"
+            f"find {node_local}/repx/labs -maxdepth 1 -name '.*.repx-cache.json' | wc -l"
         ).strip())
-        print(f"Total extraction markers: {marker_count}")
+        print(f"Total extraction cache markers: {marker_count}")
         if marker_count != 1:
-            raise Exception(f"Expected 1 extraction marker, found {marker_count}!")
+            raise Exception(f"Expected 1 extraction cache marker, found {marker_count}!")
 
     print("\n" + "=" * 60)
     print("E2E LOCAL LAB-TAR RERUN IDEMPOTENCY TEST COMPLETED")

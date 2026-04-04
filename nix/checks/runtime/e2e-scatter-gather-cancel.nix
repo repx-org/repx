@@ -185,8 +185,9 @@ pkgs.testers.runNixOSTest {
 
         rc, _ = cluster.execute(f"find {base_path}/outputs -name SUCCESS | grep .")
         if rc != 0:
-            print("\n>>> SLURM JOB HISTORY (sacct):")
-            print(cluster.succeed("sacct --format=JobID,JobName,State,ExitCode"))
+            print("\n>>> SLURM JOB HISTORY:")
+            rc_sacct, sacct_out = cluster.execute("sacct --format=JobID,JobName,State,ExitCode 2>&1")
+            print(sacct_out if rc_sacct == 0 else f"sacct unavailable: {sacct_out.strip()}")
             print("\n>>> OUTPUT DIRECTORY TREE:")
             print(cluster.succeed(f"find {base_path}/outputs -maxdepth 4"))
             print("\n>>> STDERR LOGS:")

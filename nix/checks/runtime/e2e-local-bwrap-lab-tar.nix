@@ -88,11 +88,11 @@ pkgs.testers.runNixOSTest {
             raise Exception("No lab extraction directory found on node-local!")
 
         marker_count = int(machine.succeed(
-            f"find {node_local}/repx/labs -name '.extracted-*' 2>/dev/null | wc -l"
+            f"find {node_local}/repx/labs -maxdepth 1 -name '.*.repx-cache.json' 2>/dev/null | wc -l"
         ).strip())
-        print(f"Extraction markers: {marker_count}")
+        print(f"Extraction cache markers: {marker_count}")
         if marker_count == 0:
-            raise Exception("No extraction marker found!")
+            raise Exception("No extraction cache marker found!")
 
     with subtest("Image cache on node-local via lab-tar extraction"):
         local_cache = int(machine.succeed(
@@ -104,12 +104,12 @@ pkgs.testers.runNixOSTest {
 
     with subtest("Cache is reused across jobs (single extraction)"):
         marker_count = int(machine.succeed(
-            f"find {node_local}/repx/labs -name '.extracted-*' | wc -l"
+            f"find {node_local}/repx/labs -maxdepth 1 -name '.*.repx-cache.json' | wc -l"
         ).strip())
-        print(f"Extraction markers: {marker_count}")
+        print(f"Extraction cache markers: {marker_count}")
         if marker_count > 1:
             raise Exception(
-                f"Found {marker_count} extraction markers. Expected exactly 1 "
+                f"Found {marker_count} extraction cache markers. Expected exactly 1 "
                 "(cache should be reused, not re-extracted)."
             )
 
