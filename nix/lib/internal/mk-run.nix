@@ -5,7 +5,6 @@
   pipelines,
   parameters,
   parametersDependencies ? [ ],
-  dependencyJobs ? { },
   interRunDepTypes ? { },
   ...
 }@args:
@@ -32,6 +31,8 @@ let
 
   actualKeys = builtins.attrNames args;
   invalidKeys = pkgs.lib.subtractLists validKeys actualKeys;
+
+  common = import ./common.nix;
 
   zipGroupEntries = pkgs.lib.filterAttrs (
     _: val: builtins.isAttrs val && (val._repx_zip or false)
@@ -72,7 +73,6 @@ let
       throw ''
         Parameter collision in run "${name}".
         '${first.member}' is defined both as a normal parameter and inside utils.zip (anchor '${first.anchor}').
-        A parameter name can only appear once -- either as a normal parameter or inside a zip group, not both.
       ''
     else if zipVsZipCollisions != { } then
       let
@@ -83,7 +83,6 @@ let
       throw ''
         Parameter collision in run "${name}".
         '${collName}' appears in multiple utils.zip groups: ${anchors}.
-        A parameter name can only appear in one zip group.
       ''
     else if anchorVsMemberCollisions != [ ] then
       let
@@ -92,50 +91,9 @@ let
       throw ''
         Parameter collision in run "${name}".
         '${first.anchor}' is used as both the zip anchor key and a member name inside it.
-        Use a different anchor key name for the utils.zip group.
       ''
     else
       true;
-
-  zipGroupToList =
-    zipGroup:
-    let
-      keys = builtins.attrNames zipGroup.groups;
-      len = zipGroup.length;
-      indices = pkgs.lib.range 0 (len - 1);
-    in
-    map (
-      i:
-      builtins.listToAttrs (
-        map (k: {
-          name = k;
-          value = builtins.elemAt zipGroup.groups.${k} i;
-        }) keys
-      )
-    ) indices;
-
-  zipDimensions = pkgs.lib.imap0 (
-    i: _name:
-    let
-      zipGroup = zipGroupEntries.${_name};
-      zippedList = zipGroupToList zipGroup;
-    in
-    {
-      name = "_repx_zip_${toString i}";
-      value = zippedList;
-    }
-  ) (builtins.attrNames zipGroupEntries);
-
-  zipDimensionsAttrs = builtins.listToAttrs zipDimensions;
-  zipSyntheticKeys = map (d: d.name) zipDimensions;
-
-  allParametersRaw =
-    assert zipCollisionAsserts;
-    normalParameters
-    // zipDimensionsAttrs
-    // {
-      pipeline = pipelines;
-    };
 
   processedParameters = pkgs.lib.mapAttrs (
     _: val:
@@ -156,18 +114,39 @@ let
             val;
         context = [ ];
       }
-  ) allParametersRaw;
+  ) normalParameters;
 
-  allParameters = pkgs.lib.mapAttrs (_: p: p.values) processedParameters;
+  parameterAxes = pkgs.lib.mapAttrs (_: p: p.values) processedParameters;
+
   smartParameterContext = pkgs.lib.flatten (
     pkgs.lib.mapAttrsToList (_: p: p.context) processedParameters
   );
 
-  common = import ./common.nix;
+  zipGroupsList = pkgs.lib.mapAttrsToList (
+    _anchor: zipGroup:
+    let
+      keys = builtins.attrNames zipGroup.groups;
+      len = zipGroup.length;
+      indices = pkgs.lib.range 0 (len - 1);
+      rows = map (
+        i:
+        builtins.listToAttrs (
+          map (k: {
+            name = k;
+            value = builtins.elemAt zipGroup.groups.${k} i;
+          }) keys
+        )
+      ) indices;
+    in
+    {
+      members = keys;
+      values = rows;
+    }
+  ) zipGroupEntries;
 
   autoParametersDependencies =
     let
-      flatParameters = builtins.attrValues allParameters;
+      flatParameters = builtins.attrValues parameterAxes;
 
       extractDeps =
         val:
@@ -212,10 +191,10 @@ let
       (pkgs.lib.flatten (map extractDeps flatParameters)) ++ paramPathsClosure ++ smartParameterContext
     );
 
-  allCombinations =
+  validateParameterAxes =
     let
       invalidParameters = pkgs.lib.filter (param: !pkgs.lib.isList param.value) (
-        pkgs.lib.mapAttrsToList (name: value: { inherit name value; }) allParameters
+        pkgs.lib.mapAttrsToList (name: value: { inherit name value; }) parameterAxes
       );
     in
     if invalidParameters != [ ] then
@@ -225,76 +204,33 @@ let
       in
       throw ''
         Type error in 'mkRun' parameters for run "${name}".
-        The 'cartesianProduct' function for parameter sweeps expects all parameter values to be lists.
-        The following parameters have non-list values: ${formattedNames}.
-
-        Please ensure each parameter value is wrapped in a list, e.g., 'param = [ "value" ];'
+        All parameter values must be lists. Non-list: ${formattedNames}.
       ''
     else
       let
-        internalKeys = zipSyntheticKeys ++ [ "pipeline" ];
-        nonZipParameters = pkgs.lib.filterAttrs (n: _: !(builtins.elem n zipSyntheticKeys)) allParameters;
-        userParameters = pkgs.lib.filterAttrs (n: _: !(builtins.elem n internalKeys)) allParameters;
-        parametersWithNulls = pkgs.lib.filter (param: builtins.any (elem: elem == null) param.value) (
-          pkgs.lib.mapAttrsToList (name: value: { inherit name value; }) nonZipParameters
+        emptyAxes = pkgs.lib.filter (param: param.value == [ ]) (
+          pkgs.lib.mapAttrsToList (name: value: { inherit name value; }) parameterAxes
         );
       in
-      if parametersWithNulls != [ ] then
-        let
-          nullParamNames = pkgs.lib.map (p: p.name) parametersWithNulls;
-          formattedNullNames = pkgs.lib.concatStringsSep ", " (map (n: ''"${n}"'') nullParamNames);
-        in
+      if emptyAxes != [ ] then
         throw ''
-          Type error in 'mkRun' parameters for run "${name}".
-          The following parameter lists contain null values: ${formattedNullNames}.
-          Null values in parameter lists are not allowed. Please remove them or replace with valid values.
+          Error in 'mkRun' for run "${name}":
+          Empty parameter lists: ${builtins.toJSON (map (p: p.name) emptyAxes)}.
+          Empty lists produce zero combinations.
         ''
       else
-        let
-          isScalar =
-            v:
-            builtins.isString v
-            || builtins.isInt v
-            || builtins.isFloat v
-            || builtins.isBool v
-            || builtins.isPath v;
+        true;
 
-          parametersWithNonScalars = pkgs.lib.filter (
-            param: builtins.any (elem: !isScalar elem) param.value
-          ) (pkgs.lib.mapAttrsToList (name: value: { inherit name value; }) userParameters);
-        in
-        if parametersWithNonScalars != [ ] then
-          let
-            formatParam =
-              p:
-              let
-                badElems = builtins.filter (elem: !isScalar elem) p.value;
-                badTypes = pkgs.lib.concatStringsSep ", " (map (e: builtins.typeOf e) badElems);
-              in
-              "  - \"${p.name}\": contains element(s) of type ${badTypes}; value = ${builtins.toJSON p.value}";
-            details = pkgs.lib.concatStringsSep "\n" (map formatParam parametersWithNonScalars);
-          in
-          throw ''
-            Type error in 'mkRun' parameters for run "${name}".
-            Parameter sweep lists must contain only scalar values (string, int, float, bool, path).
-            The following parameters contain non-scalar elements (e.g., nested lists or attrsets):
-            ${details}
-
-            Each element in a parameter list becomes one resolved value after cartesian product.
-            If you need to pass multiple arguments, join them into a space-separated string:
-              workload_args = [ (builtins.concatStringsSep " " ["arg1" "arg2"]) ];
-          ''
-        else
-          let
-            rawCombinations = pkgs.lib.cartesianProduct allParameters;
-          in
-          map (
-            combo:
-            let
-              zipAttrs = pkgs.lib.foldl' (acc: key: acc // (combo.${key} or { })) { } zipSyntheticKeys;
-            in
-            (pkgs.lib.removeAttrs combo zipSyntheticKeys) // zipAttrs
-          ) rawCombinations;
+  representativeParameters =
+    let
+      fromAxes = pkgs.lib.mapAttrs (
+        _: values: if builtins.isList values && values != [ ] then builtins.head values else values
+      ) parameterAxes;
+      fromZips = pkgs.lib.foldl' (
+        acc: zg: if zg.values != [ ] then acc // (builtins.head zg.values) else acc
+      ) { } zipGroupsList;
+    in
+    fromAxes // fromZips;
 
   repxForDiscovery = repx-lib.mkPipelineHelpers {
     inherit
@@ -303,7 +239,24 @@ let
       interRunDepTypes
       hashMode
       ;
+    resolvedParameters = representativeParameters;
   };
+
+  loadedPipelines = pkgs.lib.map (
+    p:
+    let
+      pFn = if builtins.isFunction p then p else import p;
+      pArgs = builtins.functionArgs pFn;
+    in
+    pkgs.callPackage pFn (
+      if pArgs ? "repx" || pArgs ? "..." then
+        {
+          repx = repxForDiscovery;
+        }
+      else
+        { }
+    )
+  ) pipelines;
 
   getDrvsFromPipeline =
     pipeline:
@@ -323,42 +276,41 @@ let
     in
     scriptDrvs;
 
-  loadedPipelines = pkgs.lib.map (
-    p:
+  pipelineTemplates = pkgs.lib.imap0 (
+    i: pipeline:
     let
-      pFn = if builtins.isFunction p then p else import p;
-      pArgs = builtins.functionArgs pFn;
+      jobs = pkgs.lib.filter common.isVirtualJob (pkgs.lib.attrValues pipeline);
     in
-    pkgs.callPackage pFn (
-      if pArgs ? "repx" || pArgs ? "..." then
-        {
-          repx = repxForDiscovery;
-        }
-      else
-        { }
-    )
-  ) pipelines;
+    {
+      source =
+        let
+          p = builtins.elemAt pipelines i;
+        in
+        if builtins.isPath p then
+          toString p
+        else if builtins.isFunction p then
+          "pipeline-fn-${toString i}"
+        else
+          "pipeline-${toString i}";
+      stages = map (job: job.templateData) jobs;
+    }
+  ) loadedPipelines;
+
 in
 if invalidKeys != [ ] then
   throw ''
     Error in 'mkRun' definition for run "${name}".
-    Unknown attributes were provided: ${builtins.toJSON invalidKeys}.
-    The set of valid attributes is: ${builtins.toJSON validKeys}.
+    Unknown attributes: ${builtins.toJSON invalidKeys}.
+    Valid: ${builtins.toJSON validKeys}.
   ''
 else if !(builtins.elem hashMode validHashModes) then
   throw ''
-    Error in 'mkRun' definition for run "${name}".
-    Invalid hashMode: "${hashMode}".
-    Valid values are: ${builtins.toJSON validHashModes}.
-  ''
-else if allCombinations == [ ] then
-  throw ''
-    Error in 'mkRun' for run "${name}":
-    The resulting parameter sweep is empty.
-    This happens if the 'pipelines' list is empty, or if any parameter in 'parameters' is an empty list.
-    'pkgs.lib.cartesianProduct' produces no combinations if *any* input list is empty.
+    Error in 'mkRun' for run "${name}".
+    Invalid hashMode: "${hashMode}". Valid: ${builtins.toJSON validHashModes}.
   ''
 else
+  assert zipCollisionAsserts;
+  assert validateParameterAxes;
   let
     paramDepsClosure = pkgs.writeTextDir "share/repx/${name}/param-dependencies" (
       builtins.toJSON (parametersDependencies ++ autoParametersDependencies)
@@ -377,32 +329,15 @@ else
 
     imageContents = runImageContents;
 
-    runs = pkgs.lib.map (
-      combo:
-      let
-        pipelinePath = combo.pipeline;
-        resolvedParameters = pkgs.lib.removeAttrs combo [ "pipeline" ];
-        repxForPipeline = repx-lib.mkPipelineHelpers {
-          inherit
-            pkgs
-            repx-lib
-            resolvedParameters
-            dependencyJobs
-            interRunDepTypes
-            hashMode
-            ;
-        };
+    scriptDrvs = common.uniqueDrvs pipelineScriptDrvs;
 
-        pipelineFn = if builtins.isFunction pipelinePath then pipelinePath else import pipelinePath;
-        pipelineArgs = builtins.functionArgs pipelineFn;
-      in
-      pkgs.callPackage pipelineFn (
-        if pipelineArgs ? "repx" || pipelineArgs ? "..." then
-          {
-            repx = repxForPipeline;
-          }
-        else
-          { }
-      )
-    ) allCombinations;
+    runTemplate = {
+      inherit name;
+      hash_mode = if hashMode == "pure" then "pure" else "params-only";
+      inter_run_dep_types = interRunDepTypes;
+      parameter_axes = parameterAxes;
+      zip_groups = zipGroupsList;
+      pipelines = pipelineTemplates;
+      image_contents = map (d: builtins.unsafeDiscardStringContext (toString d)) runImageContents;
+    };
   }

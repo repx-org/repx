@@ -30,15 +30,21 @@ pub struct ExecutionRequest {
     pub repx_out_dir: PathBuf,
     pub host_tools_bin_dir: Option<PathBuf>,
     pub mount_policy: MountPolicy,
+    pub inputs_data: Option<Vec<u8>>,
+    pub parameters_data: Option<Vec<u8>>,
 }
 
 pub struct Executor {
     pub request: ExecutionRequest,
+    local_log_dir: Option<PathBuf>,
 }
 
 impl Executor {
     pub fn new(request: ExecutionRequest) -> Self {
-        Self { request }
+        Self {
+            request,
+            local_log_dir: None,
+        }
     }
 
     fn context(&self) -> RuntimeContext<'_> {
@@ -46,7 +52,7 @@ impl Executor {
     }
 
     pub async fn execute_script(
-        &self,
+        &mut self,
         script_path: &Path,
         args: &[String],
         cancel: &CancellationToken,
@@ -58,7 +64,12 @@ impl Executor {
         }
 
         let (stdout_log, stderr_log) = self.create_log_files().await?;
-        let stderr_path = self.request.repx_out_dir.join(logs::STDERR);
+
+        let stderr_path = if let Some(ref local_dir) = self.local_log_dir {
+            local_dir.join(logs::STDERR)
+        } else {
+            self.request.repx_out_dir.join(logs::STDERR)
+        };
 
         let mut cmd = self.build_command_for_script(script_path, args).await?;
 
@@ -90,15 +101,20 @@ impl Executor {
                     self.request.job_id,
                 );
                 let _ = child.kill().await;
+                let _ = self.sync_logs_to_nfs().await;
                 return Err(ExecutorError::Cancelled {
                     job_id: self.request.job_id.to_string(),
                 });
             }
         };
 
+        self.sync_logs_to_nfs().await?;
+
         if !status.success() {
-            let stderr_content = tokio::fs::read_to_string(&stderr_path)
+            let nfs_stderr = self.request.repx_out_dir.join(logs::STDERR);
+            let stderr_content = tokio::fs::read_to_string(&nfs_stderr)
                 .await
+                .or_else(|_| std::fs::read_to_string(&stderr_path))
                 .unwrap_or_else(|e| format!("<failed to read stderr.log: {}>", e));
             return Err(ExecutorError::ScriptFailed {
                 script: script_path.display().to_string(),
@@ -119,7 +135,7 @@ impl Executor {
         let script_path = resolved_script.as_path();
 
         let cmd = match &self.request.runtime {
-            Runtime::Native => NativeRuntime::build_command(&self.request, script_path, args),
+            Runtime::Native => NativeRuntime::build_command(&self.request, script_path, args)?,
             Runtime::Podman { .. } | Runtime::Docker { .. } => {
                 ContainerRuntime::ensure_image_loaded(&ctx, &self.request.runtime).await?;
                 ContainerRuntime::build_command(&ctx, &self.request.runtime, script_path, args)
@@ -134,9 +150,21 @@ impl Executor {
         Ok(cmd)
     }
 
-    async fn create_log_files(&self) -> Result<(File, File)> {
-        let stdout_path = self.request.repx_out_dir.join(logs::STDOUT);
-        let stderr_path = self.request.repx_out_dir.join(logs::STDERR);
+    async fn create_log_files(&mut self) -> Result<(File, File)> {
+        let log_dir = if let Ok(tmpdir) = std::env::var("TMPDIR") {
+            let local_dir = PathBuf::from(tmpdir).join("repx-logs");
+            if tokio::fs::create_dir_all(&local_dir).await.is_ok() {
+                self.local_log_dir = Some(local_dir.clone());
+                local_dir
+            } else {
+                self.request.repx_out_dir.clone()
+            }
+        } else {
+            self.request.repx_out_dir.clone()
+        };
+
+        let stdout_path = log_dir.join(logs::STDOUT);
+        let stderr_path = log_dir.join(logs::STDERR);
 
         let stdout_file = OpenOptions::new()
             .create(true)
@@ -153,7 +181,36 @@ impl Executor {
         Ok((stdout_file, stderr_file))
     }
 
-    pub fn build_native_command(&self, script_path: &Path, args: &[String]) -> TokioCommand {
+    pub async fn sync_logs_to_nfs(&self) -> Result<()> {
+        if let Some(ref local_dir) = self.local_log_dir {
+            let local_stdout = local_dir.join(logs::STDOUT);
+            let local_stderr = local_dir.join(logs::STDERR);
+            let nfs_stdout = self.request.repx_out_dir.join(logs::STDOUT);
+            let nfs_stderr = self.request.repx_out_dir.join(logs::STDERR);
+
+            tokio::fs::create_dir_all(&self.request.repx_out_dir)
+                .await
+                .io_ctx("create_dir_all", &self.request.repx_out_dir)?;
+
+            if local_stdout.exists() {
+                tokio::fs::copy(&local_stdout, &nfs_stdout)
+                    .await
+                    .io_ctx("copy stdout.log to NFS", &nfs_stdout)?;
+            }
+            if local_stderr.exists() {
+                tokio::fs::copy(&local_stderr, &nfs_stderr)
+                    .await
+                    .io_ctx("copy stderr.log to NFS", &nfs_stderr)?;
+            }
+        }
+        Ok(())
+    }
+
+    pub fn build_native_command(
+        &self,
+        script_path: &Path,
+        args: &[String],
+    ) -> Result<TokioCommand> {
         NativeRuntime::build_command(&self.request, script_path, args)
     }
 

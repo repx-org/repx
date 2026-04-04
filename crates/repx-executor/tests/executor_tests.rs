@@ -21,6 +21,8 @@ fn create_test_request(base_path: PathBuf) -> ExecutionRequest {
         repx_out_dir: base_path.join("outputs/repx"),
         host_tools_bin_dir: None,
         mount_policy: MountPolicy::Isolated,
+        inputs_data: None,
+        parameters_data: None,
     }
 }
 
@@ -40,6 +42,8 @@ fn create_test_request_with_host_tools(
         repx_out_dir: base_path.join("outputs/repx"),
         host_tools_bin_dir: Some(host_tools),
         mount_policy: MountPolicy::Isolated,
+        inputs_data: None,
+        parameters_data: None,
     }
 }
 
@@ -234,7 +238,9 @@ fn test_build_native_command_basic() {
 
     let script_path = PathBuf::from("/path/to/script.sh");
     let args = vec!["arg1".to_string(), "arg2".to_string()];
-    let cmd = executor.build_native_command(&script_path, &args);
+    let cmd = executor
+        .build_native_command(&script_path, &args)
+        .expect("build command");
 
     let std_cmd = cmd.as_std();
     assert_eq!(std_cmd.get_program(), "/path/to/script.sh");
@@ -254,7 +260,9 @@ fn test_build_native_command_with_host_tools() {
     let executor = Executor::new(request);
 
     let script_path = PathBuf::from("/script.sh");
-    let cmd = executor.build_native_command(&script_path, &[]);
+    let cmd = executor
+        .build_native_command(&script_path, &[])
+        .expect("build command");
 
     let envs: std::collections::HashMap<_, _> = cmd.as_std().get_envs().collect();
     let path_env = envs.get(std::ffi::OsStr::new("PATH"));
@@ -273,7 +281,9 @@ fn test_build_native_command_empty_args() {
     let executor = Executor::new(request);
 
     let script_path = PathBuf::from("/script.sh");
-    let cmd = executor.build_native_command(&script_path, &[]);
+    let cmd = executor
+        .build_native_command(&script_path, &[])
+        .expect("build command");
 
     let std_cmd = cmd.as_std();
     assert_eq!(std_cmd.get_args().count(), 0);
@@ -488,6 +498,8 @@ fn create_runnable_request(temp: &tempfile::TempDir) -> (ExecutionRequest, PathB
         repx_out_dir: repx_out,
         host_tools_bin_dir: None,
         mount_policy: MountPolicy::Isolated,
+        inputs_data: None,
+        parameters_data: None,
     };
     (request, base)
 }
@@ -509,7 +521,7 @@ async fn test_execute_script_cancelled_kills_child() {
     let temp = tempdir().expect("tempdir");
     let (request, base) = create_runnable_request(&temp);
     let script = write_script(&base, "sleep.sh", "sleep 300");
-    let executor = Executor::new(request);
+    let mut executor = Executor::new(request);
 
     let token = CancellationToken::new();
     let token_clone = token.clone();
@@ -536,7 +548,7 @@ async fn test_execute_script_pre_cancelled_token_returns_immediately() {
     let (request, base) = create_runnable_request(&temp);
 
     let script = write_script(&base, "long.sh", "sleep 300");
-    let executor = Executor::new(request);
+    let mut executor = Executor::new(request);
 
     let token = CancellationToken::new();
     token.cancel();
@@ -567,7 +579,7 @@ async fn test_execute_script_succeeds_with_live_token() {
     let (request, base) = create_runnable_request(&temp);
 
     let script = write_script(&base, "ok.sh", "exit 0");
-    let executor = Executor::new(request);
+    let mut executor = Executor::new(request);
 
     let token = CancellationToken::new();
     let result = executor.execute_script(&script, &[], &token).await;
@@ -586,7 +598,7 @@ async fn test_execute_script_failure_not_masked_by_token() {
     let (request, base) = create_runnable_request(&temp);
 
     let script = write_script(&base, "fail.sh", "exit 42");
-    let executor = Executor::new(request);
+    let mut executor = Executor::new(request);
 
     let token = CancellationToken::new();
     let result = executor.execute_script(&script, &[], &token).await;

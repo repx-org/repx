@@ -4,7 +4,9 @@
   lab_version,
 }:
 let
-  repxVersion = "0.4.2";
+  repxVersion = "0.5.0";
+
+  repx-expand = import ./internal/repx-expand-pkg.nix { inherit pkgs; };
 
   rsyncStatic =
     (pkgs.pkgsStatic.rsync.override {
@@ -75,43 +77,34 @@ let
 
   common = import ./internal/common.nix;
 
-  buildLabCoreAndManifest =
+  hostToolsJson = map (
+    spec:
+    let
+      pkgPath = builtins.unsafeDiscardStringContext (toString spec.pkg);
+      pkgHash = builtins.baseNameOf pkgPath;
+    in
     {
-      runs,
-      includeImages,
-      containerMode,
+      pkg_path = pkgPath;
+      pkg_hash = pkgHash;
+      bins =
+        if spec.bins == null then
+          null
+        else
+          map (binSpec: if builtins.isAttrs binSpec then binSpec else binSpec) spec.bins;
+    }
+  ) hostToolBinaries;
+
+  blueprint2Lab =
+    {
+      runDefinitions,
       resolvedGroups ? { },
+      containerMode ? "unified",
     }:
     let
-      lib-run-internal = {
-        run2Jobs =
-          runDefinition:
-          let
-            pipelinesForRun = runDefinition.runs;
-            nestedJobs = pkgs.lib.map (pipeline: pkgs.lib.attrValues pipeline) pipelinesForRun;
-            allStageResults = pkgs.lib.flatten nestedJobs;
-            allVirtualJobs = pkgs.lib.filter common.isVirtualJob allStageResults;
-          in
-          common.uniqueJobs allVirtualJobs;
-      };
+      runs = runDefinitions;
+      includeImages = containerMode != "none";
 
-      allVirtualJobs = common.uniqueJobs (
-        pkgs.lib.flatten (pkgs.lib.map (run: lib-run-internal.run2Jobs run) runs)
-      );
-
-      allScriptDrvs = common.uniqueDrvs (
-        pkgs.lib.concatMap (
-          job:
-          if job.repxStageType == "scatter-gather" then
-            [
-              job.scatterDrv
-              job.gatherDrv
-            ]
-            ++ (builtins.attrValues job.stepDrvs)
-          else
-            [ job.scriptDrv ]
-        ) allVirtualJobs
-      );
+      allScriptDrvs = common.uniqueDrvs (pkgs.lib.concatMap (run: run.scriptDrvs or [ ]) runs);
 
       allImageContents = common.uniqueDrvs (
         pkgs.lib.flatten (pkgs.lib.map (run: run.imageContents or [ ]) runs)
@@ -166,324 +159,132 @@ let
         (pkgs.lib.optional (unifiedImage != null) unifiedImage) ++ (builtins.attrValues perRunImages)
       );
 
-      metadataHelpers = (import ./metadata.nix) {
-        inherit
-          pkgs
-          gitHash
-          repxVersion
-          includeImages
-          containerMode
-          unifiedImage
-          perRunImages
-          ;
-      };
+      runTemplates = map (
+        run:
+        run.runTemplate
+        // {
+          image_path =
+            if containerMode == "per-run" && perRunImages ? "${run.name}" then
+              let
+                img = perRunImages.${run.name};
+              in
+              if img != null then
+                "images/" + builtins.baseNameOf (builtins.unsafeDiscardStringContext (toString img))
+              else
+                null
+            else
+              null;
+        }
+      ) runs;
 
-      metadataDrvs =
-        let
-          accumulateMetadata =
-            acc: runDef:
-            let
-              resolvedDependencies = pkgs.lib.listToAttrs (
-                pkgs.lib.mapAttrsToList (
-                  depName: depType:
-                  let
-                    depDrv =
-                      acc.${depName}
-                        or (throw "Dependency '${depName}' not found for run '${runDef.name}'. This should not happen if runs are sorted.");
-                    depFilename = builtins.baseNameOf (toString depDrv);
-                    relPath = "revision/${depFilename}";
-                  in
-                  {
-                    name = builtins.unsafeDiscardStringContext relPath;
-                    value = depType;
-                  }
-                ) (runDef.interRunDepTypes or { })
-              );
-
-              metadataDrv = metadataHelpers.mkRunMetadata {
-                inherit runDef resolvedDependencies;
-                jobs = lib-run-internal.run2Jobs runDef;
-              };
-            in
-            acc
-            // {
-              "${runDef.name}" = metadataDrv;
-            };
-        in
-        pkgs.lib.foldl' accumulateMetadata { } runs;
-
-      rootMetadata = metadataHelpers.mkRootMetadata {
-        runMetadataPaths = map (
-          runDef:
-          let
-            drv = metadataDrvs.${runDef.name};
-            filename = builtins.baseNameOf (toString drv);
-          in
-          "revision/${filename}"
-        ) runs;
+      blueprintData = {
+        runs = runTemplates;
+        host_tools = {
+          hash = hostToolsHash;
+          binaries = hostToolsJson;
+        };
+        git_hash = gitHash;
+        repx_version = repxVersion;
+        inherit lab_version;
+        container_mode = containerMode;
         groups = resolvedGroups;
-      };
-      rootMetadataFilename = builtins.baseNameOf (toString rootMetadata);
-
-      jobManifestJson = builtins.toJSON (
-        map (
-          job:
-          if job.repxStageType == "scatter-gather" then
-            {
-              inherit (job)
-                jobDirName
-                pname
-                parametersJson
-                dependencyManifestJson
-                ;
-              type = "scatter-gather";
-              scripts = {
-                scatter = toString job.scatterDrv;
-                gather = toString job.gatherDrv;
-              }
-              // (pkgs.lib.mapAttrs' (
-                name: drv: pkgs.lib.nameValuePair "step-${name}" (toString drv)
-              ) job.stepDrvs);
-            }
+        unified_image_path =
+          if unifiedImage != null then
+            "images/" + builtins.baseNameOf (builtins.unsafeDiscardStringContext (toString unifiedImage))
           else
-            {
-              inherit (job)
-                jobDirName
-                pname
-                parametersJson
-                dependencyManifestJson
-                ;
-              type = "simple";
-              scriptDrv = toString job.scriptDrv;
-            }
-        ) allVirtualJobs
-      );
+            null;
+      };
 
-      jobManifestFile = pkgs.writeText "job-manifest.json" jobManifestJson;
+      blueprintJson = builtins.unsafeDiscardStringContext (builtins.toJSON blueprintData);
+      blueprintFile = pkgs.writeText "blueprint.json" blueprintJson;
 
-      labCoreBuildScript = ''
-        mkdir -p $out/store $out/revision $out/jobs $out/host-tools/${hostToolsHash}/bin
+      imageAssemblyScript = pkgs.lib.optionalString includeImages ''
+        mkdir -p $out/images
 
         ${pkgs.lib.concatMapStringsSep "\n" (
-          toolSpec:
+          imageDrv:
           let
-            inherit (toolSpec) pkg;
-            pkgHash = builtins.baseNameOf (toString pkg);
+            imageBasename = builtins.baseNameOf (toString imageDrv);
           in
-          if toolSpec.bins == null then
-            ''
-              for bin in ${pkg}/bin/*; do
-                binname=$(basename "$bin")
-                storename="${pkgHash}-$binname"
-                if [ ! -f "$out/store/$storename" ]; then
-                  cp "$bin" "$out/store/$storename"
-                fi
-                ln -sf "../../../store/$storename" "$out/host-tools/${hostToolsHash}/bin/$binname"
-              done
-            ''
-          else
-            pkgs.lib.concatMapStringsSep "\n" (
-              binSpec:
-              let
-                srcName = if builtins.isAttrs binSpec then binSpec.src else binSpec;
-                dstName = if builtins.isAttrs binSpec then binSpec.dst else binSpec;
-                storeName = "${pkgHash}-${srcName}";
-              in
-              ''
-                if [ ! -f "$out/store/${storeName}" ]; then
-                  cp ${pkg}/bin/${srcName} "$out/store/${storeName}"
-                fi
-                ln -sf "../../../store/${storeName}" "$out/host-tools/${hostToolsHash}/bin/${dstName}"
-              ''
-            ) toolSpec.bins
-        ) hostToolBinaries}
+          ''
+            image_tarball=$(${pkgs.findutils}/bin/find "${imageDrv}" -name "*.tar.gz" -o -name "*.tar" | head -n 1)
+            if [ -z "$image_tarball" ]; then
+              echo "Error: Could not find container image tarball in ${imageDrv}"; exit 1;
+            fi
 
-        echo "Assembling job directories from manifest..."
-        jobCount=$(${pkgs.jq}/bin/jq -r 'length' ${jobManifestFile})
+            image_dir="$out/images/${imageBasename}"
+            mkdir -p "$image_dir"
 
-        assemble_job() {
-          IFS=$'\t' read -r jobDir jobType pname paramsJson depManifest scriptInfo <<< "$1"
-          mkdir -p "$out/jobs/$jobDir/bin"
+            temp_extract=$(mktemp -d)
+            ${pkgs.gnutar}/bin/tar -xf "$image_tarball" -C "$temp_extract"
 
-          if [ "$jobType" = "simple" ]; then
-            cp "$scriptInfo/bin/$pname" "$out/jobs/$jobDir/bin/$pname"
-            chmod +x "$out/jobs/$jobDir/bin/$pname"
-          elif [ "$jobType" = "scatter-gather" ]; then
-            IFS='|' read -ra scriptEntries <<< "$scriptInfo"
-            for scriptEntry in "''${scriptEntries[@]}"; do
-              scriptName="''${scriptEntry%%=*}"
-              scriptPath="''${scriptEntry#*=}"
-              cp "$scriptPath/bin/"* "$out/jobs/$jobDir/bin/$pname-$scriptName"
-              chmod +x "$out/jobs/$jobDir/bin/$pname-$scriptName"
+            cp "$temp_extract/manifest.json" "$image_dir/manifest.json"
+
+            for json_file in "$temp_extract"/*.json; do
+              if [ -f "$json_file" ] && [ "$(basename "$json_file")" != "manifest.json" ]; then
+                cp "$json_file" "$image_dir/"
+              fi
             done
-          fi
 
-          echo "$paramsJson" > "$out/jobs/$jobDir/$pname-parameters.json"
-          echo "$depManifest" > "$out/jobs/$jobDir/nix-input-dependencies.json"
-        }
-        export -f assemble_job
-        export out
+            layer_paths=$(${pkgs.jq}/bin/jq -r '.[0].Layers[]' "$image_dir/manifest.json")
 
-        ${pkgs.jq}/bin/jq -r '.[] | [.jobDirName, .type, .pname, .parametersJson, .dependencyManifestJson, (if .type == "simple" then .scriptDrv else (.scripts | to_entries | map("\(.key)=\(.value)") | join("|")) end)] | @tsv' ${jobManifestFile} \
-          | ${pkgs.parallel}/bin/parallel --pipe -L 1 -j+0 'while read -r line; do assemble_job "$line"; done'
+            for layer_path in $layer_paths; do
+              layer_hash=$(dirname "$layer_path")
+              layer_store_name="''${layer_hash}-layer.tar"
 
-        echo "Assembled $jobCount job directories."
-
-        cp ${rootMetadata} "$out/revision/${rootMetadataFilename}"
-
-        ${pkgs.lib.concatMapStringsSep "\n" (drv: ''
-          cp ${drv} "$out/revision/$(basename ${drv})"
-        '') (pkgs.lib.attrValues metadataDrvs)}
-
-        ${pkgs.lib.optionalString includeImages ''
-          mkdir -p $out/images
-
-          ${pkgs.lib.concatMapStringsSep "\n" (
-            imageDrv:
-            let
-              imageBasename = builtins.baseNameOf (toString imageDrv);
-            in
-            ''
-              image_tarball=$(${pkgs.findutils}/bin/find "${imageDrv}" -name "*.tar.gz" -o -name "*.tar" | head -n 1)
-              if [ -z "$image_tarball" ]; then
-                echo "Error: Could not find container image tarball in ${imageDrv}"; exit 1;
+              if [ ! -f "$out/store/$layer_store_name" ]; then
+                cp "$temp_extract/$layer_path" "$out/store/$layer_store_name"
               fi
 
-              image_dir="$out/images/${imageBasename}"
-              mkdir -p "$image_dir"
+              mkdir -p "$image_dir/$layer_hash"
+              ln -s "../../../store/$layer_store_name" "$image_dir/$layer_hash/layer.tar"
+            done
 
-              temp_extract=$(mktemp -d)
-              ${pkgs.gnutar}/bin/tar -xf "$image_tarball" -C "$temp_extract"
-
-              cp "$temp_extract/manifest.json" "$image_dir/manifest.json"
-
-              for json_file in "$temp_extract"/*.json; do
-                if [ -f "$json_file" ] && [ "$(basename "$json_file")" != "manifest.json" ]; then
-                  cp "$json_file" "$image_dir/"
-                fi
-              done
-
-              layer_paths=$(${pkgs.jq}/bin/jq -r '.[0].Layers[]' "$image_dir/manifest.json")
-
-              for layer_path in $layer_paths; do
-                layer_hash=$(dirname "$layer_path")
-                layer_store_name="''${layer_hash}-layer.tar"
-
-                if [ ! -f "$out/store/$layer_store_name" ]; then
-                  cp "$temp_extract/$layer_path" "$out/store/$layer_store_name"
-                fi
-
-                mkdir -p "$image_dir/$layer_hash"
-                ln -s "../../../store/$layer_store_name" "$image_dir/$layer_hash/layer.tar"
-              done
-
-              rm -rf "$temp_extract"
-            ''
-          ) imageDerivations}
-        ''}
+            rm -rf "$temp_extract"
+          ''
+        ) imageDerivations}
       '';
 
-      labCore = pkgs.stdenv.mkDerivation {
-        name = "hpc-lab-core";
-        version = repxVersion;
-
-        nativeBuildInputs = [
-          pkgs.jq
-          pkgs.parallel
-        ]
-        ++ allScriptDrvs;
-
-        inherit labCoreBuildScript;
-        passAsFile = [ "labCoreBuildScript" ];
-
-        buildCommand = ''
-          source "$labCoreBuildScriptPath"
-        '';
-      };
-
-      labId = pkgs.lib.head (pkgs.lib.splitString "-" (builtins.baseNameOf (toString labCore)));
-      labManifest = pkgs.writeText "lab-metadata.json" (
-        builtins.toJSON {
-          inherit labId;
-          metadata = "revision/${rootMetadataFilename}";
-        }
-      );
-
-      allReadmeParts = (import ./readme.nix) {
-        inherit pkgs;
-        virtualJobs = allVirtualJobs;
-      };
-
-    in
-    {
-      inherit
-        labCore
-        labManifest
-        allReadmeParts
-        allVirtualJobs
-        ;
-    };
-  runs2Lab =
-    {
-      runDefinitions,
-      resolvedGroups ? { },
-      containerMode ? "unified",
-    }:
-    let
-      runs = runDefinitions;
-      artifacts = buildLabCoreAndManifest {
-        inherit runs resolvedGroups containerMode;
-        includeImages = containerMode != "none";
-      };
-      readme = pkgs.runCommand "README.md" { } ''
-        cat ${artifacts.allReadmeParts.readmeNative}/README.md > $out
-      '';
     in
     {
       lab = pkgs.stdenv.mkDerivation {
         name = "hpc-experiment-lab";
         version = repxVersion;
         nativeBuildInputs = [
-          artifacts.labCore
+          repx-expand
           pkgs.jq
           pkgs.coreutils
           pkgs.findutils
-        ];
+          pkgs.gnutar
+        ]
+        ++ allScriptDrvs;
 
-        passthru = {
-          inherit (artifacts) allVirtualJobs;
-        };
+        hostToolPaths = pkgs.lib.concatMapStringsSep " " (spec: toString spec.pkg) hostToolBinaries;
 
         buildCommand = ''
-          mkdir -p $out $out/lab $out/readme
-          cp -r --reflink=auto --no-dereference ${artifacts.labCore}/* $out/
-          cp ${readme} $out/readme/$(basename ${readme})
+          for p in $hostToolPaths; do
+            test -e "$p" || { echo "FATAL: host tool not found: $p"; exit 1; }
+          done
 
-          files_json_file=$(mktemp)
-          prefix="$out/"
-          find $out -type f -print0 | xargs -0 -P"$(nproc)" -n 100 sha256sum | \
-            awk -v prefix="$prefix" '{hash=$1; path=substr($2, length(prefix)+1); printf "%s\t%s\n", path, hash}' | \
-            sort -t$'\t' -k1,1 | \
-            awk -F'\t' '{printf "{\"path\":\"%s\",\"sha256\":\"%s\"}\n", $1, $2}' | \
-            jq -s '.' > "$files_json_file"
+          mkdir -p $out $out/lab $out/readme $out/store $out/jobs $out/revision $out/host-tools
 
-          labId=$(jq -r '.labId' ${artifacts.labManifest})
-          metadata=$(jq -r '.metadata' ${artifacts.labManifest})
+          ${imageAssemblyScript}
 
-          jq -n \
-            --arg labId "$labId" \
-            --arg lab_version "${lab_version}" \
-            --arg metadata "$metadata" \
-            --slurpfile files "$files_json_file" \
-            '{labId: $labId, lab_version: $lab_version, metadata: $metadata, files: $files[0]}' \
-            > $out/lab/$(basename ${artifacts.labManifest})
+          cat > $out/readme/README.md <<'REPX_README_EOF'
+          This lab directory is a self-contained "seed" for your experiments.
+          Built with repx ${repxVersion}. Assembled by repx-expand.
+          REPX_README_EOF
 
-          rm -f "$files_json_file"
-          echo "Lab directory created successfully."
+          repx-expand \
+            --blueprint ${blueprintFile} \
+            --output $out \
+            --lab-version "${lab_version}"
+
+          echo "Lab built successfully."
         '';
       };
     };
 in
 {
-  inherit runs2Lab;
+  inherit blueprint2Lab;
 }

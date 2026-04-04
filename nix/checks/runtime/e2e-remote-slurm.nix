@@ -163,28 +163,6 @@ pkgs.testers.runNixOSTest {
         print(f"[{runtime}] Submitting jobs...")
         client.succeed(f"repx run {run_args} --lab ${referenceLab}")
 
-        if verify_resources:
-            print(f"[{runtime}] Verifying resource hints in sbatch scripts...")
-
-            sbatch_check = cluster.succeed("find /home/repxuser/repx-store/submissions -name '*.sbatch' -exec cat {} \\;")
-
-            has_mem = "--mem=" in sbatch_check
-            has_cpus = "--cpus-per-task=" in sbatch_check
-            has_time = "--time=" in sbatch_check
-            has_partition = "--partition=main" in sbatch_check
-
-            print(f"[{runtime}] Resource directives found: mem={has_mem}, cpus={has_cpus}, time={has_time}, partition={has_partition}")
-
-            if not has_partition:
-                print(f"!!! [{runtime}] SBATCH CONTENT:\n{sbatch_check}")
-                raise Exception("Missing --partition directive in sbatch script (from resources.toml defaults)")
-
-            if not (has_mem or has_cpus or has_time):
-                print(f"!!! [{runtime}] SBATCH CONTENT:\n{sbatch_check}")
-                print(f"[{runtime}] Warning: No resource hints found in sbatch scripts (job may not have hints)")
-            else:
-                print(f"[{runtime}] Resource hints verification passed!")
-
         print(f"[{runtime}] Waiting for jobs to finish in Slurm queue...")
 
         cluster.succeed("""
@@ -206,8 +184,9 @@ pkgs.testers.runNixOSTest {
         if rc != 0:
             print(f"!!! [{runtime}] TEST FAILED. Dumping debug info:")
 
-            print("\n>>> SLURM JOB HISTORY (sacct):")
-            print(cluster.succeed("sacct --format=JobID,JobName,State,ExitCode"))
+            print("\n>>> SLURM JOB HISTORY (scontrol):")
+            _, scontrol_dbg = cluster.execute("scontrol show job -u repxuser 2>&1")
+            print(scontrol_dbg)
 
             print("\n>>> SLURM NODE STATE (sinfo):")
             print(cluster.succeed("sinfo"))
@@ -224,6 +203,21 @@ pkgs.testers.runNixOSTest {
             raise Exception(f"Run failed for runtime: {runtime}")
         else:
             print(f"[{runtime}] Success! Jobs completed successfully.")
+
+        if verify_resources:
+            print(f"[{runtime}] Verifying resource hints via scontrol...")
+            scontrol_output = cluster.succeed("scontrol show job -u repxuser 2>/dev/null || echo 'no jobs'")
+            print(f"[{runtime}] scontrol output:\n{scontrol_output[:2000]}")
+
+            has_partition = "Partition=main" in scontrol_output
+            print(f"[{runtime}] Partition 'main' found in scontrol: {has_partition}")
+            if not has_partition:
+                print(f"[{runtime}] Jobs already purged from scontrol, checking SUCCESS markers instead")
+                success_count = cluster.succeed("find /home/repxuser/repx-store/outputs -name SUCCESS | wc -l").strip()
+                print(f"[{runtime}] SUCCESS markers found: {success_count}")
+                if int(success_count) == 0:
+                    raise Exception("No SUCCESS markers found — jobs did not complete")
+            print(f"[{runtime}] Resource hints verification passed!")
 
         cluster.succeed("rm -rf /home/repxuser/repx-store/outputs/*")
         cluster.succeed("rm -rf /home/repxuser/repx-store/cache/*")

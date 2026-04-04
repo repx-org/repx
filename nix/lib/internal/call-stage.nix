@@ -1,7 +1,6 @@
 args: stageFile: dependencies:
 let
   inherit (args) pkgs;
-  hashMode = args.hashMode or "pure";
   common = import ./common.nix;
   processDependenciesFn = import ./process-dependencies.nix;
   mkSimpleStage = import ../stage-simple.nix { inherit pkgs; };
@@ -44,9 +43,7 @@ let
 
   declaredParameters = stageDef.parameters or { };
   globalParameters = args.resolvedParameters or { };
-  resolvedParameters = pkgs.lib.mapAttrs (
-    name: default: if builtins.hasAttr name globalParameters then globalParameters.${name} else default
-  ) declaredParameters;
+  resolvedParameters = declaredParameters // globalParameters;
 
   resolveWithParameters = common.mkResolveWithParameters resolvedParameters (toString stageFile);
 
@@ -57,17 +54,18 @@ let
   resolvedOutputs = resolveWithParameters "outputs" (stageDef.outputs or { });
 
   resolvedStageResources = resolveWithParameters "resources" (stageDef.resources or null);
-
   finalResources = common.validateResourceHints {
     inherit pkgs;
     resources = resolvedStageResources;
     contextStr = "stage '${resolvedPname}' resources";
   };
 
+  interRunDepTypes = args.interRunDepTypes or { };
+
   processed = processDependenciesFn (
     args
     // {
-      inherit dependencies;
+      inherit dependencies interRunDepTypes;
       consumerInputs = resolvedInputs;
       producerPname = resolvedPname;
     }
@@ -77,16 +75,16 @@ let
     if !(pkgs.lib.isAttrs stageDef) then
       throw "Stage file '${toString stageFile}' did not return a declarative attribute set."
     else if !(builtins.isPath stageFile || builtins.isFunction stageFile) then
-      throw "call-stage: 'stageFile' must be a path or a function, got ${builtins.typeOf stageFile}."
+      throw "call-stage: 'stageFile' must be a path or a function."
     else if (stageDef ? "run") && !(builtins.isFunction stageDef.run) then
-      throw "Stage '${toString stageFile}': 'run' must be a function, got ${builtins.typeOf stageDef.run}."
+      throw "Stage '${toString stageFile}': 'run' must be a function."
     else
       let
         stageDefWithDeps = stageDef // {
           pname = resolvedPname;
           inputs = resolvedInputs;
           outputs = resolvedOutputs;
-          inherit resolvedParameters hashMode;
+          inherit resolvedParameters;
           dependencyDerivations = common.uniqueDrvs processed.dependencyDerivations;
           inherit (processed) upstreamJobs;
           stageInputs = processed.finalFlatInputs;

@@ -18,7 +18,5 @@ shellexpand = { workspace = true }
 sha2 = { workspace = true }
 rayon = { workspace = true }
 tar = { workspace = true }
-nix = { workspace = true }
-
 [lints]
 workspace = true

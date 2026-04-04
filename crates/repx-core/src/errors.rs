@@ -203,6 +203,9 @@ pub enum CoreError {
 
     #[error("Host tool error: {detail}")]
     HostToolNotFound { detail: String },
+
+    #[error("Cache error for key '{key}': {detail}")]
+    CacheError { key: String, detail: String },
 }
 
 #[derive(Error, Debug)]

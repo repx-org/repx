@@ -1,6 +1,6 @@
 use crate::context::RuntimeContext;
 use crate::error::{ExecutorError, IoContext, Result};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use tokio::fs::File;
 use tokio::process::Command as TokioCommand;
@@ -397,9 +397,37 @@ impl ContainerRuntime {
             repx_core::model::MountPolicy::Isolated => {}
         }
 
-        cmd.arg(image_tag).arg(script_path);
+        let mut rewritten_args: Vec<String> = args.to_vec();
+        let mut shm_cleanup: Vec<PathBuf> = Vec::new();
 
-        cmd.args(args);
+        if let Some(ref data) = request.inputs_data {
+            let shm_path =
+                PathBuf::from(format!("/dev/shm/repx-inputs-{}.json", std::process::id()));
+            std::fs::write(&shm_path, data).io_ctx("write inputs to /dev/shm", &shm_path)?;
+            let container_path = "/tmp/repx-inputs.json";
+            cmd.arg("-v")
+                .arg(format!("{}:{}:ro", shm_path.display(), container_path));
+            if rewritten_args.len() > 1 {
+                rewritten_args[1] = container_path.to_string();
+            }
+            shm_cleanup.push(shm_path);
+        }
+        if let Some(ref data) = request.parameters_data {
+            let shm_path =
+                PathBuf::from(format!("/dev/shm/repx-params-{}.json", std::process::id()));
+            std::fs::write(&shm_path, data).io_ctx("write params to /dev/shm", &shm_path)?;
+            let container_path = "/tmp/repx-parameters.json";
+            cmd.arg("-v")
+                .arg(format!("{}:{}:ro", shm_path.display(), container_path));
+            if rewritten_args.len() > 2 {
+                rewritten_args[2] = container_path.to_string();
+            }
+            shm_cleanup.push(shm_path);
+        }
+
+        cmd.arg(image_tag).arg(script_path);
+        cmd.args(&rewritten_args);
+
         ctx.restrict_command_environment(&mut cmd, &[binary]).await;
         Ok(cmd)
     }

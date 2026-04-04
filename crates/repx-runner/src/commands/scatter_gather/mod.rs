@@ -194,12 +194,14 @@ impl ScatterGatherOrchestrator {
             repx_out_dir: repx_out,
             host_tools_bin_dir: self.host_tools_bin_dir.clone(),
             mount_policy: self.mount_policy.clone(),
+            inputs_data: None,
+            parameters_data: None,
         })
     }
 
     async fn run_scatter(&self, exe_path: &Path) -> Result<(), CliError> {
         tracing::info!("[1/4] Starting scatter phase for job '{}'...", self.job_id);
-        let executor =
+        let mut executor =
             self.create_executor(self.scatter_out_dir.clone(), self.scatter_repx_dir.clone());
         let args = vec![
             self.scatter_out_dir.to_string_lossy().to_string(),
@@ -265,7 +267,7 @@ impl ScatterGatherOrchestrator {
             serde_json::to_string_pretty(&gather_inputs)?,
         )?;
 
-        let executor = self.create_executor(self.user_out_dir.clone(), self.repx_dir.clone());
+        let mut executor = self.create_executor(self.user_out_dir.clone(), self.repx_dir.clone());
         let args = vec![
             self.user_out_dir.to_string_lossy().to_string(),
             gather_inputs_json_path.to_string_lossy().to_string(),
@@ -442,7 +444,7 @@ async fn handle_phase_step(
     let step_inputs_path = step_repx.join("inputs.json");
     fs::write(&step_inputs_path, serde_json::to_string_pretty(&inputs)?)?;
 
-    let executor = orch.create_executor(step_out.clone(), step_repx.clone());
+    let mut executor = orch.create_executor(step_out.clone(), step_repx.clone());
     let exec_args = vec![
         step_out.to_string_lossy().to_string(),
         step_inputs_path.to_string_lossy().to_string(),

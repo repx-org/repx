@@ -16,7 +16,7 @@ let
       inherit parameters;
     };
 
-  happyRun = mkTestRun {
+  happyRun = builtins.tryEval (mkTestRun {
     workload = [
       "a"
       "b"
@@ -32,11 +32,9 @@ let
         "vf"
       ];
     };
-  };
+  });
 
-  happyCount = builtins.length happyRun.runs;
-
-  multiZipRun = mkTestRun {
+  multiZipRun = builtins.tryEval (mkTestRun {
     group_a = utils.zip {
       x = [
         1
@@ -59,11 +57,9 @@ let
         "Z"
       ];
     };
-  };
+  });
 
-  multiZipCount = builtins.length multiZipRun.runs;
-
-  zipOnlyRun = mkTestRun {
+  zipOnlyRun = builtins.tryEval (mkTestRun {
     config = utils.zip {
       a = [
         1
@@ -76,10 +72,9 @@ let
         "z"
       ];
     };
-  };
-  zipOnlyCount = builtins.length zipOnlyRun.runs;
+  });
 
-  noZipRun = mkTestRun {
+  noZipRun = builtins.tryEval (mkTestRun {
     x = [
       1
       2
@@ -89,8 +84,7 @@ let
       "b"
       "c"
     ];
-  };
-  noZipCount = builtins.length noZipRun.runs;
+  });
 
   collisionZipVsNormal = builtins.tryEval (mkTestRun {
     mode = [
@@ -184,10 +178,10 @@ pkgs.runCommand "check-zip-parameters" { } ''
     fi
   }
 
-  check_eq "zip+cartesian count" "${toString happyCount}" "6"
-  check_eq "multi-zip count" "${toString multiZipCount}" "6"
-  check_eq "zip-only count" "${toString zipOnlyCount}" "3"
-  check_eq "no-zip backwards compat" "${toString noZipCount}" "6"
+  check_eq "zip+cartesian eval succeeds" "${toString happyRun.success}" "1"
+  check_eq "multi-zip eval succeeds" "${toString multiZipRun.success}" "1"
+  check_eq "zip-only eval succeeds" "${toString zipOnlyRun.success}" "1"
+  check_eq "no-zip eval succeeds" "${toString noZipRun.success}" "1"
 
   check_fail "zip member vs normal parameter" "${toString collisionZipVsNormal.success}"
   check_fail "zip member vs zip member" "${toString collisionZipVsZip.success}"

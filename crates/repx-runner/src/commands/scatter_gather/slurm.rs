@@ -1,6 +1,8 @@
 use crate::error::CliError;
 use repx_core::{constants::dirs, errors::CoreError};
-use std::{collections::HashMap, fs};
+use std::collections::HashMap;
+use std::fs;
+use tokio::io::AsyncWriteExt;
 use tokio::process::Command as TokioCommand;
 
 use super::{inputs::resolve_step_inputs, ScatterGatherOrchestrator, StepsMetadata};
@@ -200,17 +202,14 @@ pub(crate) async fn submit_slurm_branches(
                 .file_name()
                 .unwrap_or(std::ffi::OsStr::new("unknown"))
                 .to_string_lossy();
-            let _lab_dir_name = local_artifacts
-                .file_name()
-                .unwrap_or(std::ffi::OsStr::new("result"))
-                .to_string_lossy();
             format!(
-                "export LOCAL_BASE='{local_base}' && \
-                 export MARKER=\"$LOCAL_BASE/.extracted-{hash}\" && \
-                 export LAB_TAR='{tar}' && \
-                 mkdir -p \"$LOCAL_BASE\" && \
-                 flock -x \"$LOCAL_BASE/.lock\" sh -c \
-                   'if [ ! -f \"$MARKER\" ]; then tar xf \"$LAB_TAR\" -C \"$LOCAL_BASE/\" && touch \"$MARKER\"; fi' && ",
+                r#"export LOCAL_BASE='{local_base}'
+export MARKER="$LOCAL_BASE/.extracted-{hash}"
+export LAB_TAR='{tar}'
+mkdir -p "$LOCAL_BASE"
+flock -x "$LOCAL_BASE/.lock" sh -c \
+  'if [ ! -f "$MARKER" ]; then tar xf "$LAB_TAR" -C "$LOCAL_BASE/" && touch "$MARKER"; fi'
+"#,
                 local_base = local_base.display(),
                 hash = content_hash,
                 tar = tar_path.display(),
@@ -230,11 +229,8 @@ pub(crate) async fn submit_slurm_branches(
 
     for (branch_idx, item) in work_items.iter().enumerate() {
         let branch_root = orch.job_root.join(format!("branch-{}", branch_idx));
-        let branch_repx = branch_root.join(dirs::REPX);
-        fs::create_dir_all(&branch_repx)?;
 
-        let work_item_path = branch_repx.join("work_item.json");
-        fs::write(&work_item_path, serde_json::to_string(item)?)?;
+        let work_item_json = serde_json::to_string(item)?;
 
         let mut step_slurm_ids: HashMap<String, String> = HashMap::new();
 
@@ -246,35 +242,58 @@ pub(crate) async fn submit_slurm_branches(
             let step_root = branch_root.join(format!("step-{}", step_name));
             let step_out = step_root.join(dirs::OUT);
             let step_repx = step_root.join(dirs::REPX);
-            fs::create_dir_all(&step_out)?;
-            fs::create_dir_all(&step_repx)?;
 
+            let work_item_fd_path = std::path::PathBuf::from("/dev/fd/4");
             let inputs = resolve_step_inputs(
                 step_meta,
                 &branch_root,
-                &work_item_path,
+                &work_item_fd_path,
                 &orch.static_inputs,
                 &steps_meta.steps,
             )?;
-            let inputs_path = step_repx.join("inputs.json");
-            fs::write(&inputs_path, serde_json::to_string_pretty(&inputs)?)?;
+            let inputs_json = serde_json::to_string_pretty(&inputs)?;
 
-            let inner_cmd = format!(
-                "{bootstrap}{repx} internal-execute \
-                 --job-id '{job_id}' \
-                 --runtime '{runtime}' \
-                 {image_tag} \
-                 --base-path '{base_path}' \
-                 --host-tools-dir '{host_tools_dir}' \
-                 {node_local} \
-                 {local_artifacts} \
-                 {mount} \
-                 --executable-path '{exe_path}' \
-                 --user-out-dir '{user_out}' \
-                 --repx-out-dir '{repx_out}' \
-                 --parameters-json-path '{params_json}' \
-                 --job-package-path '{job_pkg}'",
-                bootstrap = worker_bootstrap,
+            #[allow(clippy::format_in_format_args)]
+            let script = format!(
+                r#"#!/usr/bin/env bash
+#SBATCH --job-name={job_name}
+#SBATCH --output=/dev/null
+#SBATCH --error=/dev/null
+{sbatch_directives}
+set -e
+
+# Inputs, parameters, and work_item are passed via file descriptors.
+# Zero filesystem writes — data flows: heredoc -> kernel buffer -> fd -> child.
+exec 3<<'__REPX_INPUTS_EOF__'
+{inputs_json}
+__REPX_INPUTS_EOF__
+
+exec 4<<'__REPX_WI_EOF__'
+{work_item_json}
+__REPX_WI_EOF__
+
+{worker_bootstrap}
+exec {repx} internal-execute \
+  --job-id '{job_id}' \
+  --runtime '{runtime}' \
+  {image_tag} \
+  --base-path '{base_path}' \
+  --host-tools-dir '{host_tools_dir}' \
+  {node_local} \
+  {local_artifacts} \
+  {mount} \
+  --executable-path '{exe_path}' \
+  --user-out-dir '{user_out}' \
+  --repx-out-dir '{repx_out}' \
+  --inputs-json-path /dev/fd/3 \
+  --parameters-json-path '{params_json}' \
+  --job-package-path '{job_pkg}'
+"#,
+                job_name = format!("{}-b{}-{}", orch.job_id.as_str(), branch_idx, step_name),
+                sbatch_directives = format_sbatch_opts(sbatch_opts),
+                work_item_json = work_item_json,
+                inputs_json = inputs_json,
+                worker_bootstrap = worker_bootstrap,
                 repx = repx_binary_str,
                 job_id = orch.job_id.as_str(),
                 runtime = runtime_str,
@@ -290,12 +309,13 @@ pub(crate) async fn submit_slurm_branches(
                 params_json = orch.parameters_json_path.display(),
                 job_pkg = orch.job_package_path.display(),
             );
-            let repx_cmd = inner_cmd;
 
             let mut sbatch = TokioCommand::new("sbatch");
             sbatch
                 .arg("--parsable")
-                .args(sbatch_opts.split_whitespace());
+                .stdin(std::process::Stdio::piped())
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped());
 
             let dep_slurm_ids: Vec<&String> = step_meta
                 .deps
@@ -308,18 +328,24 @@ pub(crate) async fn submit_slurm_branches(
                 sbatch.arg(format!("--dependency=afterok:{}", dep_ids_str.join(":")));
             }
 
-            sbatch
-                .arg(format!(
-                    "--job-name={}-b{}-{}",
-                    orch.job_id.as_str(),
-                    branch_idx,
-                    step_name
-                ))
-                .arg(format!("--output={}/slurm-%j.out", step_repx.display()))
-                .arg("--wrap")
-                .arg(repx_cmd);
+            let mut child = sbatch.spawn().map_err(|e| {
+                CliError::Config(CoreError::CommandFailed(format!(
+                    "Failed to spawn sbatch for branch #{} step '{}': {}",
+                    branch_idx, step_name, e
+                )))
+            })?;
 
-            let output = sbatch.output().await?;
+            if let Some(mut stdin) = child.stdin.take() {
+                stdin.write_all(script.as_bytes()).await.map_err(|e| {
+                    CliError::Config(CoreError::CommandFailed(format!(
+                        "Failed to write script to sbatch stdin for branch #{} step '{}': {}",
+                        branch_idx, step_name, e
+                    )))
+                })?;
+                drop(stdin);
+            }
+
+            let output = child.wait_with_output().await?;
             if !output.status.success() {
                 return Err(CliError::ExecutionFailed {
                     message: format!(
@@ -356,4 +382,17 @@ pub(crate) async fn submit_slurm_branches(
         all_worker_slurm_ids.len()
     );
     Ok((last_step_slurm_ids, all_worker_slurm_ids))
+}
+
+fn format_sbatch_opts(opts: &str) -> String {
+    let trimmed = opts.trim();
+    if trimmed.is_empty() || trimmed == "''" {
+        return String::new();
+    }
+    trimmed
+        .split_whitespace()
+        .filter(|s| !s.is_empty())
+        .map(|opt| format!("#SBATCH {}", opt))
+        .collect::<Vec<_>>()
+        .join("\n")
 }

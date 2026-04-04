@@ -1,6 +1,7 @@
 use crate::context::RuntimeContext;
 use crate::error::{ExecutorError, IoContext, Result};
 use crate::ExecutionRequest;
+use repx_core::cache::{CacheKey, CacheMetadata, CacheStore, FsCache};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -8,6 +9,14 @@ use tokio::process::Command as TokioCommand;
 
 const EXCLUDED_ROOTFS_DIRS: &[&str] = &["dev", "proc", "tmp"];
 const SUCCESS_MARKER: &str = "SUCCESS";
+
+fn ephemeral_base(request: &ExecutionRequest) -> PathBuf {
+    if let Ok(tmpdir) = std::env::var("TMPDIR") {
+        PathBuf::from(tmpdir).join("repx-bwrap")
+    } else {
+        request.repx_out_dir.clone()
+    }
+}
 
 #[derive(Debug, Serialize, Deserialize)]
 struct OverlayCapabilityCache {
@@ -90,6 +99,17 @@ impl BwrapRuntime {
                     local_image_copy
                 );
                 Self::stage_image_locally(&shared_image_path, &local_image_copy, ctx).await?;
+
+                let staging_cache = FsCache::new(images_cache_dir.clone());
+                let staging_key = CacheKey::ImageStaging {
+                    image_hash: image_hash.clone(),
+                };
+                let staging_meta =
+                    CacheMetadata::new(&staging_key, "node-local image staging copy")
+                        .with_content_hash(&image_hash);
+                if let Err(e) = staging_cache.mark_ready(&staging_key, staging_meta) {
+                    tracing::debug!("Failed to write cache metadata for image staging: {}", e);
+                }
             }
             local_image_copy
         } else {
@@ -216,6 +236,16 @@ impl BwrapRuntime {
             .await
             .io_ctx("create", &success_marker)?;
 
+        let cache = FsCache::new(images_cache_dir.clone());
+        let cache_key = CacheKey::Rootfs {
+            image_hash: image_hash.clone(),
+        };
+        let meta = CacheMetadata::new(&cache_key, format!("rootfs for image '{}'", image_tag))
+            .with_content_hash(&image_hash);
+        if let Err(e) = cache.mark_ready(&cache_key, meta) {
+            tracing::debug!("Failed to write cache metadata for rootfs: {}", e);
+        }
+
         let _ = tokio::fs::remove_file(&lock_path).await;
 
         tracing::info!("Successfully extracted rootfs for '{}'", image_tag);
@@ -287,7 +317,7 @@ impl BwrapRuntime {
         host_mount_point: &Path,
         image_mount_point: &Path,
     ) -> Result<PathBuf> {
-        let union_dir = request.repx_out_dir.join("nix_union_store");
+        let union_dir = ephemeral_base(request).join("nix_union_store");
         if union_dir.exists() {
             tokio::fs::remove_dir_all(&union_dir)
                 .await
@@ -372,6 +402,16 @@ impl BwrapRuntime {
             if let Ok(json) = serde_json::to_string_pretty(&cache_entry) {
                 if let Err(e) = tokio::fs::write(&cache_file, json).await {
                     tracing::debug!("Failed to write overlay capability cache: {}", e);
+                } else {
+                    let cap_cache = FsCache::new(cache_dir.clone());
+                    let cap_key = CacheKey::OverlayCapability;
+                    let cap_meta = CacheMetadata::new(
+                        &cap_key,
+                        format!("overlay support check: supported={}", supported),
+                    );
+                    if let Err(e) = cap_cache.mark_ready(&cap_key, cap_meta) {
+                        tracing::debug!("Failed to write cache metadata for overlay cap: {}", e);
+                    }
                 }
             }
         }
@@ -466,6 +506,19 @@ impl BwrapRuntime {
             if let Ok(json) = serde_json::to_string_pretty(&cache_entry) {
                 if let Err(e) = tokio::fs::write(&cache_file, json).await {
                     tracing::debug!("Failed to write overlay capability cache: {}", e);
+                } else {
+                    let cap_cache = FsCache::new(cache_dir.clone());
+                    let cap_key = CacheKey::OverlayCapability;
+                    let cap_meta = CacheMetadata::new(
+                        &cap_key,
+                        format!("tmp overlay support check: supported={}", supported),
+                    );
+                    if let Err(e) = cap_cache.mark_ready(&cap_key, cap_meta) {
+                        tracing::debug!(
+                            "Failed to write cache metadata for tmp overlay cap: {}",
+                            e
+                        );
+                    }
                 }
             }
         }
@@ -663,9 +716,54 @@ impl BwrapRuntime {
         cmd.arg("--setenv").arg("TERM").arg("xterm");
 
         cmd.arg("--chdir").arg(&request.user_out_dir);
-        cmd.arg("--");
-        cmd.arg(script_path);
-        cmd.args(args);
+
+        let mut rewritten_args: Vec<String> = args.to_vec();
+        let mut memfd_guards: Vec<std::os::fd::OwnedFd> = Vec::new();
+
+        if let Some(ref data) = request.inputs_data {
+            let (fd, owned) = create_memfd_with_data(data, "repx-inputs")?;
+            let sandbox_path = "/tmp/repx-inputs.json";
+            cmd.arg("--ro-bind-data")
+                .arg(fd.to_string())
+                .arg(sandbox_path);
+            if rewritten_args.len() > 1 {
+                rewritten_args[1] = sandbox_path.to_string();
+            }
+            memfd_guards.push(owned);
+        }
+        if let Some(ref data) = request.parameters_data {
+            let (fd, owned) = create_memfd_with_data(data, "repx-params")?;
+            let sandbox_path = "/tmp/repx-parameters.json";
+            cmd.arg("--ro-bind-data")
+                .arg(fd.to_string())
+                .arg(sandbox_path);
+            if rewritten_args.len() > 2 {
+                rewritten_args[2] = sandbox_path.to_string();
+            }
+            memfd_guards.push(owned);
+        }
+
+        if !request.mount_policy.specific_paths().is_empty() {
+            cmd.arg("--");
+            cmd.arg("/bin/sh");
+            cmd.arg("-c");
+
+            let mut args_escaped = Vec::new();
+            for a in &rewritten_args {
+                args_escaped.push(format!("'{}'", a.replace('\'', "'\\''")));
+            }
+            let args_str = args_escaped.join(" ");
+
+            cmd.arg(format!("exec '{}' {}", script_path.display(), args_str));
+        } else {
+            cmd.arg("--");
+            cmd.arg(script_path);
+            cmd.args(&rewritten_args);
+        }
+
+        for guard in memfd_guards {
+            std::mem::forget(guard);
+        }
 
         ctx.restrict_command_environment(&mut cmd, &[]).await;
 
@@ -747,8 +845,9 @@ impl BwrapRuntime {
             };
 
             if has_image_store_entries && can_overlay {
-                let overlay_upper = request.repx_out_dir.join("nix_overlay_upper");
-                let overlay_work = request.repx_out_dir.join("nix_overlay_work");
+                let eph_base = ephemeral_base(request);
+                let overlay_upper = eph_base.join("nix_overlay_upper");
+                let overlay_work = eph_base.join("nix_overlay_work");
 
                 tokio::fs::create_dir_all(&overlay_upper)
                     .await
@@ -911,4 +1010,55 @@ impl BwrapRuntime {
 
         Ok(())
     }
+}
+
+pub fn create_memfd_with_data(data: &[u8], name: &str) -> Result<(i32, std::os::fd::OwnedFd)> {
+    use nix::fcntl::{fcntl, FcntlArg, FdFlag};
+    use nix::sys::memfd::{memfd_create, MemFdCreateFlag};
+    use std::ffi::CString;
+    use std::io::{Seek, Write};
+    use std::os::fd::AsRawFd;
+
+    let cname = CString::new(name).map_err(|e| ExecutorError::Io {
+        source: std::io::Error::other(format!("invalid memfd name: {}", e)),
+        operation: "memfd_create",
+        path: PathBuf::from(name),
+    })?;
+
+    let owned = memfd_create(&cname, MemFdCreateFlag::empty()).map_err(|e| ExecutorError::Io {
+        source: std::io::Error::other(format!("memfd_create failed: {}", e)),
+        operation: "memfd_create",
+        path: PathBuf::from(name),
+    })?;
+
+    let fd_num = owned.as_raw_fd();
+
+    let mut file = std::fs::File::from(owned);
+    file.write_all(data).map_err(|e| ExecutorError::Io {
+        source: e,
+        operation: "write memfd",
+        path: PathBuf::from(name),
+    })?;
+    file.seek(std::io::SeekFrom::Start(0))
+        .map_err(|e| ExecutorError::Io {
+            source: e,
+            operation: "seek memfd",
+            path: PathBuf::from(name),
+        })?;
+
+    let current_flags = fcntl(fd_num, FcntlArg::F_GETFD).map_err(|e| ExecutorError::Io {
+        source: std::io::Error::other(format!("fcntl F_GETFD: {}", e)),
+        operation: "fcntl F_GETFD",
+        path: PathBuf::from(name),
+    })?;
+    let mut flags = FdFlag::from_bits_truncate(current_flags);
+    flags.remove(FdFlag::FD_CLOEXEC);
+    fcntl(fd_num, FcntlArg::F_SETFD(flags)).map_err(|e| ExecutorError::Io {
+        source: std::io::Error::other(format!("fcntl F_SETFD: {}", e)),
+        operation: "fcntl F_SETFD (clear CLOEXEC)",
+        path: PathBuf::from(name),
+    })?;
+
+    let owned_back: std::os::fd::OwnedFd = file.into();
+    Ok((fd_num, owned_back))
 }

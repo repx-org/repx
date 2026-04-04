@@ -3,7 +3,14 @@ use super::{
     ArtifactSync, CommandRunner, FileOps, GcOps, JobRunner, RemoteCommand, SlurmOps, TargetInfo,
 };
 use crate::error::{ClientError, Result};
-use repx_core::{config, constants::dirs, errors::CoreError, logging, model::JobId};
+use repx_core::{
+    cache::{CacheKey, CacheStore, FsCache},
+    config,
+    constants::dirs,
+    errors::CoreError,
+    logging,
+    model::JobId,
+};
 use std::{
     collections::HashSet,
     io::Write,
@@ -82,8 +89,12 @@ impl SshTarget {
         let rsync_local_path = self.local_tool("rsync");
         let hash = super::compute_file_hash(&rsync_local_path)?;
 
-        let remote_versioned_dir = self.base_path().join("bin").join(&hash);
-        let remote_dest_path = remote_versioned_dir.join("rsync");
+        let remote_cache = FsCache::new(self.base_path().to_path_buf());
+        let cache_key = CacheKey::RemoteRsync {
+            binary_hash: hash.clone(),
+            target: self.name.clone(),
+        };
+        let remote_dest_path = remote_cache.path(&cache_key);
         let remote_dest_str = remote_dest_path.to_string_lossy().to_string();
 
         let check_cmd = RemoteCommand::new("test")
@@ -97,6 +108,10 @@ impl SshTarget {
             }
         }
 
+        let remote_versioned_dir = remote_dest_path
+            .parent()
+            .unwrap_or(self.base_path())
+            .to_path_buf();
         let mkdir_cmd = RemoteCommand::new("mkdir")
             .arg("-p")
             .arg(&remote_versioned_dir.to_string_lossy());
@@ -176,6 +191,30 @@ impl CommandRunner for SshTarget {
         }
 
         Ok(String::from_utf8_lossy(&output.stdout).to_string())
+    }
+
+    fn spawn_command(&self, command: &str, args: &[&str]) -> Result<std::process::Child> {
+        let remote_cmd_exe = self.remote_tool(command);
+
+        let remote_command_string = if command == "sh" && args.len() == 2 && args[0] == "-c" {
+            format!("sh -c {}", shell_quote(args[1]))
+        } else {
+            let mut parts = vec![remote_cmd_exe.as_str()];
+            parts.extend_from_slice(args);
+            parts.join(" ")
+        };
+
+        let mut cmd = Command::new(self.local_tool("ssh"));
+        cmd.arg(&self.address)
+            .arg(&remote_command_string)
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped());
+
+        logging::log_and_print_command(&cmd);
+
+        cmd.spawn()
+            .map_err(|e| ClientError::Config(CoreError::Io(e)))
     }
 }
 
@@ -864,8 +903,12 @@ impl JobRunner for SshTarget {
         let runner_exe_path = super::find_local_runner_binary()?;
         let hash = super::compute_file_hash(&runner_exe_path)?;
 
-        let remote_versioned_dir = self.base_path().join("bin").join(&hash);
-        let remote_dest_path = remote_versioned_dir.join("repx");
+        let remote_cache = FsCache::new(self.base_path().to_path_buf());
+        let cache_key = CacheKey::RemoteBinary {
+            binary_hash: hash.clone(),
+            target: self.name.clone(),
+        };
+        let remote_dest_path = remote_cache.path(&cache_key);
 
         let verify = || -> Result<()> {
             let cmd = RemoteCommand::new(&remote_dest_path.to_string_lossy()).arg("--version");
@@ -893,6 +936,10 @@ impl JobRunner for SshTarget {
             }
         }
 
+        let remote_versioned_dir = remote_dest_path
+            .parent()
+            .unwrap_or(self.base_path())
+            .to_path_buf();
         let mkdir_cmd = RemoteCommand::new("mkdir")
             .arg("-p")
             .arg(&remote_versioned_dir.to_string_lossy());

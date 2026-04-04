@@ -1,5 +1,8 @@
 use crate::error::{ClientError, Result};
-use repx_core::errors::CoreError;
+use repx_core::{
+    cache::{CacheKey, CacheMetadata, CacheStore, CacheStoreExt, FsCache},
+    errors::CoreError,
+};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -67,12 +70,18 @@ pub fn extract_image_to_cache(
         })?;
 
     let image_hash_name = parse_image_hash(image_filename)?;
-    let images_cache = cache_root.join("images");
-    let image_extract_dir = images_cache.join(&image_hash_name);
 
-    if image_extract_dir.exists() {
+    let cache = FsCache::new(cache_root.to_path_buf());
+    let cache_key = CacheKey::ImageExtract {
+        image_hash: image_hash_name.clone(),
+    };
+    let image_extract_dir = cache.path(&cache_key);
+
+    if cache.ensure_fresh(&cache_key)? {
         return Ok(image_extract_dir);
     }
+
+    let images_cache = cache_root.join("images");
 
     if image_path.is_dir() {
         tracing::info!(
@@ -96,6 +105,10 @@ pub fn extract_image_to_cache(
                 stderr
             ))));
         }
+
+        let meta = CacheMetadata::new(&cache_key, "OCI image directory (copied)")
+            .with_content_hash(&image_hash_name);
+        cache.mark_ready(&cache_key, meta)?;
 
         return Ok(image_extract_dir);
     }
@@ -133,11 +146,17 @@ pub fn extract_image_to_cache(
         ))));
     }
 
+    let meta = CacheMetadata::new(&cache_key, "OCI image tarball (extracted)")
+        .with_content_hash(&image_hash_name);
+    cache.mark_ready(&cache_key, meta)?;
+
     Ok(image_extract_dir)
 }
 
 pub fn restructure_layers_for_dedup(image_extract_dir: &Path, layers_cache: &Path) -> Result<()> {
     fs_err::create_dir_all(layers_cache).map_err(CoreError::Io)?;
+
+    let dedup_cache = FsCache::new(layers_cache.parent().unwrap_or(layers_cache).to_path_buf());
 
     for entry in fs_err::read_dir(image_extract_dir).map_err(CoreError::Io)? {
         let entry = entry.map_err(CoreError::Io)?;
@@ -146,12 +165,19 @@ pub fn restructure_layers_for_dedup(image_extract_dir: &Path, layers_cache: &Pat
         if path.is_dir() {
             let dirname = entry.file_name();
             if path.join("layer.tar").exists() {
-                let layer_cache_path = layers_cache.join(&dirname);
+                let layer_hash = dirname.to_string_lossy().to_string();
+                let dedup_key = CacheKey::LayerDedup {
+                    layer_hash: layer_hash.clone(),
+                };
+                let layer_cache_path = dedup_cache.path(&dedup_key);
 
-                if !layer_cache_path.exists() {
-                    fs_err::rename(&path, &layer_cache_path).map_err(CoreError::Io)?;
-                } else {
+                if dedup_cache.ensure_fresh(&dedup_key)? {
                     fs_err::remove_dir_all(&path).map_err(CoreError::Io)?;
+                } else {
+                    fs_err::rename(&path, &layer_cache_path).map_err(CoreError::Io)?;
+                    let meta = CacheMetadata::new(&dedup_key, "deduplicated OCI layer")
+                        .with_content_hash(&layer_hash);
+                    dedup_cache.mark_ready(&dedup_key, meta)?;
                 }
 
                 let relative_target = PathBuf::from("../../layers").join(&dirname);
@@ -294,9 +320,13 @@ pub fn extract_layer_to_cache(
     layers_cache: &Path,
     tar_tool: &Path,
 ) -> Result<()> {
-    let layer_dest_dir = layers_cache.join(layer_hash);
+    let cache = FsCache::new(layers_cache.parent().unwrap_or(layers_cache).to_path_buf());
+    let cache_key = CacheKey::LayerExtract {
+        layer_hash: layer_hash.to_string(),
+    };
+    let layer_dest_dir = cache.path(&cache_key);
 
-    if layer_dest_dir.exists() {
+    if cache.ensure_fresh(&cache_key)? {
         return Ok(());
     }
 
@@ -348,6 +378,9 @@ pub fn extract_layer_to_cache(
 
     fs_err::rename(&temp_extract_dir, &layer_dest_dir).map_err(CoreError::Io)?;
 
+    let meta = CacheMetadata::new(&cache_key, "OCI layer directory").with_content_hash(layer_hash);
+    cache.mark_ready(&cache_key, meta)?;
+
     Ok(())
 }
 
@@ -358,13 +391,17 @@ pub fn extract_layer_to_flat_store(
     store_cache: &Path,
     tar_tool: &Path,
 ) -> Result<()> {
-    let flat_layer_name = format!("{}-layer.tar", layer_hash);
-    let layer_dest_path = store_cache.join(&flat_layer_name);
+    let cache = FsCache::new(store_cache.parent().unwrap_or(store_cache).to_path_buf());
+    let cache_key = CacheKey::LayerFlatStore {
+        layer_hash: layer_hash.to_string(),
+    };
+    let layer_dest_path = cache.path(&cache_key);
 
-    if layer_dest_path.exists() {
+    if cache.ensure_fresh(&cache_key)? {
         return Ok(());
     }
 
+    let flat_layer_name = format!("{}-layer.tar", layer_hash);
     let temp_path = store_cache.join(format!(".tmp_{}", flat_layer_name));
     if temp_path.exists() {
         if let Err(e) = fs_err::remove_file(&temp_path) {
@@ -402,6 +439,11 @@ pub fn extract_layer_to_flat_store(
 
     fs_err::write(&temp_path, &output.stdout).map_err(CoreError::Io)?;
     fs_err::rename(&temp_path, &layer_dest_path).map_err(CoreError::Io)?;
+
+    let meta = CacheMetadata::new(&cache_key, "OCI layer flat tar")
+        .with_content_hash(layer_hash)
+        .with_size(output.stdout.len() as u64);
+    cache.mark_ready(&cache_key, meta)?;
 
     Ok(())
 }
