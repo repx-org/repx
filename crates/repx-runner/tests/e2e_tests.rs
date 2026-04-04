@@ -6,6 +6,18 @@ use predicates::prelude::PredicateBooleanExt;
 use std::fs;
 
 #[test]
+fn test_group_all_resolves() {
+    let harness = TestHarness::new();
+    harness.cmd().arg("run").arg("@all").assert().success();
+}
+
+#[test]
+fn test_group_compute_resolves() {
+    let harness = TestHarness::new();
+    harness.cmd().arg("run").arg("@compute").assert().success();
+}
+
+#[test]
 fn test_full_run_local_native() {
     let harness = TestHarness::new();
 

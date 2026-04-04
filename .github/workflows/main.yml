@@ -101,6 +101,9 @@ jobs:
           - e2e-local-lab-tar-symlink
           - e2e-local-lab-tar-retry
           - e2e-local-lab-tar-io-errors
+          - e2e-local-lab-tar-stale-extraction
+          - e2e-internal-logs
+          - e2e-slurm-multi-node-tar-source
     steps:
       - uses: actions/checkout@v4
       - uses: DeterminateSystems/nix-installer-action@main
