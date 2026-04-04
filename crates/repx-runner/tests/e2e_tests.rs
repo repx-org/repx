@@ -356,6 +356,9 @@ fn test_continue_on_failure_runs_independent_jobs() {
     fs::write(stage_a_path.join("repx/FAIL"), "simulated failure")
         .expect("writing FAIL marker must succeed");
 
+    let completions_path = harness.cache_dir.join("outputs/completions.jsonl");
+    let _ = fs::remove_file(&completions_path);
+
     let stage_b_job_id = harness.job_id_by_name("stage-B-producer");
     let stage_b_path = harness.job_output_path(&stage_b_job_id);
 

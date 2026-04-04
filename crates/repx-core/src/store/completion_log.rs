@@ -5,7 +5,6 @@ use std::fs::{self, OpenOptions};
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 
-const COMPLETIONS_DIR: &str = "repx";
 const COMPLETIONS_FILE: &str = "completions.jsonl";
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -23,7 +22,7 @@ enum CompletionStatus {
 }
 
 pub fn completions_path(base_path: &Path) -> PathBuf {
-    base_path.join(COMPLETIONS_DIR).join(COMPLETIONS_FILE)
+    base_path.join("outputs").join(COMPLETIONS_FILE)
 }
 
 pub fn append_completion(

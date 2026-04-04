@@ -103,7 +103,8 @@ pkgs.testers.runNixOSTest {
         print(f"Removed {markers_removed} SUCCESS markers from image cache")
 
         machine.succeed(f"find {base_path}/outputs -name SUCCESS -exec rm {{}} \\;")
-        print("Removed output SUCCESS markers to force re-run")
+        machine.succeed(f"rm -f {base_path}/outputs/completions.jsonl")
+        print("Removed output SUCCESS markers and completion log to force re-run")
 
         rootfs_count = int(machine.succeed(
             f"find {node_local}/repx -name rootfs -type d 2>/dev/null | wc -l"

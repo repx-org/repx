@@ -811,47 +811,49 @@ impl LocalTarget {
     }
 
     fn find_lab_manifest(&self, lab_hash: &str) -> Result<PathBuf> {
-        let artifacts_base = self.artifacts_base_path();
-        let lab_dir = artifacts_base.join("lab");
+        let lab_dir = self.artifacts_base_path().join("lab");
 
-        if lab_dir.exists() {
-            if let Some(entry) = fs_err::read_dir(&lab_dir)
-                .map_err(|e| ClientError::Config(CoreError::Io(e)))?
-                .filter_map(|e| e.ok())
-                .find(|e| {
-                    let name = e.file_name().to_string_lossy().to_string();
-                    name.contains(lab_hash) && name.ends_with("-lab-metadata.json")
+        let entries = std::fs::read_dir(&lab_dir).map_err(|_| {
+            ClientError::Config(CoreError::ManifestNotFound {
+                hash: lab_hash.to_string(),
+            })
+        })?;
+
+        let manifest = entries
+            .filter_map(|e| e.ok())
+            .find(|e| {
+                e.file_name()
+                    .to_string_lossy()
+                    .ends_with("lab-metadata.json")
+            })
+            .map(|e| e.path())
+            .ok_or_else(|| {
+                ClientError::Config(CoreError::ManifestNotFound {
+                    hash: lab_hash.to_string(),
                 })
-            {
-                return Ok(entry.path());
-            }
+            })?;
 
-            for entry in fs_err::read_dir(&lab_dir)
-                .map_err(|e| ClientError::Config(CoreError::Io(e)))?
-                .filter_map(|e| e.ok())
-            {
-                let name = entry.file_name().to_string_lossy().to_string();
-                if !name.ends_with("-lab-metadata.json") {
-                    continue;
-                }
-                if let Ok(content) = std::fs::read_to_string(entry.path()) {
-                    if let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) {
-                        if json.get("labId").and_then(|v| v.as_str()) == Some(lab_hash) {
-                            return Ok(entry.path());
-                        }
-                    }
-                }
-            }
+        let content = std::fs::read_to_string(&manifest)
+            .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
+        let json: serde_json::Value = serde_json::from_str(&content).map_err(|e| {
+            ClientError::Config(CoreError::InvalidConfig {
+                detail: format!("Failed to parse lab-metadata.json: {}", e),
+            })
+        })?;
+
+        let found_id = json.get("labId").and_then(|v| v.as_str()).ok_or_else(|| {
+            ClientError::Config(CoreError::InvalidConfig {
+                detail: "lab-metadata.json missing labId field".to_string(),
+            })
+        })?;
+
+        if found_id != lab_hash {
+            return Err(ClientError::Config(CoreError::ManifestNotFound {
+                hash: lab_hash.to_string(),
+            }));
         }
 
-        let fallback = artifacts_base.join(lab_hash);
-        if fallback.exists() {
-            return Ok(fallback);
-        }
-
-        Err(ClientError::Config(CoreError::ManifestNotFound {
-            hash: lab_hash.to_string(),
-        }))
+        Ok(manifest)
     }
 
     fn compute_root_size(&self, link_path: &Path) -> Option<u64> {
