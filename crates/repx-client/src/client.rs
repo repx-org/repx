@@ -541,12 +541,17 @@ impl Client {
                         .base_path()
                         .join("repx")
                         .join("temp")
-                        .join("host-tools-cache")
-                        .join("host-tools");
-                    let remote_ht_dest = target.artifacts_base_path().join("host-tools");
-                    if local_ht_cache.exists() {
-                        target.sync_directory(&local_ht_cache, &remote_ht_dest)?;
+                        .join("host-tools-cache");
+                    if !local_ht_cache.join("host-tools").exists() {
+                        std::fs::create_dir_all(&local_ht_cache)
+                            .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
+                        crate::tar_extract::extract_host_tools_from_tar(
+                            _tar_path,
+                            &local_ht_cache,
+                        )?;
                     }
+                    let remote_ht_dest = target.artifacts_base_path().join("host-tools");
+                    target.sync_directory(&local_ht_cache.join("host-tools"), &remote_ht_dest)?;
                 } else {
                     target.sync_lab_from_tar_via_rsync(_tar_path)?;
                 }

@@ -96,10 +96,19 @@ fn generate_repx_invoker_script(
         s.push('\n');
     }
 
+    s.push_str("if [ -n \"$REPX_ANCHOR_ID\" ]; then\n");
+    s.push_str("  trap 'scancel \"$REPX_ANCHOR_ID\" 2>/dev/null || true' EXIT\n");
+    s.push_str("fi\n\n");
+
     s.push_str(&repx_command_to_wrap);
     s.push_str(" --inputs-json-path /dev/fd/3");
     s.push_str(" --parameters-json-path /dev/fd/4");
-    s.push('\n');
+    s.push_str("\n_repx_rc=$?\n\n");
+
+    s.push_str("if [ -n \"$REPX_ANCHOR_ID\" ]; then\n");
+    s.push_str("  trap - EXIT\n");
+    s.push_str("fi\n");
+    s.push_str("exit $_repx_rc\n");
 
     Ok(s)
 }

@@ -43,7 +43,8 @@ let
 
   declaredParameters = stageDef.parameters or { };
   globalParameters = args.resolvedParameters or { };
-  resolvedParameters = declaredParameters // globalParameters;
+  nonNullGlobalParameters = pkgs.lib.filterAttrs (_: v: v != null) globalParameters;
+  resolvedParameters = declaredParameters // nonNullGlobalParameters;
 
   resolveWithParameters = common.mkResolveWithParameters resolvedParameters (toString stageFile);
 

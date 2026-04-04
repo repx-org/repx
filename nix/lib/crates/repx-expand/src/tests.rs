@@ -14,6 +14,28 @@ mod integration {
     }
 
     fn simple_stage(pname: &str, version: &str, script_drv: &str) -> StageTemplate {
+        simple_stage_with_defaults(pname, version, script_drv, BTreeMap::new())
+    }
+
+    fn simple_stage_with_params(
+        pname: &str,
+        version: &str,
+        script_drv: &str,
+        param_names: &[&str],
+    ) -> StageTemplate {
+        let defaults: BTreeMap<String, serde_json::Value> = param_names
+            .iter()
+            .map(|n| (n.to_string(), json!("")))
+            .collect();
+        simple_stage_with_defaults(pname, version, script_drv, defaults)
+    }
+
+    fn simple_stage_with_defaults(
+        pname: &str,
+        version: &str,
+        script_drv: &str,
+        parameter_defaults: BTreeMap<String, serde_json::Value>,
+    ) -> StageTemplate {
         StageTemplate {
             pname: pname.into(),
             version: version.into(),
@@ -34,6 +56,7 @@ mod integration {
                 );
                 m
             },
+            parameter_defaults,
             script_drv: Some(script_drv.into()),
             scatter_drv: None,
             gather_drv: None,
@@ -197,7 +220,7 @@ mod integration {
     fn test_hash_stability_same_inputs() {
         let mut axes = BTreeMap::new();
         axes.insert("x".into(), vec![json!(1)]);
-        let stage = simple_stage("stage-A", "1.0", "/nix/store/fake-drv");
+        let stage = simple_stage_with_params("stage-A", "1.0", "/nix/store/fake-drv", &["x"]);
         let run = make_run("test", axes, vec![stage]);
 
         let expanded1 = expand_run(&run, &BTreeMap::new());
@@ -214,7 +237,7 @@ mod integration {
 
     #[test]
     fn test_hash_different_params() {
-        let stage = simple_stage("stage-A", "1.0", "/nix/store/fake-drv");
+        let stage = simple_stage_with_params("stage-A", "1.0", "/nix/store/fake-drv", &["x"]);
 
         let mut axes1 = BTreeMap::new();
         axes1.insert("x".into(), vec![json!(1)]);
@@ -222,7 +245,7 @@ mod integration {
 
         let mut axes2 = BTreeMap::new();
         axes2.insert("x".into(), vec![json!(2)]);
-        let stage2 = simple_stage("stage-A", "1.0", "/nix/store/fake-drv");
+        let stage2 = simple_stage_with_params("stage-A", "1.0", "/nix/store/fake-drv", &["x"]);
         let run2 = make_run("test", axes2, vec![stage2]);
 
         let expanded1 = expand_run(&run1, &BTreeMap::new());
@@ -236,8 +259,8 @@ mod integration {
 
     #[test]
     fn test_params_only_version_change_propagates() {
-        let stage_a_v1 = simple_stage("stage-A", "1.0", "/nix/store/drv-a-v1");
-        let stage_a_v2 = simple_stage("stage-A", "2.0", "/nix/store/drv-a-v1");
+        let stage_a_v1 = simple_stage_with_params("stage-A", "1.0", "/nix/store/drv-a-v1", &["x"]);
+        let stage_a_v2 = simple_stage_with_params("stage-A", "2.0", "/nix/store/drv-a-v1", &["x"]);
 
         let mut axes = BTreeMap::new();
         axes.insert("x".into(), vec![json!(1)]);
@@ -259,8 +282,9 @@ mod integration {
 
     #[test]
     fn test_params_only_drv_change_no_effect() {
-        let stage1 = simple_stage("stage-A", "1.0", "/nix/store/drv-v1");
-        let stage2 = simple_stage("stage-A", "1.0", "/nix/store/drv-v2-different");
+        let stage1 = simple_stage_with_params("stage-A", "1.0", "/nix/store/drv-v1", &["x"]);
+        let stage2 =
+            simple_stage_with_params("stage-A", "1.0", "/nix/store/drv-v2-different", &["x"]);
 
         let mut axes = BTreeMap::new();
         axes.insert("x".into(), vec![json!(1)]);
@@ -282,8 +306,9 @@ mod integration {
 
     #[test]
     fn test_pure_drv_change_propagates() {
-        let stage1 = simple_stage("stage-A", "1.0", "/nix/store/drv-v1");
-        let stage2 = simple_stage("stage-A", "1.0", "/nix/store/drv-v2-different");
+        let stage1 = simple_stage_with_params("stage-A", "1.0", "/nix/store/drv-v1", &["x"]);
+        let stage2 =
+            simple_stage_with_params("stage-A", "1.0", "/nix/store/drv-v2-different", &["x"]);
 
         let mut axes = BTreeMap::new();
         axes.insert("x".into(), vec![json!(1)]);
@@ -305,7 +330,7 @@ mod integration {
 
     #[test]
     fn test_pure_vs_params_produce_different_hashes() {
-        let stage = simple_stage("stage-A", "1.0", "/nix/store/fake-drv");
+        let stage = simple_stage_with_params("stage-A", "1.0", "/nix/store/fake-drv", &["x"]);
 
         let mut axes = BTreeMap::new();
         axes.insert("x".into(), vec![json!(1)]);
@@ -327,7 +352,7 @@ mod integration {
 
     #[test]
     fn test_dedup_identical_combos() {
-        let stage = simple_stage("stage-A", "1.0", "/nix/store/fake-drv");
+        let stage = simple_stage_with_params("stage-A", "1.0", "/nix/store/fake-drv", &["x"]);
 
         let mut axes = BTreeMap::new();
         axes.insert("x".into(), vec![json!(1), json!(1)]);
@@ -344,8 +369,8 @@ mod integration {
 
     #[test]
     fn test_pipeline_upstream_propagation() {
-        let stage_a = simple_stage("stage-A", "1.0", "/nix/store/drv-a");
-        let mut stage_b = simple_stage("stage-B", "1.0", "/nix/store/drv-b");
+        let stage_a = simple_stage_with_params("stage-A", "1.0", "/nix/store/drv-a", &["x"]);
+        let mut stage_b = simple_stage_with_params("stage-B", "1.0", "/nix/store/drv-b", &["x"]);
         stage_b.input_mappings = vec![InputMapping {
             mapping_type: Some("intra-pipeline".into()),
             job_id_template: Some("stage-A".into()),

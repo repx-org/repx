@@ -276,25 +276,55 @@ let
     in
     scriptDrvs;
 
-  pipelineTemplates = pkgs.lib.imap0 (
-    i: pipeline:
+  allStageDeclaredParams =
     let
-      jobs = pkgs.lib.filter common.isVirtualJob (pkgs.lib.attrValues pipeline);
+      allJobs = pkgs.lib.concatMap (
+        pipeline: pkgs.lib.filter common.isVirtualJob (pkgs.lib.attrValues pipeline)
+      ) loadedPipelines;
     in
-    {
-      source =
-        let
-          p = builtins.elemAt pipelines i;
-        in
-        if builtins.isPath p then
-          toString p
-        else if builtins.isFunction p then
-          "pipeline-fn-${toString i}"
-        else
-          "pipeline-${toString i}";
-      stages = map (job: job.templateData) jobs;
-    }
-  ) loadedPipelines;
+    pkgs.lib.unique (pkgs.lib.concatMap (job: job.declaredParameterNames or [ ]) allJobs);
+
+  allProvidedParamNames =
+    let
+      fromAxes = builtins.attrNames parameterAxes;
+      fromZips = pkgs.lib.concatMap (zg: zg.members) zipGroupsList;
+    in
+    fromAxes ++ fromZips;
+
+  missingStageParams = pkgs.lib.subtractLists allProvidedParamNames allStageDeclaredParams;
+
+  validateStageParams =
+    if missingStageParams != [ ] then
+      throw ''
+        Error in 'mkRun' for run "${name}".
+        Stage(s) declare parameter(s) not provided by the run: ${builtins.toJSON missingStageParams}.
+        Every parameter declared by a stage must be provided by the run definition.
+        Use [ null ] for parameters that are not needed in this run.
+      ''
+    else
+      true;
+
+  pipelineTemplates =
+    assert validateStageParams;
+    pkgs.lib.imap0 (
+      i: pipeline:
+      let
+        jobs = pkgs.lib.filter common.isVirtualJob (pkgs.lib.attrValues pipeline);
+      in
+      {
+        source =
+          let
+            p = builtins.elemAt pipelines i;
+          in
+          if builtins.isPath p then
+            toString p
+          else if builtins.isFunction p then
+            "pipeline-fn-${toString i}"
+          else
+            "pipeline-${toString i}";
+        stages = map (job: job.templateData) jobs;
+      }
+    ) loadedPipelines;
 
 in
 if invalidKeys != [ ] then

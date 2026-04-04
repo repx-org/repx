@@ -88,6 +88,22 @@ fn expand_stage(
     dependency_drvs: &[String],
     bufs: &mut ThreadBuffers,
 ) -> ExpandedJob {
+    let effective_parameters: ParamCombo = stage
+        .parameter_defaults
+        .keys()
+        .map(|k| {
+            let value = resolved_parameters
+                .get(k)
+                .cloned()
+                .unwrap_or(serde_json::Value::Null);
+            if value.is_null() {
+                (k.clone(), stage.parameter_defaults[k].clone())
+            } else {
+                (k.clone(), value)
+            }
+        })
+        .collect();
+
     let dependency_ids: Vec<&str> = if !upstream_job_dir_names.is_empty() {
         upstream_job_dir_names.iter().map(|s| s.as_str()).collect()
     } else {
@@ -102,7 +118,7 @@ fn expand_stage(
         nix32::sha256_hex(joined.as_bytes())
     };
 
-    let params_bytes = ThreadBuffers::json_to_buf(&mut bufs.params_buf, resolved_parameters);
+    let params_bytes = ThreadBuffers::json_to_buf(&mut bufs.params_buf, &effective_parameters);
     let parameters_json = unsafe { std::str::from_utf8_unchecked(params_bytes) };
 
     let mappings_bytes = ThreadBuffers::json_to_buf(&mut bufs.mappings_buf, &stage.input_mappings);
@@ -139,7 +155,7 @@ fn expand_stage(
         stage_type: stage.stage_type,
         parameters_json: parameters_json_owned,
         dependency_manifest_json: dependency_manifest_json_owned,
-        resolved_parameters: resolved_parameters.clone(),
+        resolved_parameters: effective_parameters,
         input_mappings: stage.input_mappings.clone(),
         executables,
         resources: stage.resources.clone(),

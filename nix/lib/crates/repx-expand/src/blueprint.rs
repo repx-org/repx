@@ -64,6 +64,9 @@ pub struct StageTemplate {
     pub executables: BTreeMap<String, ExecutableTemplate>,
 
     #[serde(default)]
+    pub parameter_defaults: BTreeMap<String, serde_json::Value>,
+
+    #[serde(default)]
     pub script_drv: Option<String>,
 
     #[serde(default)]

@@ -8,7 +8,6 @@ let
     parameters = {
       param_a = 0;
       param_b = 0;
-      param_c = 0;
     };
 
     outputs = {
