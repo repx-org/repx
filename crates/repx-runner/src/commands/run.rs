@@ -155,6 +155,23 @@ pub fn handle_run(
             ClientEvent::SyncingLabTar => {
                 println!("- Syncing lab tar to target...");
             }
+            ClientEvent::CheckingJobStatuses => {
+                println!("- Checking job statuses on target...");
+            }
+            ClientEvent::PreparingInputs { num_jobs } => {
+                println!("- Preparing inputs for {} jobs...", num_jobs);
+            }
+            ClientEvent::PreparingInputProgress {
+                job_id,
+                current,
+                total,
+            } => {
+                println!(
+                    "  {} {}",
+                    format!("[{}/{}]", current, total).dimmed(),
+                    job_id.to_string().dimmed(),
+                );
+            }
             ClientEvent::GeneratingSlurmScripts { num_jobs } => {
                 println!("- Generating {} SLURM scripts...", num_jobs);
             }

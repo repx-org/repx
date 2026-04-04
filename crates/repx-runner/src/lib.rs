@@ -30,7 +30,7 @@ pub fn run(cli: Cli) -> Result<(), CliError> {
         Commands::InternalOrchestrate(args) => {
             commands::internal::handle_internal_orchestrate(args)
         }
-        Commands::InternalExecute(args) => commands::execute::handle_execute(args),
+        Commands::InternalExecute(args) => commands::execute::handle_execute(*args),
         Commands::InternalScatterGather(args) => {
             commands::scatter_gather::handle_scatter_gather(*args, Verbosity::from(cli.verbose))
         }

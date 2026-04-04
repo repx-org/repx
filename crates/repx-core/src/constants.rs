@@ -25,3 +25,7 @@ pub mod dirs {
 pub mod targets {
     pub const LOCAL: &str = "local";
 }
+
+pub mod cache {
+    pub const METADATA_SUFFIX: &str = ".repx-cache.json";
+}

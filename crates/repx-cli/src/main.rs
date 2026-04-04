@@ -1,7 +1,10 @@
 use clap::{Args, CommandFactory, Parser, Subcommand};
 use clap_complete::{generate, Shell};
 use colored::Colorize;
-use repx_core::model::SchedulerType;
+use repx_core::{
+    cache::{CacheStats, CacheStore, FsCache, KNOWN_CACHE_TYPES},
+    model::SchedulerType,
+};
 use repx_runner::cli::Commands as RunnerCommands;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -67,6 +70,9 @@ enum Commands {
 
     #[command(about = "Generate shell completions")]
     Completions(CompletionsArgs),
+
+    #[command(about = "Manage the repx cache")]
+    Cache(CacheArgs),
 }
 
 #[derive(Args)]
@@ -142,6 +148,48 @@ struct InitArgs {
 struct CompletionsArgs {
     #[arg(long, help = "Shell to generate completions for")]
     shell: Shell,
+}
+
+#[derive(Args)]
+struct CacheArgs {
+    #[command(subcommand)]
+    action: CacheAction,
+}
+
+#[derive(Subcommand)]
+enum CacheAction {
+    #[command(about = "List all cache entries")]
+    List {
+        #[arg(long, help = "Filter by cache type")]
+        r#type: Option<String>,
+    },
+
+    #[command(about = "Show cache statistics")]
+    Stats,
+
+    #[command(about = "Invalidate cache entries (remove metadata only)")]
+    Invalidate {
+        #[arg(long, help = "Invalidate all entries of this type")]
+        r#type: Option<String>,
+
+        #[arg(help = "Specific cache key to invalidate (format: type:id)")]
+        key: Option<String>,
+
+        #[arg(long, help = "Invalidate all entries")]
+        all: bool,
+    },
+
+    #[command(about = "Remove cached data and metadata")]
+    Clear {
+        #[arg(long, help = "Remove only entries of this type")]
+        r#type: Option<String>,
+
+        #[arg(long, help = "Skip confirmation prompt")]
+        yes: bool,
+    },
+
+    #[command(about = "List known cache type names")]
+    Types,
 }
 
 #[derive(Args)]
@@ -334,6 +382,264 @@ fn main() {
             let name = cmd.get_name().to_string();
             generate(args.shell, &mut cmd, name, &mut std::io::stdout());
         }
+        Commands::Cache(args) => {
+            if let Err(e) = handle_cache(args) {
+                eprintln!("{}", format!("[ERROR] {}", e).red());
+                std::process::exit(1);
+            }
+        }
+    }
+}
+
+fn get_cache_root() -> Result<PathBuf, String> {
+    let config =
+        repx_core::config::load_config().map_err(|e| format!("Failed to load config: {}", e))?;
+    let local_target = config
+        .targets
+        .get("local")
+        .ok_or("No 'local' target configured. Cannot determine cache directory.".to_string())?;
+    Ok(local_target.base_path.join("repx"))
+}
+
+fn handle_cache(args: CacheArgs) -> Result<(), String> {
+    let cache_root = get_cache_root()?;
+    let cache = FsCache::new(cache_root.clone());
+
+    match args.action {
+        CacheAction::List {
+            r#type: type_filter,
+        } => {
+            let entries = cache
+                .list()
+                .map_err(|e| format!("Failed to list cache: {}", e))?;
+
+            if entries.is_empty() {
+                println!("No cache entries found.");
+                println!("Cache root: {}", cache_root.display());
+                return Ok(());
+            }
+
+            let filtered: Vec<_> = if let Some(ref filter) = type_filter {
+                entries
+                    .into_iter()
+                    .filter(|(k, _)| k.type_name() == filter.as_str())
+                    .collect()
+            } else {
+                entries
+            };
+
+            if filtered.is_empty() {
+                if let Some(filter) = type_filter {
+                    println!("No cache entries matching type '{}'.", filter);
+                } else {
+                    println!("No cache entries found.");
+                }
+                return Ok(());
+            }
+
+            println!(
+                "{:<20} {:<40} {:<10} {:<12} DESCRIPTION",
+                "TYPE", "KEY", "SIZE", "AGE"
+            );
+            println!("{}", "-".repeat(100));
+
+            for (key, meta) in &filtered {
+                let size = meta
+                    .size_bytes
+                    .map(format_bytes)
+                    .unwrap_or_else(|| "-".to_string());
+
+                let age = format_age(meta.created_at);
+                let desc = if meta.description.len() > 30 {
+                    format!("{}...", &meta.description[..27])
+                } else {
+                    meta.description.clone()
+                };
+
+                println!(
+                    "{:<20} {:<40} {:<10} {:<12} {}",
+                    key.type_name(),
+                    truncate(&key.key_id(), 38),
+                    size,
+                    age,
+                    desc
+                );
+            }
+
+            println!();
+            println!("Total: {} entries", filtered.len());
+            println!("Cache root: {}", cache_root.display());
+            Ok(())
+        }
+
+        CacheAction::Stats => {
+            let entries = cache
+                .list()
+                .map_err(|e| format!("Failed to list cache: {}", e))?;
+            let disk = cache
+                .disk_usage()
+                .map_err(|e| format!("Failed to calculate disk usage: {}", e))?;
+            let stats = CacheStats::from_entries(&entries);
+
+            println!("Cache Statistics");
+            println!("{}", "-".repeat(40));
+            println!("  Root:          {}", cache_root.display());
+            println!("  Total entries: {}", stats.total_entries);
+            println!("  Disk usage:    {}", format_bytes(disk));
+
+            if let Some(oldest) = stats.oldest {
+                println!("  Oldest entry:  {}", format_age(oldest));
+            }
+            if let Some(newest) = stats.newest {
+                println!("  Newest entry:  {}", format_age(newest));
+            }
+
+            if !stats.entries_by_type.is_empty() {
+                println!();
+                println!("  Entries by type:");
+                for (type_name, count) in &stats.entries_by_type {
+                    println!("    {:<25} {}", type_name, count);
+                }
+            }
+
+            Ok(())
+        }
+
+        CacheAction::Invalidate {
+            r#type: type_filter,
+            key,
+            all,
+        } => {
+            if !all && type_filter.is_none() && key.is_none() {
+                return Err("Specify --all, --type <name>, or a specific key.".to_string());
+            }
+
+            let entries = cache
+                .list()
+                .map_err(|e| format!("Failed to list cache: {}", e))?;
+
+            let to_invalidate: Vec<_> = if all {
+                entries.iter().map(|(k, _)| k).collect()
+            } else if let Some(ref filter) = type_filter {
+                entries
+                    .iter()
+                    .filter(|(k, _)| k.type_name() == filter.as_str())
+                    .map(|(k, _)| k)
+                    .collect()
+            } else if let Some(ref key_str) = key {
+                entries
+                    .iter()
+                    .filter(|(k, _)| k.to_string() == *key_str)
+                    .map(|(k, _)| k)
+                    .collect()
+            } else {
+                Vec::new()
+            };
+
+            if to_invalidate.is_empty() {
+                println!("No matching cache entries to invalidate.");
+                return Ok(());
+            }
+
+            for k in &to_invalidate {
+                cache
+                    .remove(k)
+                    .map_err(|e| format!("Failed to remove {}: {}", k, e))?;
+            }
+
+            println!("Invalidated {} cache entries.", to_invalidate.len());
+            Ok(())
+        }
+
+        CacheAction::Clear {
+            r#type: type_filter,
+            yes,
+        } => {
+            let entries = cache
+                .list()
+                .map_err(|e| format!("Failed to list cache: {}", e))?;
+
+            let to_clear: Vec<_> = if let Some(ref filter) = type_filter {
+                entries
+                    .into_iter()
+                    .filter(|(k, _)| k.type_name() == filter.as_str())
+                    .collect()
+            } else {
+                entries
+            };
+
+            if to_clear.is_empty() {
+                println!("No cache entries to clear.");
+                return Ok(());
+            }
+
+            if !yes {
+                println!(
+                    "This will remove {} cache entries and their data.",
+                    to_clear.len()
+                );
+                println!("Run with --yes to confirm.");
+                return Ok(());
+            }
+
+            for (k, _) in &to_clear {
+                if let Err(e) = cache.remove(k) {
+                    eprintln!("Warning: failed to remove {}: {}", k, e);
+                }
+            }
+
+            println!("Cleared {} cache entries.", to_clear.len());
+            Ok(())
+        }
+
+        CacheAction::Types => {
+            println!("Known cache types:");
+            for type_name in KNOWN_CACHE_TYPES {
+                println!("  {}", type_name);
+            }
+            Ok(())
+        }
+    }
+}
+
+fn format_bytes(bytes: u64) -> String {
+    const KB: u64 = 1024;
+    const MB: u64 = KB * 1024;
+    const GB: u64 = MB * 1024;
+    if bytes >= GB {
+        format!("{:.1} GB", bytes as f64 / GB as f64)
+    } else if bytes >= MB {
+        format!("{:.1} MB", bytes as f64 / MB as f64)
+    } else if bytes >= KB {
+        format!("{:.1} KB", bytes as f64 / KB as f64)
+    } else {
+        format!("{} B", bytes)
+    }
+}
+
+fn format_age(timestamp: chrono::DateTime<chrono::Utc>) -> String {
+    let age = chrono::Utc::now() - timestamp;
+    let total_secs = age.num_seconds();
+    if total_secs < 0 {
+        return "future".to_string();
+    }
+    let days = total_secs / 86400;
+    let hours = (total_secs % 86400) / 3600;
+    let mins = (total_secs % 3600) / 60;
+    if days > 0 {
+        format!("{}d {}h", days, hours)
+    } else if hours > 0 {
+        format!("{}h {}m", hours, mins)
+    } else {
+        format!("{}m", mins)
+    }
+}
+
+fn truncate(s: &str, max: usize) -> String {
+    if s.len() > max {
+        format!("{}...", &s[..max.saturating_sub(3)])
+    } else {
+        s.to_string()
     }
 }
 

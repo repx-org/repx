@@ -124,6 +124,11 @@ let
     e2e-local-lab-tar-io-errors = import ./checks/runtime/e2e-local-lab-tar-io-errors.nix {
       inherit pkgs repx referenceLab;
     };
+    e2e-local-lab-tar-stale-extraction =
+      import ./checks/runtime/e2e-local-lab-tar-stale-extraction.nix
+        {
+          inherit pkgs repx referenceLab;
+        };
 
     non-nixos-local-bwrap-impure = import ./checks/runtime/non-nixos-local-bwrap-impure.nix {
       inherit pkgs repx referenceLab;

@@ -4,12 +4,12 @@
   consumerInputs,
   producerPname,
   interRunDepTypes ? { },
-  dependencyJobs ? { },
   ...
 }:
 let
   common = import ./common.nix;
   isFirstStage = dependencies == [ ];
+
   explicitDeps =
     pkgs.lib.foldl'
       (
@@ -31,19 +31,16 @@ let
                   Pipeline connection error: Implicit dependency resolution failed.
                   Stage "${producerPname}" depends on "${producerJob.pname}", but they share no matching input/output names.
 
-                  When passing a stage derivation directly (implicit mapping), at least one output name from the producer
-                  must match an input name in the consumer.
-
                   Producer "${producerJob.pname}" outputs: ${builtins.toJSON producerOutputs}
                   Consumer "${producerPname}" inputs:  ${builtins.toJSON consumerInputNames}
 
-                  If the names differ, use the explicit mapping syntax: [ producer "source_output" "target_input" ]
+                  Use the explicit mapping syntax: [ producer "source_output" "target_input" ]
                 ''
               else
                 let
                   newMappings = pkgs.lib.mapAttrsToList (name: _: {
                     type = "intra-pipeline";
-                    job_id = producerJob.jobDirName;
+                    job_id_template = producerJob.pname;
                     source_output = name;
                     target_input = name;
                   }) validMappings;
@@ -65,7 +62,7 @@ let
                 producerOutputs = dep.outputMetadata or { };
               in
               if !(common.isVirtualJob dep) then
-                throw "In [dep, ...], the first element must be a virtual job, but got: ${builtins.typeOf dep}"
+                throw "In [dep, ...], the first element must be a virtual job."
               else if !(pkgs.lib.all pkgs.lib.isString strings) then
                 throw "In [dep, ...], all elements after the first must be strings."
               else if
@@ -74,25 +71,16 @@ let
                   3
                 ])
               then
-                throw "A grouped list dependency must have 2 or 3 elements, but got ${toString (pkgs.lib.length item)}."
+                throw "A grouped list dependency must have 2 or 3 elements."
               else if !(builtins.hasAttr sourceName producerOutputs) then
-                let
-                  availableOutputs = builtins.attrNames producerOutputs;
-                in
                 throw ''
-                  Pipeline connection error: Stage validation failed.
-                  The producer stage "${dep.pname}" does not have an output named "${sourceName}".
-                  Available outputs are: ${builtins.toJSON availableOutputs}
+                  Pipeline connection error: Stage "${dep.pname}" does not have output "${sourceName}".
+                  Available outputs: ${builtins.toJSON (builtins.attrNames producerOutputs)}
                 ''
               else if !(builtins.hasAttr targetName consumerInputs) then
-                let
-                  availableInputs = builtins.attrNames consumerInputs;
-                in
                 throw ''
-                  Pipeline connection error: Stage validation failed.
-                  You are trying to connect to a target input named "${targetName}" on stage "${producerPname}".
-                  However, that stage does not declare such an input.
-                  Available inputs on "${producerPname}" are: ${builtins.toJSON availableInputs}
+                  Pipeline connection error: Stage "${producerPname}" does not have input "${targetName}".
+                  Available inputs: ${builtins.toJSON (builtins.attrNames consumerInputs)}
                 ''
               else
                 {
@@ -103,14 +91,14 @@ let
                   inputMappings = [
                     {
                       type = "intra-pipeline";
-                      job_id = dep.jobDirName;
+                      job_id_template = dep.pname;
                       source_output = sourceName;
                       target_input = targetName;
                     }
                   ];
                 }
             else
-              throw "Dependency item in '${producerPname}' must be a virtual job or a list. found: ${builtins.typeOf item}";
+              throw "Dependency in '${producerPname}' must be a virtual job or a list. Got: ${builtins.typeOf item}";
         in
         {
           upstreamJobs = acc.upstreamJobs ++ result.upstreamJobs;
@@ -127,12 +115,6 @@ let
 
   requiredRunNames = builtins.attrNames interRunDepTypes;
 
-  upstreamInterRunJobs =
-    if isFirstStage then
-      pkgs.lib.flatten (map (name: dependencyJobs.${name} or [ ]) requiredRunNames)
-    else
-      [ ];
-
   implicitMappings =
     if isFirstStage then
       pkgs.lib.concatMap (
@@ -145,20 +127,12 @@ let
         if !(builtins.hasAttr metaInput consumerInputs) then
           throw ''
             Pipeline Error in stage '${producerPname}':
-            This stage is a "First Stage" (it has no intra-pipeline dependencies).
-            The Run Definition declares a dependency on run '${runName}'.
-
-            Therefore, this stage MUST accept the input: "${metaInput}".
-
-            Please add '"${metaInput}" = "";' to the inputs of '${producerPname}'.
+            First stage must accept input: "${metaInput}".
           ''
         else if !(builtins.hasAttr baseInput consumerInputs) then
           throw ''
             Pipeline Error in stage '${producerPname}':
-            This stage is a "First Stage" and the run has external dependencies.
-            It MUST accept the input: "store__base".
-
-            Please add '"store__base" = "";' to the inputs of '${producerPname}'.
+            First stage with external deps must accept input: "store__base".
           ''
         else
           [
@@ -184,12 +158,7 @@ let
       if forbiddenInputs != [ ] then
         throw ''
           Pipeline Error in stage '${producerPname}':
-          This stage depends on other stages within the pipeline. It is NOT a "First Stage".
-          Only First Stages are allowed to accept inter-run metadata/store arguments.
-
-          Please remove the following inputs: ${builtins.toJSON forbiddenInputs}
-
-          Pass necessary data from the upstream stages instead.
+          Non-first stages cannot accept inter-run inputs: ${builtins.toJSON forbiddenInputs}
         ''
       else
         [ ];
@@ -211,17 +180,13 @@ in
 if missingInputNames != [ ] then
   throw ''
     Pipeline connection error: Unresolved inputs in stage "${producerPname}".
-    The following inputs are declared but were not provided by any dependency:
-    ${builtins.toJSON missingInputNames}
-
-    Provided inputs: ${builtins.toJSON satisfiedInputNames}
-    Declared inputs: ${builtins.toJSON requiredInputNames}
-
-    Please ensure all inputs are mapped from an upstream stage or implicit dependency.
+    Missing: ${builtins.toJSON missingInputNames}
+    Provided: ${builtins.toJSON satisfiedInputNames}
+    Declared: ${builtins.toJSON requiredInputNames}
   ''
 else
   {
-    upstreamJobs = explicitDeps.upstreamJobs ++ upstreamInterRunJobs;
+    inherit (explicitDeps) upstreamJobs;
     dependencyDerivations =
       let
         drvsFromJobs = pkgs.lib.concatMap (
@@ -235,22 +200,8 @@ else
           else
             [ job.scriptDrv ]
         ) explicitDeps.upstreamJobs;
-        interRunDrvs = pkgs.lib.concatMap (
-          job:
-          if common.isVirtualJob job then
-            if job.repxStageType == "scatter-gather" then
-              [
-                job.scatterDrv
-                job.gatherDrv
-              ]
-              ++ (builtins.attrValues job.stepDrvs)
-            else
-              [ job.scriptDrv ]
-          else
-            [ ]
-        ) upstreamInterRunJobs;
       in
-      common.uniqueDrvs (drvsFromJobs ++ interRunDrvs);
+      common.uniqueDrvs drvsFromJobs;
     finalFlatInputs = allSatisfiedInputs;
     inputMappings = explicitDeps.inputMappings ++ uniqueImplicitMappings;
   }

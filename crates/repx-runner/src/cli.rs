@@ -75,7 +75,7 @@ pub enum Commands {
     InternalOrchestrate(InternalOrchestrateArgs),
 
     #[command(hide = true)]
-    InternalExecute(InternalExecuteArgs),
+    InternalExecute(Box<InternalExecuteArgs>),
 
     #[command(hide = true)]
     InternalScatterGather(Box<InternalScatterGatherArgs>),
@@ -369,7 +369,10 @@ impl From<ArtifactStoreArg> for repx_core::model::ArtifactStore {
 #[derive(Args)]
 pub struct InternalOrchestrateArgs {
     #[arg(value_name = "PLAN_FILE")]
-    pub plan_file: PathBuf,
+    pub plan_file: Option<PathBuf>,
+
+    #[arg(long)]
+    pub stream: bool,
 }
 
 #[derive(Args)]
@@ -412,7 +415,12 @@ pub struct InternalExecuteArgs {
     pub repx_out_dir: Option<PathBuf>,
     #[arg(
         long,
-        help = "Override the parameters JSON path (for scatter-gather steps)."
+        help = "Override the inputs JSON path (for heredoc-based submission)."
+    )]
+    pub inputs_json_path: Option<PathBuf>,
+    #[arg(
+        long,
+        help = "Override the parameters JSON path (for heredoc-based submission)."
     )]
     pub parameters_json_path: Option<PathBuf>,
     #[arg(

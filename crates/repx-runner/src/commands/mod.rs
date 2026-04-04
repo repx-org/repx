@@ -23,8 +23,7 @@ pub(crate) fn create_tokio_runtime() -> Result<tokio::runtime::Runtime, CliError
 }
 
 pub(crate) fn write_marker(path: &Path) -> std::io::Result<()> {
-    let f = std::fs::File::create(path)?;
-    f.sync_all()?;
+    let _f = std::fs::File::create(path)?;
     Ok(())
 }
 

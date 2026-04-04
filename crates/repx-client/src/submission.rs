@@ -2,6 +2,7 @@ use crate::client::ClientEvent;
 use crate::error::Result;
 use crate::targets::Target;
 use repx_core::{
+    cache::{CacheKey, CacheMetadata, CacheStore, CacheStoreExt, FsCache},
     engine,
     lab::LabSource,
     model::{Job, JobId, Lab, RunId, StageType},
@@ -129,17 +130,24 @@ pub fn sync_images(
                     fs_err::create_dir_all(&image_cache).map_err(|e| {
                         crate::error::ClientError::Config(repx_core::errors::CoreError::Io(e))
                     })?;
-                    let dest = image_cache.join(
-                        relative_path
-                            .file_name()
-                            .unwrap_or(std::ffi::OsStr::new("image")),
-                    );
-                    if !dest.exists() {
+                    let filename = relative_path
+                        .file_name()
+                        .unwrap_or(std::ffi::OsStr::new("image"))
+                        .to_string_lossy()
+                        .to_string();
+                    let cache = FsCache::new(local_cache_root.to_path_buf());
+                    let cache_key = CacheKey::ImageFromTar {
+                        filename: filename.clone(),
+                    };
+                    let dest = cache.path(&cache_key);
+                    if !cache.ensure_fresh(&cache_key)? {
                         crate::tar_extract::extract_image_from_tar(
                             tar_path,
                             &relative_path.to_string_lossy(),
                             &image_cache,
                         )?;
+                        let meta = CacheMetadata::new(&cache_key, "image extracted from lab tar");
+                        cache.mark_ready(&cache_key, meta)?;
                     }
                     dest
                 }
@@ -163,8 +171,17 @@ pub fn generate_inputs_for_jobs(
     source: &LabSource,
     jobs_to_run: &HashMap<JobId, &Job>,
     target: Arc<dyn Target>,
+    event_sender: Option<&std::sync::mpsc::Sender<ClientEvent>>,
 ) -> Result<()> {
-    for (job_id, job) in jobs_to_run {
+    let total = jobs_to_run.len();
+    for (current, (job_id, job)) in jobs_to_run.iter().enumerate() {
+        if let Some(sender) = event_sender {
+            let _ = sender.send(ClientEvent::PreparingInputProgress {
+                job_id: job_id.clone(),
+                current: current + 1,
+                total,
+            });
+        }
         let exe_name = if job.stage_type == StageType::ScatterGather {
             "scatter"
         } else {

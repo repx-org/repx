@@ -94,6 +94,8 @@ pub trait TargetInfo: Send + Sync {
 
 pub trait CommandRunner: TargetInfo {
     fn run_command(&self, command: &str, args: &[&str]) -> Result<String>;
+
+    fn spawn_command(&self, command: &str, args: &[&str]) -> Result<std::process::Child>;
 }
 
 pub trait ArtifactSync: TargetInfo {
@@ -183,6 +185,22 @@ pub trait JobRunner: CommandRunner {
     ) -> Result<std::process::Child>;
 
     fn check_outcome_markers(&self) -> Result<HashMap<JobId, engine::JobStatus>> {
+        match repx_core::store::completion_log::read_completions(self.base_path(), self.name()) {
+            Ok(Some(outcomes)) if !outcomes.is_empty() => {
+                tracing::debug!("Read {} outcomes from completion log", outcomes.len());
+                return Ok(outcomes);
+            }
+            Ok(_) => {
+                tracing::debug!("No completion log found, falling back to find-based scan");
+            }
+            Err(e) => {
+                tracing::warn!(
+                    "Failed to read completion log ({}), falling back to find-based scan",
+                    e
+                );
+            }
+        }
+
         let outputs_path = self.base_path().join(dirs::OUTPUTS);
         let find_cmd = format!(
             "if [ -d \"{}\" ]; then find \"{}\" -mindepth 3 -maxdepth 3 \\( -name {} -o -name {} \\) -path '*/{}/*'; fi",

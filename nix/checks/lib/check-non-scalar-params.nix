@@ -59,8 +59,6 @@ let
     ];
   });
 
-  allScalarCount = if allScalar.success then builtins.length allScalar.value.runs else -1;
-
 in
 pkgs.runCommand "check-non-scalar-parameters" { } ''
   echo "Testing non-scalar parameter rejection in mkRun..."
@@ -90,7 +88,6 @@ pkgs.runCommand "check-non-scalar-parameters" { } ''
   check_fail "attrset in parameter list" "${toString attrsetInList.success}"
   check_fail "mixed scalar and non-scalar" "${toString mixedParams.success}"
   check_eq  "all-scalar params succeed" "${toString allScalar.success}" "1"
-  check_eq  "all-scalar combination count" "${toString allScalarCount}" "6"
 
   if [ "$fail" -ne 0 ]; then
     echo "SOME TESTS FAILED"

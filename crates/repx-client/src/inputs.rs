@@ -5,45 +5,22 @@ use repx_core::{
     lab::LabSource,
     model::{Job, JobId, Lab},
 };
+use std::path::Path;
 use std::sync::Arc;
 
-pub fn generate_and_write_parameters_json(
-    job: &Job,
-    job_id: &JobId,
-    target: Arc<dyn crate::targets::Target>,
-) -> Result<()> {
-    let json_content = serde_json::to_string_pretty(&job.params)
-        .map_err(|e| ClientError::Config(CoreError::Json(e)))?;
-
-    let parameters_json_path = target
-        .base_path()
-        .join(dirs::OUTPUTS)
-        .join(job_id.as_str())
-        .join(dirs::REPX)
-        .join("parameters.json");
-
-    tracing::info!(
-        "Generating parameters.json for job '{}' on target '{}'",
-        job_id,
-        target.name()
-    );
-    tracing::debug!(
-        "Writing parameters.json to '{}' with content:\n{}",
-        parameters_json_path.display(),
-        json_content
-    );
-
-    target.write_remote_file(&parameters_json_path, &json_content)
+pub fn generate_parameters_json_content(job: &Job) -> Result<String> {
+    serde_json::to_string_pretty(&job.params).map_err(|e| ClientError::Config(CoreError::Json(e)))
 }
 
-pub fn generate_and_write_inputs_json(
+pub fn generate_inputs_json_content(
     lab: &Lab,
     source: &LabSource,
     job: &Job,
     job_id: &JobId,
-    target: Arc<dyn crate::targets::Target>,
+    base_path: &Path,
+    artifacts_base_path: &Path,
     executable_name: &str,
-) -> Result<()> {
+) -> Result<String> {
     let mut inputs_map = serde_json::Map::new();
 
     let exe = job.executables.get(executable_name).ok_or_else(|| {
@@ -94,8 +71,7 @@ pub fn generate_and_write_inputs_json(
                 })
             })?;
 
-            let dep_output_dir = target
-                .base_path()
+            let dep_output_dir = base_path
                 .join(dirs::OUTPUTS)
                 .join(dep_job_id.as_str())
                 .join(dirs::OUT);
@@ -108,7 +84,7 @@ pub fn generate_and_write_inputs_json(
         } else if mapping.mapping_type == Some(repx_core::model::MappingType::Global)
             || mapping.target_input == "store__base"
         {
-            let store_path = target.base_path().to_string_lossy().to_string();
+            let store_path = base_path.to_string_lossy().to_string();
             inputs_map.insert(
                 mapping.target_input.clone(),
                 serde_json::Value::String(store_path),
@@ -155,7 +131,7 @@ pub fn generate_and_write_inputs_json(
             };
 
             if let Some(filename) = found_filename {
-                let remote_path = target.artifacts_base_path().join("revision").join(filename);
+                let remote_path = artifacts_base_path.join("revision").join(filename);
                 inputs_map.insert(
                     mapping.target_input.clone(),
                     serde_json::Value::String(remote_path.to_string_lossy().to_string()),
@@ -169,8 +145,55 @@ pub fn generate_and_write_inputs_json(
         }
     }
 
-    let json_content = serde_json::to_string_pretty(&serde_json::Value::Object(inputs_map))
-        .map_err(|e| ClientError::Config(CoreError::Json(e)))?;
+    serde_json::to_string_pretty(&serde_json::Value::Object(inputs_map))
+        .map_err(|e| ClientError::Config(CoreError::Json(e)))
+}
+
+pub fn generate_and_write_parameters_json(
+    job: &Job,
+    job_id: &JobId,
+    target: Arc<dyn crate::targets::Target>,
+) -> Result<()> {
+    let json_content = generate_parameters_json_content(job)?;
+
+    let parameters_json_path = target
+        .base_path()
+        .join(dirs::OUTPUTS)
+        .join(job_id.as_str())
+        .join(dirs::REPX)
+        .join("parameters.json");
+
+    tracing::info!(
+        "Generating parameters.json for job '{}' on target '{}'",
+        job_id,
+        target.name()
+    );
+    tracing::debug!(
+        "Writing parameters.json to '{}' with content:\n{}",
+        parameters_json_path.display(),
+        json_content
+    );
+
+    target.write_remote_file(&parameters_json_path, &json_content)
+}
+
+pub fn generate_and_write_inputs_json(
+    lab: &Lab,
+    source: &LabSource,
+    job: &Job,
+    job_id: &JobId,
+    target: Arc<dyn crate::targets::Target>,
+    executable_name: &str,
+) -> Result<()> {
+    let json_content = generate_inputs_json_content(
+        lab,
+        source,
+        job,
+        job_id,
+        target.base_path(),
+        &target.artifacts_base_path(),
+        executable_name,
+    )?;
 
     let inputs_json_path_on_target = target
         .base_path()

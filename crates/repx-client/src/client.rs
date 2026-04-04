@@ -5,6 +5,7 @@ use crate::{
 use comfy_table::{modifiers::UTF8_ROUND_CORNERS, presets, Attribute, Cell, Color, Table};
 use fs_err;
 use repx_core::{
+    cache::{CacheKey, CacheMetadata, CacheStore, CacheStoreExt, FsCache},
     config::{Config, Resources},
     constants::{dirs, logs, targets},
     engine,
@@ -56,6 +57,15 @@ pub enum ClientEvent {
     DeployingBinary,
     CreatingLabTar,
     SyncingLabTar,
+    CheckingJobStatuses,
+    PreparingInputs {
+        num_jobs: usize,
+    },
+    PreparingInputProgress {
+        job_id: JobId,
+        current: usize,
+        total: usize,
+    },
     GeneratingSlurmScripts {
         num_jobs: usize,
     },
@@ -195,6 +205,7 @@ pub struct Client {
     pub(crate) lab: Lab,
     pub(crate) targets: HashMap<String, Arc<dyn Target>>,
     pub(crate) slurm_map: SlurmIdMap,
+    pub(crate) cache: Arc<FsCache>,
 }
 
 impl Client {
@@ -214,13 +225,19 @@ impl Client {
         fs_err::create_dir_all(&client_temp_dir)
             .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
 
+        let cache = Arc::new(FsCache::new(local_base_path.join("repx")));
+
         let local_tools_path = if lab.host_tools_path.is_relative() {
             if let LabSource::Tar(tar_path) = &source {
-                let tools_root = client_temp_dir.join("host-tools-cache");
-                let marker = tools_root.join(format!(".extracted-{}", lab.content_hash));
-                if !marker.exists() {
+                let ht_key = CacheKey::HostTools {
+                    content_hash: lab.content_hash.clone(),
+                };
+                let tools_root = cache.path(&ht_key);
+                if !cache.ensure_fresh(&ht_key)? {
                     crate::tar_extract::extract_host_tools_from_tar(tar_path, &tools_root)?;
-                    let _ = std::fs::write(&marker, "");
+                    let meta = CacheMetadata::new(&ht_key, "host tools extracted from lab tar")
+                        .with_content_hash(&lab.content_hash);
+                    cache.mark_ready(&ht_key, meta)?;
                 }
                 tools_root.join(&lab.host_tools_path)
             } else {
@@ -298,6 +315,7 @@ impl Client {
             lab,
             targets,
             slurm_map: Arc::new(Mutex::new(slurm_map_data)),
+            cache,
         })
     }
 
@@ -430,21 +448,22 @@ impl Client {
             })?;
 
             send(ClientEvent::CreatingLabTar);
-            let local_target = self
-                .get_target(targets::LOCAL)
-                .ok_or(ClientError::Config(CoreError::MissingLocalTarget))?;
 
             let tar_filename = format!("{}.tar", self.lab.content_hash);
 
             let local_tar_path = match &self.lab_source {
                 LabSource::Tar(tar_path) => tar_path.clone(),
                 LabSource::Directory(dir_path) => {
-                    let local_temp_dir = local_target.base_path().join("repx").join("temp");
-                    std::fs::create_dir_all(&local_temp_dir)
+                    let cache_key = CacheKey::LabTar {
+                        content_hash: self.lab.content_hash.clone(),
+                    };
+                    let tar_path = self.cache.path(&cache_key);
+                    std::fs::create_dir_all(tar_path.parent().unwrap_or(Path::new("/")))
                         .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
-                    let tar_path = local_temp_dir.join(&tar_filename);
 
-                    if !tar_path.exists() {
+                    if self.cache.ensure_fresh(&cache_key)? {
+                        tracing::info!("Lab tar already cached: {:?}", tar_path);
+                    } else {
                         let resolved_lab = dir_path
                             .canonicalize()
                             .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
@@ -465,6 +484,9 @@ impl Client {
                                 detail: format!("Failed to create lab tar at {:?}", tar_path),
                             }));
                         }
+                        let meta = CacheMetadata::new(&cache_key, "lab tar archive")
+                            .with_content_hash(&self.lab.content_hash);
+                        self.cache.mark_ready(&cache_key, meta)?;
                         tracing::info!("Created lab tar: {:?}", tar_path);
                     }
                     tar_path
@@ -546,6 +568,7 @@ impl Client {
             tracing::warn!("Failed to register GC root: {}. The next `repx gc` may delete this experiment's results.", e);
         }
 
+        send(ClientEvent::CheckingJobStatuses);
         let raw_statuses = self.get_statuses_for_active_target(target_name, Some(scheduler))?;
         let job_statuses = engine::determine_job_statuses(&self.lab, &raw_statuses);
         let jobs_to_run =
@@ -597,12 +620,18 @@ impl Client {
             );
         }
 
-        submission::generate_inputs_for_jobs(
-            &self.lab,
-            &self.lab_source,
-            &jobs_to_run,
-            target.clone(),
-        )?;
+        if scheduler != SchedulerType::Slurm {
+            send(ClientEvent::PreparingInputs {
+                num_jobs: jobs_to_run.len(),
+            });
+            submission::generate_inputs_for_jobs(
+                &self.lab,
+                &self.lab_source,
+                &jobs_to_run,
+                target.clone(),
+                options.event_sender.as_ref(),
+            )?;
+        }
 
         let sub_target = SubmissionTarget {
             target: target.clone(),
@@ -622,8 +651,17 @@ impl Client {
             SchedulerType::Local => {
                 let local_artifacts = if let Some(ref info) = lab_tar_remote_path {
                     let local_base = &info.node_local_base;
-                    let marker = local_base.join(format!(".extracted-{}", info.content_hash));
-                    if !marker.exists() {
+                    let extraction_cache_root = local_base
+                        .parent()
+                        .and_then(|p| p.parent())
+                        .unwrap_or(local_base);
+                    let extraction_cache = FsCache::new(extraction_cache_root.to_path_buf());
+                    let ext_key = CacheKey::LabExtraction {
+                        content_hash: info.content_hash.clone(),
+                    };
+                    if !extraction_cache.ensure_fresh(&ext_key)? {
+                        repx_core::fs_utils::force_remove_dir(local_base)
+                            .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
                         std::fs::create_dir_all(local_base)
                             .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
                         let status = std::process::Command::new("tar")
@@ -638,8 +676,10 @@ impl Client {
                                 detail: format!("Failed to extract lab tar to {:?}", local_base),
                             }));
                         }
-                        std::fs::write(&marker, "")
-                            .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
+                        let meta =
+                            CacheMetadata::new(&ext_key, "lab tar extracted to node-local storage")
+                                .with_content_hash(&info.content_hash);
+                        extraction_cache.mark_ready(&ext_key, meta)?;
                     }
                     Some(local_base.join(&info.lab_dir_name))
                 } else {

@@ -1,6 +1,7 @@
 use super::{ArtifactSync, CommandRunner, FileOps, GcOps, JobRunner, SlurmOps, TargetInfo};
 use crate::error::{ClientError, Result};
 use repx_core::{
+    cache::{CacheKey, CacheMetadata, CacheStore, CacheStoreExt, FsCache},
     config,
     constants::{dirs, markers},
     errors::CoreError,
@@ -93,6 +94,20 @@ impl CommandRunner for LocalTarget {
         }
 
         Ok(String::from_utf8_lossy(&output.stdout).to_string())
+    }
+
+    fn spawn_command(&self, command: &str, args: &[&str]) -> Result<std::process::Child> {
+        let cmd_path = self.tool(command);
+        let mut cmd = Command::new(&cmd_path);
+        cmd.args(args)
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped());
+
+        repx_core::logging::log_and_print_command(&cmd);
+
+        cmd.spawn()
+            .map_err(|e| ClientError::Config(CoreError::Io(e)))
     }
 }
 
@@ -432,19 +447,30 @@ impl JobRunner for LocalTarget {
         let runner_exe_path = super::find_local_runner_binary()?;
         let hash = super::compute_file_hash(&runner_exe_path)?;
 
-        let versioned_bin_dir = self.base_path().join("bin").join(&hash);
-        let dest_path = versioned_bin_dir.join("repx");
+        let cache = FsCache::new(self.base_path().to_path_buf());
+        let cache_key = CacheKey::LocalBinary {
+            binary_hash: hash.clone(),
+        };
+        let dest_path = cache.path(&cache_key);
 
-        if dest_path.exists() {
-            return Ok(dest_path);
+        if cache.ensure_fresh(&cache_key)? {
+            return Ok(cache.path(&cache_key));
         }
 
-        fs_err::create_dir_all(&versioned_bin_dir)
+        let versioned_bin_dir = dest_path.parent().ok_or_else(|| {
+            ClientError::Config(CoreError::InvalidConfig {
+                detail: "Binary deploy path has no parent directory".to_string(),
+            })
+        })?;
+        fs_err::create_dir_all(versioned_bin_dir)
             .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
         fs_err::copy(&runner_exe_path, &dest_path)
             .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
         fs_err::set_permissions(&dest_path, PermissionsExt::from_mode(0o755))
             .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
+
+        let meta = CacheMetadata::new(&cache_key, "repx binary").with_content_hash(&hash);
+        cache.mark_ready(&cache_key, meta)?;
 
         Ok(dest_path)
     }
@@ -468,6 +494,22 @@ impl JobRunner for LocalTarget {
     fn check_outcome_markers(
         &self,
     ) -> Result<std::collections::HashMap<JobId, repx_core::engine::JobStatus>> {
+        match repx_core::store::completion_log::read_completions(self.base_path(), self.name()) {
+            Ok(Some(outcomes)) if !outcomes.is_empty() => {
+                tracing::debug!("Read {} outcomes from completion log", outcomes.len());
+                return Ok(outcomes);
+            }
+            Ok(_) => {
+                tracing::debug!("No completion log found, falling back to directory walk");
+            }
+            Err(e) => {
+                tracing::warn!(
+                    "Failed to read completion log ({}), falling back to directory walk",
+                    e
+                );
+            }
+        }
+
         let outputs_path = self.base_path().join(dirs::OUTPUTS);
         let mut outcomes = std::collections::HashMap::new();
 
