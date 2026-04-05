@@ -75,51 +75,6 @@ jobs:
           name: linux-${{ matrix.arch }}
           path: repx-${{ steps.version.outputs.version }}-linux-${{ matrix.arch }}.tar.gz
 
-  build-nix-macos:
-    name: Build macOS
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: DeterminateSystems/nix-installer-action@main
-
-      - name: Get Version
-        id: version
-        run: |
-          VERSION="${{ inputs.version }}"
-          if [[ -z "$VERSION" ]]; then
-            VERSION="${GITHUB_REF#refs/tags/}"
-          fi
-          VERSION="${VERSION#v}"
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-
-      - name: Build Binary
-        run: |
-          nix build -L .#repx
-
-          mkdir -p dist
-          cp result/bin/repx dist/repx
-
-          cd dist
-          tar -czf ../repx-${{ steps.version.outputs.version }}-darwin-amd64.tar.gz repx
-          cd ..
-
-      - name: Verify Version
-        run: |
-          VERSION="${{ inputs.version }}"
-          if [[ -z "$VERSION" ]]; then
-            VERSION="${GITHUB_REF#refs/tags/}"
-          fi
-          VERSION="${VERSION#v}"
-          echo "Expected version: $VERSION"
-
-          ./result/bin/repx --version | grep -F "$VERSION"
-
-      - name: Upload Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: darwin-amd64
-          path: repx-${{ steps.version.outputs.version }}-darwin-amd64.tar.gz
-
   build-packages:
     name: Build Packages (Deb/RPM)
     runs-on: ubuntu-latest
@@ -217,7 +172,7 @@ jobs:
 
   publish:
     name: Publish Release
-    needs: [build-nix-static, build-nix-macos, build-packages, build-python]
+    needs: [build-nix-static, build-packages, build-python]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
