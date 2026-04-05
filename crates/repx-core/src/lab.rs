@@ -471,7 +471,7 @@ fn detect_tar_prefix_from_bytes(data: &[u8], source: &Path) -> Result<String, Co
                 let idx = s[pos..].find(needle)?;
                 let abs_idx = pos + idx;
                 if (abs_idx == 0 || s.as_bytes()[abs_idx - 1] == b'/')
-                    && s[abs_idx + needle.len()..].ends_with("-lab-metadata.json")
+                    && s[abs_idx + needle.len()..].ends_with("lab-metadata.json")
                 {
                     return Some(s[..abs_idx].to_string());
                 }
@@ -692,7 +692,42 @@ pub fn load_from_tar(tar_path: &Path) -> Result<Lab, CoreError> {
         .map(|(link, target)| (link.clone(), target.clone()))
         .collect();
 
+    let symlink_map: HashMap<String, String> = probe
+        .symlinks
+        .iter()
+        .filter_map(|(link, target)| {
+            let target_str = target.to_string_lossy();
+            if target_str.starts_with('/') {
+                return None;
+            }
+            let parent = Path::new(link).parent().unwrap_or(Path::new(""));
+            let resolved = parent.join(target_str.as_ref());
+            let mut parts: Vec<&str> = Vec::new();
+            for component in resolved.components() {
+                match component {
+                    std::path::Component::ParentDir => {
+                        parts.pop();
+                    }
+                    std::path::Component::Normal(s) => {
+                        if let Some(s) = s.to_str() {
+                            parts.push(s);
+                        }
+                    }
+                    std::path::Component::CurDir => {}
+                    _ => {}
+                }
+            }
+            let normalized = parts.join("/");
+            if normalized.is_empty() {
+                None
+            } else {
+                Some((link.clone(), normalized))
+            }
+        })
+        .collect();
+
     let mut hardlink_targets: HashSet<String> = HashSet::new();
+    let mut symlink_targets: HashSet<String> = HashSet::new();
     for path in &probe.files_to_verify {
         if hardlink_map.contains_key(path) {
             let mut current = path.as_str();
@@ -705,6 +740,18 @@ pub fn load_from_tar(tar_path: &Path) -> Result<Lab, CoreError> {
                 }
             }
             hardlink_targets.insert(current.to_string());
+        }
+        if symlink_map.contains_key(path) {
+            let mut current = path.as_str();
+            let mut depth = 0;
+            while let Some(next) = symlink_map.get(current) {
+                current = next.as_str();
+                depth += 1;
+                if depth > 100 {
+                    break;
+                }
+            }
+            symlink_targets.insert(current.to_string());
         }
     }
 
@@ -736,7 +783,10 @@ pub fn load_from_tar(tar_path: &Path) -> Result<Lab, CoreError> {
             _ => continue,
         };
 
-        if !probe.files_to_verify.contains(&rel_path) && !hardlink_targets.contains(&rel_path) {
+        if !probe.files_to_verify.contains(&rel_path)
+            && !hardlink_targets.contains(&rel_path)
+            && !symlink_targets.contains(&rel_path)
+        {
             continue;
         }
 
@@ -762,6 +812,23 @@ pub fn load_from_tar(tar_path: &Path) -> Result<Lab, CoreError> {
             let mut current = path.as_str();
             let mut depth = 0;
             while let Some(next) = hardlink_map.get(current) {
+                current = next.as_str();
+                depth += 1;
+                if depth > 100 {
+                    break;
+                }
+            }
+            if let Some(hash) = file_hashes.get(current).cloned() {
+                file_hashes.insert(path.clone(), hash);
+            }
+        }
+    }
+
+    for path in &probe.files_to_verify {
+        if symlink_map.contains_key(path) {
+            let mut current = path.as_str();
+            let mut depth = 0;
+            while let Some(next) = symlink_map.get(current) {
                 current = next.as_str();
                 depth += 1;
                 if depth > 100 {

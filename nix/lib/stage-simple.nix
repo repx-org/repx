@@ -36,6 +36,7 @@ in
   _repx_virtual_job = true;
   inherit pname version scriptDrv;
   repxStageType = "simple";
+  declaredParameterNames = builtins.attrNames (stageDef.parameters or { });
   outputMetadata = outputsDef;
   stageInputs = stageDef.stageInputs or { };
   resources = stageDef.resources or null;
@@ -48,6 +49,7 @@ in
     outputs = outputsDef;
     input_mappings = stageDef.inputMappings or [ ];
     resources = stageDef.resources or null;
+    parameter_defaults = stageDef.parameters or { };
     executables = {
       main = {
         inputs = stageDef.inputMappings or [ ];

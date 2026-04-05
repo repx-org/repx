@@ -85,8 +85,8 @@ pkgs.testers.runNixOSTest {
             controlMachine = "controller";
             procTrackType = "proctrack/pgid";
             nodeName = [
-              "controller NodeAddr=controller CPUs=2 RealMemory=3000 State=UNKNOWN"
-              "worker NodeAddr=worker CPUs=2 RealMemory=3000 State=UNKNOWN"
+              "controller NodeAddr=controller CPUs=1 RealMemory=3000 State=UNKNOWN"
+              "worker NodeAddr=worker CPUs=1 RealMemory=3000 State=UNKNOWN"
             ];
             partitionName = [ "main Nodes=controller,worker Default=YES MaxTime=INFINITE State=UP" ];
             extraConfig = ''
@@ -157,8 +157,8 @@ pkgs.testers.runNixOSTest {
             controlMachine = "controller";
             procTrackType = "proctrack/pgid";
             nodeName = [
-              "controller NodeAddr=controller CPUs=2 RealMemory=3000 State=UNKNOWN"
-              "worker NodeAddr=worker CPUs=2 RealMemory=3000 State=UNKNOWN"
+              "controller NodeAddr=controller CPUs=1 RealMemory=3000 State=UNKNOWN"
+              "worker NodeAddr=worker CPUs=1 RealMemory=3000 State=UNKNOWN"
             ];
             partitionName = [ "main Nodes=controller,worker Default=YES MaxTime=INFINITE State=UP" ];
             extraConfig = ''

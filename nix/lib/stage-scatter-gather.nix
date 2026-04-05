@@ -349,6 +349,7 @@ else
     pname = groupPname;
     inherit version;
     repxStageType = "scatter-gather";
+    declaredParameterNames = builtins.attrNames (stageDef.parameters or { });
     outputMetadata = gatherDef.outputs or { };
     inherit scatterDrv gatherDrv stepDrvs;
     resources = stageDef.resources or null;
@@ -366,6 +367,7 @@ else
       step_deps = stepDepNames;
       outputs = gatherDef.outputs or { };
       input_mappings = stageDef.inputMappings or [ ];
+      parameter_defaults = stageDef.parameters or { };
       resources = common.validateResourceHints {
         inherit pkgs;
         resources = stageDef.resources or null;
