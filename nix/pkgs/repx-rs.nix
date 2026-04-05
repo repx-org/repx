@@ -2,7 +2,7 @@
 
 pkgs.pkgsStatic.rustPlatform.buildRustPackage {
   pname = "repx-rs";
-  version = "0.4.2";
+  version = "0.5.0";
 
   src = pkgs.lib.cleanSourceWith {
     src = ../../.;
