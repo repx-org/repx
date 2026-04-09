@@ -1,10 +1,63 @@
-use anyhow::Result;
 use repx_core::model::{Job, JobId, Lab, StageType};
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 use crate::helpers::*;
 use crate::VizArgs;
+
+fn pipe_node(clean_name: &str) -> String {
+    format!("pipe_{}", clean_name)
+}
+
+fn sg_scatter_node(clean_name: &str) -> String {
+    format!("pipe_{}_sg_scatter", clean_name)
+}
+
+fn sg_gather_node(clean_name: &str) -> String {
+    format!("pipe_{}_sg_gather", clean_name)
+}
+
+fn sg_step_node(base_id: &str, step_name: &str) -> String {
+    format!("{}_sg_step_{}", base_id, clean_id(step_name))
+}
+
+fn resolve_sg_source(clean_name: &str, is_sg: bool) -> String {
+    if is_sg {
+        sg_gather_node(clean_name)
+    } else {
+        pipe_node(clean_name)
+    }
+}
+
+fn resolve_sg_target(clean_name: &str, is_sg: bool) -> String {
+    if is_sg {
+        sg_scatter_node(clean_name)
+    } else {
+        pipe_node(clean_name)
+    }
+}
+
+fn write_sg_edge(
+    dot: &mut String,
+    clean_src: &str,
+    clean_tgt: &str,
+    src_is_sg: bool,
+    dst_is_sg: bool,
+    style: &str,
+) {
+    let src = resolve_sg_source(clean_src, src_is_sg);
+    let dst = resolve_sg_target(clean_tgt, dst_is_sg);
+    dot_writeln!(dot, "    {} -> {} [", src, dst);
+    if src_is_sg {
+        dot_writeln!(dot, "        ltail=\"cluster_pipe_{}_sg\",", clean_src);
+    }
+    if dst_is_sg {
+        dot_writeln!(dot, "        lhead=\"cluster_pipe_{}_sg\",", clean_tgt);
+    }
+    dot_writeln!(dot, "        style=\"{}\",", style);
+    dot.push_str("        color=\"#64748B\"\n");
+    dot.push_str("    ];\n");
+}
 
 pub(crate) struct VizGenerator<'a> {
     pub lab: &'a Lab,
@@ -28,7 +81,7 @@ impl<'a> VizGenerator<'a> {
     }
 
     #[allow(clippy::expect_used)]
-    pub fn generate_dot(&mut self, args: &VizArgs) -> Result<String> {
+    pub fn generate_dot(&mut self, args: &VizArgs) -> String {
         let mut dot = String::new();
         dot.push_str("digraph \"RepX Topology\" {\n");
 
@@ -101,12 +154,8 @@ impl<'a> VizGenerator<'a> {
                 for pipeline_name in pipelines {
                     let clean_pipe = clean_id(pipeline_name);
                     let is_sg = self.scatter_gather_clean_names.contains(&clean_pipe);
-                    let pipe_node = if is_sg {
-                        format!("pipe_{}_sg_scatter", clean_pipe)
-                    } else {
-                        format!("pipe_{}", clean_pipe)
-                    };
-                    dot_writeln!(dot, "    {} -> {} [", run_node, pipe_node);
+                    let target = resolve_sg_target(&clean_pipe, is_sg);
+                    dot_writeln!(dot, "    {} -> {} [", run_node, target);
                     dot.push_str("        style=\"dashed\",\n");
                     dot.push_str("        color=\"#94a3b8\",\n");
                     dot.push_str("        arrowhead=\"open\",\n");
@@ -117,7 +166,7 @@ impl<'a> VizGenerator<'a> {
         }
 
         dot.push_str("}\n");
-        Ok(dot)
+        dot
     }
 
     fn render_pipeline_layer(
@@ -130,7 +179,7 @@ impl<'a> VizGenerator<'a> {
         for (pipeline_name, job_ids) in pipeline_jobs {
             let count = job_ids.len();
             let clean_pipe = clean_id(pipeline_name);
-            let node_id = format!("pipe_{}", clean_pipe);
+            let node_id = pipe_node(&clean_pipe);
 
             let is_sg = pipeline_representative
                 .get(pipeline_name)
@@ -198,11 +247,7 @@ impl<'a> VizGenerator<'a> {
                     dot.push_str("        penwidth=\"0.8\"\n");
                     dot.push_str("    ];\n");
 
-                    let target = if is_sg {
-                        format!("pipe_{}_sg_scatter", clean_pipe)
-                    } else {
-                        node_id.clone()
-                    };
+                    let target = resolve_sg_target(&clean_pipe, is_sg);
                     dot_writeln!(dot, "    {} -> {} [", param_node_id, target);
                     dot.push_str("        style=\"dotted\",\n");
                     dot_writeln!(dot, "        color=\"{}\",", PARAM_BORDER);
@@ -239,17 +284,8 @@ impl<'a> VizGenerator<'a> {
 
                             let src_is_sg = self.scatter_gather_clean_names.contains(&clean_src);
                             let dst_is_sg = self.scatter_gather_clean_names.contains(&clean_tgt);
-
-                            let actual_src = if src_is_sg {
-                                format!("pipe_{}_sg_gather", clean_src)
-                            } else {
-                                format!("pipe_{}", clean_src)
-                            };
-                            let actual_dst = if dst_is_sg {
-                                format!("pipe_{}_sg_scatter", clean_tgt)
-                            } else {
-                                format!("pipe_{}", clean_tgt)
-                            };
+                            let actual_src = resolve_sg_source(&clean_src, src_is_sg);
+                            let actual_dst = resolve_sg_target(&clean_tgt, dst_is_sg);
 
                             dot_write!(
                                 dot,
@@ -409,28 +445,8 @@ impl<'a> VizGenerator<'a> {
                         let src_is_sg = self.scatter_gather_clean_names.contains(&clean_src);
                         let dst_is_sg = self.scatter_gather_clean_names.contains(&clean_tgt);
 
-                        let actual_src = if src_is_sg {
-                            format!("pipe_{}_sg_gather", clean_src)
-                        } else {
-                            format!("pipe_{}", clean_src)
-                        };
-                        let actual_dst = if dst_is_sg {
-                            format!("pipe_{}_sg_scatter", clean_tgt)
-                        } else {
-                            format!("pipe_{}", clean_tgt)
-                        };
-
                         let style = if dtype == "soft" { "dashed" } else { "solid" };
-                        dot_writeln!(dot, "    {} -> {} [", actual_src, actual_dst);
-                        if src_is_sg {
-                            dot_writeln!(dot, "        ltail=\"cluster_pipe_{}_sg\",", clean_src);
-                        }
-                        if dst_is_sg {
-                            dot_writeln!(dot, "        lhead=\"cluster_pipe_{}_sg\",", clean_tgt);
-                        }
-                        dot_writeln!(dot, "        style=\"{}\",", style);
-                        dot.push_str("        color=\"#64748B\"\n");
-                        dot.push_str("    ];\n");
+                        write_sg_edge(dot, &clean_src, &clean_tgt, src_is_sg, dst_is_sg, style);
                     }
                 }
 
@@ -462,36 +478,9 @@ impl<'a> VizGenerator<'a> {
 
                             let src_is_sg = self.scatter_gather_clean_names.contains(&clean_src);
                             let dst_is_sg = self.scatter_gather_clean_names.contains(&clean_tgt);
-
-                            let actual_src = if src_is_sg {
-                                format!("pipe_{}_sg_gather", clean_src)
-                            } else {
-                                format!("pipe_{}", clean_src)
-                            };
-                            let actual_dst = if dst_is_sg {
-                                format!("pipe_{}_sg_scatter", clean_tgt)
-                            } else {
-                                format!("pipe_{}", clean_tgt)
-                            };
-
-                            dot_writeln!(dot, "    {} -> {} [", actual_src, actual_dst);
-                            if src_is_sg {
-                                dot_writeln!(
-                                    dot,
-                                    "        ltail=\"cluster_pipe_{}_sg\",",
-                                    clean_src
-                                );
-                            }
-                            if dst_is_sg {
-                                dot_writeln!(
-                                    dot,
-                                    "        lhead=\"cluster_pipe_{}_sg\",",
-                                    clean_tgt
-                                );
-                            }
-                            dot.push_str("        style=\"solid\",\n");
-                            dot.push_str("        color=\"#64748B\"\n");
-                            dot.push_str("    ];\n");
+                            write_sg_edge(
+                                dot, &clean_src, &clean_tgt, src_is_sg, dst_is_sg, "solid",
+                            );
                         }
                     }
                 }
@@ -557,7 +546,7 @@ impl<'a> VizGenerator<'a> {
         dot_writeln!(dot, "{}    ];", indent);
 
         for step_name in &step_names {
-            let step_id = format!("{}_sg_step_{}", unique_node_id, clean_id(step_name));
+            let step_id = sg_step_node(unique_node_id, step_name);
             dot_writeln!(dot, "{}    {} [", indent, step_id);
             dot_writeln!(
                 dot,
@@ -617,7 +606,7 @@ impl<'a> VizGenerator<'a> {
             .collect();
 
         for root in &root_steps {
-            let step_id = format!("{}_sg_step_{}", unique_node_id, clean_id(root));
+            let step_id = sg_step_node(unique_node_id, root);
             dot_writeln!(
                 dot,
                 "{}    {} -> {} [color=\"{}\", penwidth=\"1.0\", arrowsize=\"0.6\"];",
@@ -631,9 +620,9 @@ impl<'a> VizGenerator<'a> {
         for step_name in &step_names {
             let exe_key = format!("step-{}", step_name);
             if let Some(exe) = representative_job.executables.get(&exe_key) {
-                let step_id = format!("{}_sg_step_{}", unique_node_id, clean_id(step_name));
+                let step_id = sg_step_node(unique_node_id, step_name);
                 for dep_name in &exe.deps {
-                    let dep_id = format!("{}_sg_step_{}", unique_node_id, clean_id(dep_name));
+                    let dep_id = sg_step_node(unique_node_id, dep_name);
                     dot_writeln!(
                         dot,
                         "{}    {} -> {} [color=\"{}\", penwidth=\"1.0\", arrowsize=\"0.6\"];",
@@ -647,7 +636,7 @@ impl<'a> VizGenerator<'a> {
         }
 
         for sink in &sink_steps {
-            let step_id = format!("{}_sg_step_{}", unique_node_id, clean_id(sink));
+            let step_id = sg_step_node(unique_node_id, sink);
             dot_writeln!(
                 dot,
                 "{}    {} -> {} [color=\"{}\", penwidth=\"1.0\", arrowsize=\"0.6\"];",

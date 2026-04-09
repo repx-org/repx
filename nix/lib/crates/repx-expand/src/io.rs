@@ -1,12 +1,11 @@
 use crate::blueprint::{BinSpec, HostToolSpec};
 use crate::expand::{ExpandedJob, ExpandedLab};
 use crate::metadata;
+use crate::util::{sha256_file, write_hashed};
 use anyhow::{Context, Result};
 use rayon::prelude::*;
-use sha2::{Digest, Sha256};
 use std::collections::HashSet;
 use std::fs;
-use std::io::Write;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -62,6 +61,7 @@ pub fn assemble_lab(
     file_entries.lock().unwrap().extend(host_tool_entries);
 
     let dedup_set = dashmap_lite::DedupSet::new();
+    let assembly_errors: Mutex<Vec<String>> = Mutex::new(Vec::new());
 
     for run in &lab.runs {
         let batch_entries: Vec<Vec<FileEntry>> = run
@@ -85,7 +85,9 @@ pub fn assemble_lab(
                             local_entries.extend(entries);
                         }
                         Err(e) => {
-                            eprintln!("ERROR assembling job {}: {e}", job.job_dir_name);
+                            let msg = format!("job {}: {e}", job.job_dir_name);
+                            eprintln!("ERROR assembling {msg}");
+                            assembly_errors.lock().unwrap().push(msg);
                         }
                     }
                 }
@@ -98,6 +100,20 @@ pub fn assemble_lab(
         for batch in batch_entries {
             all.extend(batch);
         }
+    }
+
+    let errors = assembly_errors.into_inner().unwrap();
+    if !errors.is_empty() {
+        let summary = if errors.len() <= 5 {
+            errors.join("; ")
+        } else {
+            format!(
+                "{}; ... and {} more",
+                errors[..5].join("; "),
+                errors.len() - 5
+            )
+        };
+        anyhow::bail!("{} job(s) failed to assemble: {}", errors.len(), summary);
     }
 
     let meta_entries = metadata::write_all_metadata(lab, output_dir).context("writing metadata")?;
@@ -184,16 +200,6 @@ fn assemble_job(job: &ExpandedJob, jobs_dir: &Path, output_dir: &Path) -> Result
     Ok(entries)
 }
 
-fn write_hashed(path: &Path, data: &[u8]) -> Result<String> {
-    let mut f = std::io::BufWriter::with_capacity(data.len().max(8192), fs::File::create(path)?);
-    f.write_all(data)?;
-    f.flush()?;
-
-    let mut hasher = Sha256::new();
-    hasher.update(data);
-    Ok(hex_encode(hasher.finalize().as_slice()))
-}
-
 fn write_and_hash(
     path: &Path,
     data: &[u8],
@@ -206,23 +212,6 @@ fn write_and_hash(
         sha256: hash,
     });
     Ok(())
-}
-
-fn sha256_file(path: &Path) -> Result<String> {
-    let data = fs::read(path)?;
-    let mut hasher = Sha256::new();
-    hasher.update(&data);
-    Ok(hex_encode(hasher.finalize().as_slice()))
-}
-
-fn hex_encode(bytes: &[u8]) -> String {
-    const HEX: &[u8; 16] = b"0123456789abcdef";
-    let mut s = String::with_capacity(bytes.len() * 2);
-    for &b in bytes {
-        s.push(HEX[(b >> 4) as usize] as char);
-        s.push(HEX[(b & 0x0f) as usize] as char);
-    }
-    s
 }
 
 fn rel_path(path: &Path, output_dir: &Path) -> String {

@@ -205,6 +205,7 @@ pub struct Client {
     pub(crate) lab: Lab,
     pub(crate) targets: HashMap<String, Arc<dyn Target>>,
     pub(crate) slurm_map: SlurmIdMap,
+    pub(crate) slurm_map_path: PathBuf,
     pub(crate) cache: Arc<FsCache>,
 }
 
@@ -220,10 +221,8 @@ impl Client {
 
         let client_state_dir = local_base_path.join("repx").join("state");
         let client_temp_dir = local_base_path.join("repx").join("temp");
-        fs_err::create_dir_all(&client_state_dir)
-            .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
-        fs_err::create_dir_all(&client_temp_dir)
-            .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
+        fs_err::create_dir_all(&client_state_dir).map_err(ClientError::Io)?;
+        fs_err::create_dir_all(&client_temp_dir).map_err(ClientError::Io)?;
 
         let cache = Arc::new(FsCache::new(local_base_path.join("repx")));
 
@@ -315,6 +314,7 @@ impl Client {
             lab,
             targets,
             slurm_map: Arc::new(Mutex::new(slurm_map_data)),
+            slurm_map_path: map_path,
             cache,
         })
     }
@@ -336,41 +336,20 @@ impl Client {
     }
 
     pub(crate) fn save_slurm_map(&self) -> Result<()> {
-        let local_base_path = if let Some(local_target) = self.config.targets.get(targets::LOCAL) {
-            local_target.base_path.clone()
-        } else {
-            return Err(ClientError::Config(CoreError::MissingLocalTarget));
-        };
-
-        let client_state_dir = local_base_path.join("repx").join("state");
-        fs_err::create_dir_all(&client_state_dir)
-            .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
-
-        let source_path = self.lab_source.path();
-        let source_path_abs =
-            fs_err::canonicalize(source_path).unwrap_or(source_path.to_path_buf());
-        let lab_hash = {
-            let mut hasher = Sha256::new();
-            hasher.update(source_path_abs.to_string_lossy().as_bytes());
-            format!("{:x}", hasher.finalize())
-        };
-        let map_filename = format!("slurm_map_{}.json", lab_hash);
-
-        let map_path = client_state_dir.join(&map_filename);
+        if let Some(parent) = self.slurm_map_path.parent() {
+            fs_err::create_dir_all(parent).map_err(ClientError::Io)?;
+        }
 
         let data_clone = {
             let guard = lock_slurm_map(&self.slurm_map);
             guard.clone()
         };
 
-        let json_string = serde_json::to_string_pretty(&data_clone)
-            .map_err(|e| ClientError::Config(CoreError::Json(e)))?;
+        let json_string = serde_json::to_string_pretty(&data_clone).map_err(ClientError::Json)?;
 
-        let temp_filename = format!(".slurm_map_{}.json.tmp", lab_hash);
-        let temp_path = client_state_dir.join(&temp_filename);
-        fs_err::write(&temp_path, &json_string)
-            .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
-        fs_err::rename(&temp_path, &map_path).map_err(|e| ClientError::Config(CoreError::Io(e)))?;
+        let temp_path = self.slurm_map_path.with_extension("json.tmp");
+        fs_err::write(&temp_path, &json_string).map_err(ClientError::Io)?;
+        fs_err::rename(&temp_path, &self.slurm_map_path).map_err(ClientError::Io)?;
 
         Ok(())
     }
@@ -459,14 +438,12 @@ impl Client {
                     };
                     let tar_path = self.cache.path(&cache_key);
                     std::fs::create_dir_all(tar_path.parent().unwrap_or(Path::new("/")))
-                        .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
+                        .map_err(ClientError::Io)?;
 
                     if self.cache.ensure_fresh(&cache_key)? {
                         tracing::info!("Lab tar already cached: {:?}", tar_path);
                     } else {
-                        let resolved_lab = dir_path
-                            .canonicalize()
-                            .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
+                        let resolved_lab = dir_path.canonicalize().map_err(ClientError::Io)?;
                         let status = std::process::Command::new("tar")
                             .arg("cf")
                             .arg(&tar_path)
@@ -478,7 +455,7 @@ impl Client {
                                     .unwrap_or(std::ffi::OsStr::new("result")),
                             )
                             .status()
-                            .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
+                            .map_err(ClientError::Io)?;
                         if !status.success() {
                             return Err(ClientError::Config(CoreError::InvalidConfig {
                                 detail: format!("Failed to create lab tar at {:?}", tar_path),
@@ -532,7 +509,7 @@ impl Client {
 
         send(ClientEvent::SyncingArtifacts { total: 1 });
         match &self.lab_source {
-            LabSource::Tar(_tar_path) => {
+            LabSource::Tar(tar_path) => {
                 if use_node_local {
                     let local_target = self
                         .get_target(targets::LOCAL)
@@ -543,17 +520,13 @@ impl Client {
                         .join("temp")
                         .join("host-tools-cache");
                     if !local_ht_cache.join("host-tools").exists() {
-                        std::fs::create_dir_all(&local_ht_cache)
-                            .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
-                        crate::tar_extract::extract_host_tools_from_tar(
-                            _tar_path,
-                            &local_ht_cache,
-                        )?;
+                        std::fs::create_dir_all(&local_ht_cache).map_err(ClientError::Io)?;
+                        crate::tar_extract::extract_host_tools_from_tar(tar_path, &local_ht_cache)?;
                     }
                     let remote_ht_dest = target.artifacts_base_path().join("host-tools");
                     target.sync_directory(&local_ht_cache.join("host-tools"), &remote_ht_dest)?;
                 } else {
-                    target.sync_lab_from_tar_via_rsync(_tar_path)?;
+                    target.sync_lab_from_tar_via_rsync(tar_path)?;
                 }
             }
             LabSource::Directory(dir_path) => {
@@ -575,7 +548,7 @@ impl Client {
 
         send(ClientEvent::CheckingJobStatuses);
         let raw_statuses = self.get_statuses_for_active_target(target_name, Some(scheduler))?;
-        let job_statuses = engine::determine_job_statuses(&self.lab, &raw_statuses);
+        let job_statuses = engine::determine_job_statuses(&self.lab, raw_statuses);
         let jobs_to_run =
             submission::filter_jobs_to_run(&self.lab, &full_dependency_set, &job_statuses);
 
@@ -666,16 +639,15 @@ impl Client {
                     };
                     if !extraction_cache.ensure_fresh(&ext_key)? {
                         repx_core::fs_utils::force_remove_dir(local_base)
-                            .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
-                        std::fs::create_dir_all(local_base)
-                            .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
+                            .map_err(ClientError::Io)?;
+                        std::fs::create_dir_all(local_base).map_err(ClientError::Io)?;
                         let status = std::process::Command::new("tar")
                             .arg("xf")
                             .arg(&info.remote_tar_path)
                             .arg("-C")
                             .arg(local_base)
                             .status()
-                            .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
+                            .map_err(ClientError::Io)?;
                         if !status.success() {
                             return Err(ClientError::Config(CoreError::InvalidConfig {
                                 detail: format!("Failed to extract lab tar to {:?}", local_base),

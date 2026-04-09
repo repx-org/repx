@@ -1,6 +1,6 @@
 use crate::context::RuntimeContext;
 use crate::error::{ExecutorError, IoContext, Result};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::Stdio;
 use tokio::fs::File;
 use tokio::process::Command as TokioCommand;
@@ -39,13 +39,9 @@ impl ContainerRuntime {
         ctx.restrict_command_environment(&mut check_cmd, &[binary])
             .await;
 
-        let check_output = check_cmd
-            .output()
-            .await
-            .map_err(|e| ExecutorError::CommandFailed {
-                command: format!("{} images -q {}", binary, image_tag),
-                source: e,
-            })?;
+        let check_output = check_cmd.output().await.map_err(|e| {
+            ExecutorError::command_failed(format!("{} images -q {}", binary, image_tag), e)
+        })?;
 
         if check_output.stdout.is_empty() {
             tracing::info!("Image '{}' not found in cache. Loading...", image_tag);
@@ -65,10 +61,9 @@ impl ContainerRuntime {
             ctx.restrict_command_environment(&mut load_cmd, &[binary])
                 .await;
 
-            let mut child = load_cmd.spawn().map_err(|e| ExecutorError::CommandFailed {
-                command: format!("{} load", binary),
-                source: e,
-            })?;
+            let mut child = load_cmd
+                .spawn()
+                .map_err(|e| ExecutorError::command_failed(format!("{} load", binary), e))?;
             let mut load_stdin = child.stdin.take().ok_or_else(|| ExecutorError::Io {
                 source: std::io::Error::new(
                     std::io::ErrorKind::BrokenPipe,
@@ -90,10 +85,9 @@ impl ContainerRuntime {
                     .arg(".");
                 tar_cmd.stdout(Stdio::piped());
 
-                let mut tar_child = tar_cmd.spawn().map_err(|e| ExecutorError::CommandFailed {
-                    command: "tar".to_string(),
-                    source: e,
-                })?;
+                let mut tar_child = tar_cmd
+                    .spawn()
+                    .map_err(|e| ExecutorError::command_failed("tar", e))?;
                 let mut tar_stdout = tar_child.stdout.take().ok_or_else(|| ExecutorError::Io {
                     source: std::io::Error::new(
                         std::io::ErrorKind::BrokenPipe,
@@ -110,14 +104,10 @@ impl ContainerRuntime {
                 });
 
                 let copy_result = copy_task.await;
-                let tar_status =
-                    tar_child
-                        .wait()
-                        .await
-                        .map_err(|e| ExecutorError::CommandFailed {
-                            command: "tar".to_string(),
-                            source: e,
-                        })?;
+                let tar_status = tar_child
+                    .wait()
+                    .await
+                    .map_err(|e| ExecutorError::command_failed("tar", e))?;
 
                 let tar_failed = !tar_status.success();
                 let tar_error_msg = if tar_failed {
@@ -135,14 +125,10 @@ impl ContainerRuntime {
                     Err(join_err) => Some(format!("tar-to-load copy task panicked: {}", join_err)),
                 };
 
-                let load_output =
-                    child
-                        .wait_with_output()
-                        .await
-                        .map_err(|e| ExecutorError::CommandFailed {
-                            command: format!("{} load", binary),
-                            source: e,
-                        })?;
+                let load_output = child
+                    .wait_with_output()
+                    .await
+                    .map_err(|e| ExecutorError::command_failed(format!("{} load", binary), e))?;
                 if !load_output.status.success() {
                     let stderr = String::from_utf8_lossy(&load_output.stderr);
                     let stdout = String::from_utf8_lossy(&load_output.stdout);
@@ -200,45 +186,7 @@ impl ContainerRuntime {
                     }
                 }
 
-                let output_str = String::from_utf8_lossy(&load_output.stdout);
-                let loaded_image_id = output_str
-                    .lines()
-                    .find_map(|line| {
-                        line.strip_prefix("Loaded image ID: ")
-                            .or_else(|| line.strip_prefix("Loaded image: "))
-                    })
-                    .map(|s| s.trim().to_string());
-
-                if let Some(id) = loaded_image_id {
-                    let mut tag_cmd = TokioCommand::new(binary);
-                    tag_cmd.args(["tag", &id, image_tag]);
-                    ctx.restrict_command_environment(&mut tag_cmd, &[binary])
-                        .await;
-                    let tag_output =
-                        tag_cmd
-                            .output()
-                            .await
-                            .map_err(|e| ExecutorError::CommandFailed {
-                                command: format!("{} tag {} {}", binary, id, image_tag),
-                                source: e,
-                            })?;
-                    if !tag_output.status.success() {
-                        let stderr = String::from_utf8_lossy(&tag_output.stderr);
-                        return Err(ExecutorError::Io {
-                            source: std::io::Error::other(format!(
-                                "'{} tag {} {}' failed with status {}. Stderr:\n{}",
-                                binary, id, image_tag, tag_output.status, stderr
-                            )),
-                            operation: "tag",
-                            path: image_full_path.clone(),
-                        });
-                    }
-                    tracing::info!("Successfully loaded and tagged image '{}'", image_tag);
-                } else {
-                    tracing::info!(
-                        "Could not parse image ID from load output. Assuming tag is correct."
-                    );
-                }
+                tag_loaded_image(ctx, binary, image_tag, &load_output, &image_full_path).await?;
             } else {
                 tracing::debug!("Loading image tarball from {:?}...", image_full_path);
                 let mut file = File::open(&image_full_path)
@@ -249,14 +197,10 @@ impl ContainerRuntime {
                     .io_ctx("read", &image_full_path)?;
                 drop(load_stdin);
 
-                let load_output =
-                    child
-                        .wait_with_output()
-                        .await
-                        .map_err(|e| ExecutorError::CommandFailed {
-                            command: format!("{} load", binary),
-                            source: e,
-                        })?;
+                let load_output = child
+                    .wait_with_output()
+                    .await
+                    .map_err(|e| ExecutorError::command_failed(format!("{} load", binary), e))?;
                 if !load_output.status.success() {
                     let stderr = String::from_utf8_lossy(&load_output.stderr);
                     let stdout = String::from_utf8_lossy(&load_output.stdout);
@@ -270,45 +214,7 @@ impl ContainerRuntime {
                     });
                 }
 
-                let output_str = String::from_utf8_lossy(&load_output.stdout);
-                let loaded_image_id = output_str
-                    .lines()
-                    .find_map(|line| {
-                        line.strip_prefix("Loaded image ID: ")
-                            .or_else(|| line.strip_prefix("Loaded image: "))
-                    })
-                    .map(|s| s.trim().to_string());
-
-                if let Some(id) = loaded_image_id {
-                    let mut tag_cmd = TokioCommand::new(binary);
-                    tag_cmd.args(["tag", &id, image_tag]);
-                    ctx.restrict_command_environment(&mut tag_cmd, &[binary])
-                        .await;
-                    let tag_output =
-                        tag_cmd
-                            .output()
-                            .await
-                            .map_err(|e| ExecutorError::CommandFailed {
-                                command: format!("{} tag {} {}", binary, id, image_tag),
-                                source: e,
-                            })?;
-                    if !tag_output.status.success() {
-                        let stderr = String::from_utf8_lossy(&tag_output.stderr);
-                        return Err(ExecutorError::Io {
-                            source: std::io::Error::other(format!(
-                                "'{} tag {} {}' failed with status {}. Stderr:\n{}",
-                                binary, id, image_tag, tag_output.status, stderr
-                            )),
-                            operation: "tag",
-                            path: image_full_path.clone(),
-                        });
-                    }
-                    tracing::info!("Successfully loaded and tagged image '{}'", image_tag);
-                } else {
-                    tracing::info!(
-                        "Could not parse image ID from load output. Assuming tag is correct."
-                    );
-                }
+                tag_loaded_image(ctx, binary, image_tag, &load_output, &image_full_path).await?;
             }
         } else {
             tracing::debug!("Image '{}' found in cache. Skipping load.", image_tag);
@@ -323,16 +229,17 @@ impl ContainerRuntime {
         runtime: &Runtime,
         script_path: &Path,
         args: &[String],
-    ) -> Result<TokioCommand> {
+    ) -> Result<(TokioCommand, Vec<tempfile::TempPath>)> {
         let (binary, image_tag) = Self::get_runtime_details(runtime)?;
         let request = ctx.request;
         let mut cmd = TokioCommand::new(binary);
 
-        use std::collections::hash_map::DefaultHasher;
-        use std::hash::{Hash, Hasher};
-        let mut hasher = DefaultHasher::new();
-        request.repx_out_dir.hash(&mut hasher);
-        let unique_id = hasher.finish();
+        let path_bytes = request.repx_out_dir.as_os_str().as_encoded_bytes();
+        let mut unique_id: u64 = 0xcbf29ce484222325;
+        for &byte in path_bytes {
+            unique_id ^= byte as u64;
+            unique_id = unique_id.wrapping_mul(0x100000001b3);
+        }
 
         let xdg_runtime_dir = request
             .base_path
@@ -398,37 +305,96 @@ impl ContainerRuntime {
         }
 
         let mut rewritten_args: Vec<String> = args.to_vec();
-        let mut shm_cleanup: Vec<PathBuf> = Vec::new();
+        let mut temp_files: Vec<tempfile::TempPath> = Vec::new();
+
+        let shm_dir = std::path::PathBuf::from("/dev/shm");
+        let temp_dir = if shm_dir.is_dir() {
+            shm_dir
+        } else {
+            std::env::temp_dir()
+        };
 
         if let Some(ref data) = request.inputs_data {
-            let shm_path =
-                PathBuf::from(format!("/dev/shm/repx-inputs-{}.json", std::process::id()));
-            std::fs::write(&shm_path, data).io_ctx("write inputs to /dev/shm", &shm_path)?;
+            let mut tmp = tempfile::Builder::new()
+                .prefix("repx-inputs-")
+                .suffix(".json")
+                .tempfile_in(&temp_dir)
+                .io_ctx("create temp file for inputs", &temp_dir)?;
+            std::io::Write::write_all(&mut tmp, data)
+                .io_ctx("write inputs to temp file", &temp_dir)?;
+            let shm_path = tmp.path().to_path_buf();
             let container_path = "/tmp/repx-inputs.json";
             cmd.arg("-v")
                 .arg(format!("{}:{}:ro", shm_path.display(), container_path));
             if rewritten_args.len() > 1 {
                 rewritten_args[1] = container_path.to_string();
             }
-            shm_cleanup.push(shm_path);
+            temp_files.push(tmp.into_temp_path());
         }
         if let Some(ref data) = request.parameters_data {
-            let shm_path =
-                PathBuf::from(format!("/dev/shm/repx-params-{}.json", std::process::id()));
-            std::fs::write(&shm_path, data).io_ctx("write params to /dev/shm", &shm_path)?;
+            let mut tmp = tempfile::Builder::new()
+                .prefix("repx-params-")
+                .suffix(".json")
+                .tempfile_in(&temp_dir)
+                .io_ctx("create temp file for params", &temp_dir)?;
+            std::io::Write::write_all(&mut tmp, data)
+                .io_ctx("write params to temp file", &temp_dir)?;
+            let shm_path = tmp.path().to_path_buf();
             let container_path = "/tmp/repx-parameters.json";
             cmd.arg("-v")
                 .arg(format!("{}:{}:ro", shm_path.display(), container_path));
             if rewritten_args.len() > 2 {
                 rewritten_args[2] = container_path.to_string();
             }
-            shm_cleanup.push(shm_path);
+            temp_files.push(tmp.into_temp_path());
         }
 
         cmd.arg(image_tag).arg(script_path);
         cmd.args(&rewritten_args);
 
         ctx.restrict_command_environment(&mut cmd, &[binary]).await;
-        Ok(cmd)
+        Ok((cmd, temp_files))
     }
+}
+
+async fn tag_loaded_image(
+    ctx: &RuntimeContext<'_>,
+    binary: &str,
+    image_tag: &str,
+    load_output: &std::process::Output,
+    image_path: &std::path::Path,
+) -> Result<()> {
+    let output_str = String::from_utf8_lossy(&load_output.stdout);
+    let loaded_image_id = output_str
+        .lines()
+        .find_map(|line| {
+            line.strip_prefix("Loaded image ID: ")
+                .or_else(|| line.strip_prefix("Loaded image: "))
+        })
+        .map(|s| s.trim().to_string());
+
+    if let Some(id) = loaded_image_id {
+        let mut tag_cmd = TokioCommand::new(binary);
+        tag_cmd.args(["tag", &id, image_tag]);
+        ctx.restrict_command_environment(&mut tag_cmd, &[binary])
+            .await;
+        let tag_output = tag_cmd.output().await.map_err(|e| {
+            ExecutorError::command_failed(format!("{} tag {} {}", binary, id, image_tag), e)
+        })?;
+        if !tag_output.status.success() {
+            let stderr = String::from_utf8_lossy(&tag_output.stderr);
+            return Err(ExecutorError::Io {
+                source: std::io::Error::other(format!(
+                    "'{} tag {} {}' failed with status {}. Stderr:\n{}",
+                    binary, id, image_tag, tag_output.status, stderr
+                )),
+                operation: "tag",
+                path: image_path.to_path_buf(),
+            });
+        }
+        tracing::info!("Successfully loaded and tagged image '{}'", image_tag);
+    } else {
+        tracing::info!("Could not parse image ID from load output. Assuming tag is correct.");
+    }
+    Ok(())
 }

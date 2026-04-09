@@ -33,9 +33,11 @@ pub fn handle_log(args: LogArgs, context: &AppContext) -> Result<(), CliError> {
 
         let running = Arc::new(AtomicBool::new(true));
         let r = running.clone();
-        let _ = ctrlc::set_handler(move || {
+        if let Err(e) = ctrlc::set_handler(move || {
             r.store(false, Ordering::SeqCst);
-        });
+        }) {
+            tracing::warn!("Failed to set Ctrl+C handler: {e}");
+        }
 
         let mut last_seen_lines: Vec<String> = lines.iter().rev().take(10).cloned().collect();
         last_seen_lines.reverse();

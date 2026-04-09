@@ -516,12 +516,23 @@ fn list_dependencies(lab: &Lab, job_id_str: &str) -> Result<(), CliError> {
     let job_id = resolver::resolve_target_job_id(lab, &target_input)?;
 
     println!("Dependency tree for job '{}':", job_id.as_str());
-    print_dependency_tree(lab, job_id, 0);
+    let mut visited = std::collections::HashSet::new();
+    print_dependency_tree(lab, job_id, 0, &mut visited);
     Ok(())
 }
 
-fn print_dependency_tree(lab: &Lab, job_id: &JobId, level: usize) {
+fn print_dependency_tree(
+    lab: &Lab,
+    job_id: &JobId,
+    level: usize,
+    visited: &mut std::collections::HashSet<JobId>,
+) {
     let indent = "  ".repeat(level);
+    if !visited.insert(job_id.clone()) {
+        println!("{}{} (see above)", indent, job_id.as_str());
+        return;
+    }
+
     println!("{}{}", indent, job_id.as_str());
 
     if let Some(job) = lab.jobs.get(job_id) {
@@ -537,7 +548,7 @@ fn print_dependency_tree(lab: &Lab, job_id: &JobId, level: usize) {
         dependencies.dedup();
 
         for dep_id in dependencies {
-            print_dependency_tree(lab, dep_id, level + 1);
+            print_dependency_tree(lab, dep_id, level + 1, visited);
         }
     }
 }

@@ -1,13 +1,12 @@
 use crate::blueprint::{ContainerMode, StageType};
 use crate::expand::ExpandedLab;
 use crate::io::FileEntry;
+use crate::util::write_hashed;
 use anyhow::Result;
 use serde::Serialize;
 use serde_json::Value;
-use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, HashSet};
 use std::fs;
-use std::io::Write;
 use std::path::Path;
 
 #[derive(Serialize)]
@@ -115,7 +114,7 @@ pub fn write_all_metadata(lab: &ExpandedLab, output_dir: &Path) -> Result<Vec<Fi
 
         let rel = filepath
             .strip_prefix(output_dir)
-            .unwrap()
+            .unwrap_or(&filepath)
             .to_string_lossy()
             .to_string();
         all_entries.push(FileEntry {
@@ -140,7 +139,7 @@ pub fn write_all_metadata(lab: &ExpandedLab, output_dir: &Path) -> Result<Vec<Fi
     let hash = write_hashed(&root_path, root_json.as_bytes())?;
     let rel = root_path
         .strip_prefix(output_dir)
-        .unwrap()
+        .unwrap_or(&root_path)
         .to_string_lossy()
         .to_string();
     all_entries.push(FileEntry {
@@ -149,24 +148,4 @@ pub fn write_all_metadata(lab: &ExpandedLab, output_dir: &Path) -> Result<Vec<Fi
     });
 
     Ok(all_entries)
-}
-
-fn write_hashed(path: &Path, data: &[u8]) -> Result<String> {
-    let mut f = std::io::BufWriter::with_capacity(data.len().max(8192), fs::File::create(path)?);
-    f.write_all(data)?;
-    f.flush()?;
-
-    let mut hasher = Sha256::new();
-    hasher.update(data);
-    Ok(hex_encode(hasher.finalize().as_slice()))
-}
-
-fn hex_encode(bytes: &[u8]) -> String {
-    const HEX: &[u8; 16] = b"0123456789abcdef";
-    let mut s = String::with_capacity(bytes.len() * 2);
-    for &b in bytes {
-        s.push(HEX[(b >> 4) as usize] as char);
-        s.push(HEX[(b & 0x0f) as usize] as char);
-    }
-    s
 }

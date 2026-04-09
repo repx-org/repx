@@ -2051,6 +2051,7 @@ dependencies = [
 name = "repx-test-utils"
 version = "0.5.0"
 dependencies = [
+ "repx-core",
  "serde_json",
  "tempfile",
 ]
@@ -2077,9 +2078,9 @@ dependencies = [
 name = "repx-viz"
 version = "0.5.0"
 dependencies = [
- "anyhow",
  "repx-core",
  "serde_json",
+ "thiserror 2.0.18",
 ]
 
 [[package]]

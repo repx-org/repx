@@ -1,4 +1,5 @@
 use crate::errors::CoreError;
+use crate::fs_utils::path_to_string;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -317,7 +318,7 @@ impl FsCache {
         } else {
             let name = base
                 .file_name()
-                .map(|n| n.to_string_lossy().to_string())
+                .map(path_to_string)
                 .unwrap_or_else(|| "unknown".to_string());
             base.with_file_name(format!(".{name}.repx-cache.json"))
         }
@@ -398,7 +399,7 @@ impl FsCache {
 
 fn dir_name_or_fallback(path: &Path) -> String {
     path.file_name()
-        .map(|n| n.to_string_lossy().to_string())
+        .map(path_to_string)
         .unwrap_or_else(|| "unknown".to_string())
 }
 

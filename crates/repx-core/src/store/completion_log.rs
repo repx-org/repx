@@ -112,11 +112,7 @@ pub fn read_completions(
 }
 
 fn truncate_for_log(s: &str, max_len: usize) -> &str {
-    if s.len() <= max_len {
-        s
-    } else {
-        &s[..max_len]
-    }
+    crate::fs_utils::safe_truncate_ref(s, max_len)
 }
 
 #[cfg(test)]

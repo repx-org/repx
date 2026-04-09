@@ -3,12 +3,28 @@ mod dot;
 mod generator;
 mod helpers;
 
-use anyhow::{Context, Result};
 use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
 
 use generator::VizGenerator;
+
+#[derive(Debug, thiserror::Error)]
+pub enum VizError {
+    #[error("{0}")]
+    Usage(String),
+
+    #[error(transparent)]
+    Core(#[from] repx_core::errors::CoreError),
+
+    #[error(transparent)]
+    Io(#[from] std::io::Error),
+
+    #[error("Graphviz 'dot' command failed with {0}")]
+    GraphvizFailed(std::process::ExitStatus),
+}
+
+pub type Result<T> = std::result::Result<T, VizError>;
 
 #[derive(Debug, Clone)]
 pub struct VizArgs {
@@ -27,13 +43,15 @@ pub struct VizArgs {
 
 pub fn run(args: VizArgs) -> Result<()> {
     if !args.show_pipelines && !args.show_runs && !args.show_groups {
-        anyhow::bail!("Nothing to draw. Enable at least one of: --pipelines, --runs, --groups.");
+        return Err(VizError::Usage(
+            "Nothing to draw. Enable at least one of: --pipelines, --runs, --groups.".to_string(),
+        ));
     }
 
     let lab = repx_core::lab::load_from_path(&args.lab)?;
 
     let mut generator = VizGenerator::new(&lab);
-    let dot_content = generator.generate_dot(&args)?;
+    let dot_content = generator.generate_dot(&args);
 
     let output_base = args
         .output
@@ -61,11 +79,10 @@ pub fn run(args: VizArgs) -> Result<()> {
         .arg(&dot_path)
         .arg("-o")
         .arg(&output_file)
-        .status()
-        .context("Failed to execute 'dot'. Is Graphviz installed?")?;
+        .status()?;
 
     if !status.success() {
-        anyhow::bail!("Graphviz exited with error");
+        return Err(VizError::GraphvizFailed(status));
     }
 
     let _ = fs::remove_file(dot_path);

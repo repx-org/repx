@@ -4,6 +4,40 @@ use std::fmt;
 use std::path::PathBuf;
 use std::str::FromStr;
 
+macro_rules! impl_string_newtype {
+    ($Type:ident) => {
+        impl $Type {
+            pub fn as_str(&self) -> &str {
+                &self.0
+            }
+        }
+
+        impl fmt::Display for $Type {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                fmt::Display::fmt(&self.0, f)
+            }
+        }
+
+        impl From<String> for $Type {
+            fn from(s: String) -> Self {
+                $Type(s)
+            }
+        }
+
+        impl From<&str> for $Type {
+            fn from(s: &str) -> Self {
+                $Type(s.to_string())
+            }
+        }
+
+        impl AsRef<str> for $Type {
+            fn as_ref(&self) -> &str {
+                &self.0
+            }
+        }
+    };
+}
+
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize, Default)]
 #[serde(rename_all = "kebab-case")]
 pub enum StageType {
@@ -217,11 +251,11 @@ impl fmt::Display for DependencyType {
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize, Ord, PartialOrd)]
 pub struct JobId(String);
 
-impl JobId {
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
+impl_string_newtype!(JobId);
 
+const SHORT_HASH_LEN: usize = 12;
+
+impl JobId {
     pub fn into_inner(self) -> String {
         self.0
     }
@@ -241,36 +275,10 @@ impl JobId {
     }
 }
 
-impl fmt::Display for JobId {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
-const SHORT_HASH_LEN: usize = 12;
-
-impl From<String> for JobId {
-    fn from(s: String) -> Self {
-        JobId(s)
-    }
-}
-
-impl From<&str> for JobId {
-    fn from(s: &str) -> Self {
-        JobId(s.to_string())
-    }
-}
-
 impl FromStr for JobId {
     type Err = std::convert::Infallible;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         Ok(JobId(s.to_string()))
-    }
-}
-
-impl AsRef<str> for JobId {
-    fn as_ref(&self) -> &str {
-        &self.0
     }
 }
 
@@ -288,31 +296,11 @@ impl std::error::Error for ParseRunIdError {}
 #[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize, Ord, PartialOrd)]
 pub struct RunId(String);
 
-impl RunId {
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
+impl_string_newtype!(RunId);
 
+impl RunId {
     pub fn into_inner(self) -> String {
         self.0
-    }
-}
-
-impl fmt::Display for RunId {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
-impl From<String> for RunId {
-    fn from(s: String) -> Self {
-        RunId(s)
-    }
-}
-
-impl From<&str> for RunId {
-    fn from(s: &str) -> Self {
-        RunId(s.to_string())
     }
 }
 
@@ -325,12 +313,6 @@ impl FromStr for RunId {
             ))),
             _ => Ok(RunId(s.to_string())),
         }
-    }
-}
-
-impl AsRef<str> for RunId {
-    fn as_ref(&self) -> &str {
-        &self.0
     }
 }
 
@@ -354,11 +336,9 @@ pub struct InputMapping {
 #[serde(transparent)]
 pub struct Memory(String);
 
-impl Memory {
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
+impl_string_newtype!(Memory);
 
+impl Memory {
     pub fn to_bytes(&self) -> Option<u64> {
         let s = self.0.trim().to_uppercase();
         let (num_str, multiplier) = if let Some(n) = s.strip_suffix('T') {
@@ -376,63 +356,11 @@ impl Memory {
     }
 }
 
-impl fmt::Display for Memory {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
-impl From<String> for Memory {
-    fn from(s: String) -> Self {
-        Memory(s)
-    }
-}
-
-impl From<&str> for Memory {
-    fn from(s: &str) -> Self {
-        Memory(s.to_string())
-    }
-}
-
-impl AsRef<str> for Memory {
-    fn as_ref(&self) -> &str {
-        &self.0
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct SlurmTime(String);
 
-impl SlurmTime {
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-impl fmt::Display for SlurmTime {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
-impl From<String> for SlurmTime {
-    fn from(s: String) -> Self {
-        SlurmTime(s)
-    }
-}
-
-impl From<&str> for SlurmTime {
-    fn from(s: &str) -> Self {
-        SlurmTime(s.to_string())
-    }
-}
-
-impl AsRef<str> for SlurmTime {
-    fn as_ref(&self) -> &str {
-        &self.0
-    }
-}
+impl_string_newtype!(SlurmTime);
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ResourceHints {
@@ -549,37 +477,11 @@ pub(crate) struct RunMetadataForLoading {
 #[serde(transparent)]
 pub struct Sha256Hash(String);
 
-impl Sha256Hash {
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
+impl_string_newtype!(Sha256Hash);
 
+impl Sha256Hash {
     pub fn short(&self, n: usize) -> &str {
         &self.0[..n.min(self.0.len())]
-    }
-}
-
-impl fmt::Display for Sha256Hash {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
-impl From<String> for Sha256Hash {
-    fn from(s: String) -> Self {
-        Sha256Hash(s)
-    }
-}
-
-impl From<&str> for Sha256Hash {
-    fn from(s: &str) -> Self {
-        Sha256Hash(s.to_string())
-    }
-}
-
-impl AsRef<str> for Sha256Hash {
-    fn as_ref(&self) -> &str {
-        &self.0
     }
 }
 

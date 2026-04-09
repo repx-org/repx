@@ -89,16 +89,8 @@ impl<'a> RuntimeContext<'a> {
         for root in &search_roots {
             let images_dir = root.join("images");
             if tokio::fs::metadata(&images_dir).await.is_ok() {
-                let candidates = vec![
-                    images_dir.join(image_tag),
-                    images_dir.join(format!("{}.gz", image_tag)),
-                    images_dir.join(format!("{}.tar", image_tag)),
-                    images_dir.join(format!("{}.tar.gz", image_tag)),
-                ];
-                for candidate in candidates {
-                    if tokio::fs::metadata(&candidate).await.is_ok() {
-                        return Some(candidate);
-                    }
+                if let Some(found) = find_image_candidate(&images_dir, image_tag).await {
+                    return Some(found);
                 }
             }
 
@@ -111,17 +103,8 @@ impl<'a> RuntimeContext<'a> {
                     continue;
                 }
 
-                let candidates = vec![
-                    dir.join(image_tag),
-                    dir.join(format!("{}.gz", image_tag)),
-                    dir.join(format!("{}.tar", image_tag)),
-                    dir.join(format!("{}.tar.gz", image_tag)),
-                ];
-
-                for candidate in candidates {
-                    if tokio::fs::metadata(&candidate).await.is_ok() {
-                        return Some(candidate);
-                    }
+                if let Some(found) = find_image_candidate(&dir, image_tag).await {
+                    return Some(found);
                 }
             }
         }
@@ -145,28 +128,23 @@ impl<'a> RuntimeContext<'a> {
     }
 
     pub fn get_images_cache_dir(&self) -> PathBuf {
-        if let Some(local_artifacts) = self.local_artifacts_path() {
-            if let Some(parent) = local_artifacts.parent() {
-                return parent.join("cache").join("images");
-            }
-        }
-        if let Some(local) = &self.request.node_local_path {
-            local.join("repx").join("cache").join("images")
-        } else {
-            self.request.base_path.join("cache").join("images")
-        }
+        self.get_cache_subdir("images")
     }
 
     pub fn get_capabilities_cache_dir(&self) -> PathBuf {
+        self.get_cache_subdir("capabilities")
+    }
+
+    fn get_cache_subdir(&self, subdir: &str) -> PathBuf {
         if let Some(local_artifacts) = self.local_artifacts_path() {
             if let Some(parent) = local_artifacts.parent() {
-                return parent.join("cache").join("capabilities");
+                return parent.join("cache").join(subdir);
             }
         }
         if let Some(local) = &self.request.node_local_path {
-            local.join("repx").join("cache").join("capabilities")
+            local.join("repx").join("cache").join(subdir)
         } else {
-            self.request.base_path.join("cache").join("capabilities")
+            self.request.base_path.join("cache").join(subdir)
         }
     }
 
@@ -241,4 +219,19 @@ impl<'a> RuntimeContext<'a> {
             .await;
         cmd.env("PATH", path);
     }
+}
+
+async fn find_image_candidate(dir: &std::path::Path, tag: &str) -> Option<PathBuf> {
+    let candidates = [
+        dir.join(tag),
+        dir.join(format!("{}.gz", tag)),
+        dir.join(format!("{}.tar", tag)),
+        dir.join(format!("{}.tar.gz", tag)),
+    ];
+    for candidate in candidates {
+        if tokio::fs::metadata(&candidate).await.is_ok() {
+            return Some(candidate);
+        }
+    }
+    None
 }

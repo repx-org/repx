@@ -8,6 +8,7 @@ use repx_core::{
     config::Resources,
     constants::{dirs, logs},
     engine,
+    fs_utils::path_to_string,
     model::{JobId, Lab, SchedulerType},
     theme::Theme,
 };
@@ -41,7 +42,7 @@ pub enum StatusFilter {
     Failed,
     Running,
     Pending,
-    Completed,
+    Succeeded,
 }
 
 impl StatusFilter {
@@ -51,7 +52,7 @@ impl StatusFilter {
             StatusFilter::Failed => "Failed",
             StatusFilter::Running => "Running",
             StatusFilter::Pending => "Pending",
-            StatusFilter::Completed => "Succeeded",
+            StatusFilter::Succeeded => "Succeeded",
         }
     }
 }
@@ -61,7 +62,7 @@ const STATUS_FILTERS: [StatusFilter; 5] = [
     StatusFilter::Failed,
     StatusFilter::Running,
     StatusFilter::Pending,
-    StatusFilter::Completed,
+    StatusFilter::Succeeded,
 ];
 type TargetPollUpdate = Result<
     (
@@ -232,7 +233,7 @@ impl App {
             })
             .collect();
 
-        let tick_rate = client.config().tui_tick_rate();
+        let tick_rate = repx_core::config::TUI_TICK_RATE;
         let mut app = Self {
             client,
             theme,
@@ -1127,7 +1128,7 @@ impl App {
             let path_str = if is_remote {
                 path.to_string_lossy().replace('\\', "/")
             } else {
-                path.to_string_lossy().to_string()
+                path_to_string(&path)
             };
 
             thread::spawn(move || {

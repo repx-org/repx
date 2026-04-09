@@ -1,5 +1,5 @@
 use crate::error::CliError;
-use repx_core::{constants::dirs, errors::CoreError};
+use repx_core::{constants::dirs, errors::CoreError, fs_utils::path_to_string};
 use serde_json::Value;
 use std::{collections::HashMap, path::Path};
 
@@ -21,7 +21,7 @@ pub(crate) fn resolve_step_inputs(
             if source == "scatter:work_item" {
                 inputs.insert(
                     target.clone(),
-                    Value::String(work_item_path.to_string_lossy().to_string()),
+                    Value::String(path_to_string(work_item_path)),
                 );
             } else if let Some(dep_name) = source.strip_prefix("step:") {
                 let source_output = mapping.source_output.as_ref().ok_or_else(|| {

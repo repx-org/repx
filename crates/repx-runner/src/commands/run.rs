@@ -106,10 +106,12 @@ pub fn handle_run(
     let cancelled = Arc::new(AtomicBool::new(false));
     let cancelled_clone = cancelled.clone();
     let cancelled_for_submit = cancelled.clone();
-    let _ = ctrlc::set_handler(move || {
+    if let Err(e) = ctrlc::set_handler(move || {
         eprintln!("\nCancellation requested (Ctrl+C). Killing running processes...");
         cancelled_clone.store(true, Ordering::SeqCst);
-    });
+    }) {
+        tracing::warn!("Failed to set Ctrl+C handler: {e}");
+    }
 
     let target_name_clone = target_name.to_string();
     let continue_on_failure = args.continue_on_failure;
@@ -356,29 +358,26 @@ pub fn handle_run(
         }
         Ok(Err(e)) => {
             if !user_cancelled {
-                return Err(CliError::ExecutionFailed {
-                    message: "Failed to submit run".to_string(),
-                    log_path: None,
-                    log_summary: e.to_string(),
-                });
+                return Err(CliError::execution_failed(
+                    "Failed to submit run",
+                    e.to_string(),
+                ));
             }
         }
         Err(_panic) => {
-            return Err(CliError::ExecutionFailed {
-                message: "Submission thread panicked".to_string(),
-                log_path: None,
-                log_summary: "Internal error: submission thread panicked unexpectedly".to_string(),
-            });
+            return Err(CliError::execution_failed(
+                "Submission thread panicked",
+                "Internal error: submission thread panicked unexpectedly",
+            ));
         }
     }
 
     if user_cancelled {
         eprintln!("{}", "Run cancelled by user.".red().bold());
-        return Err(CliError::ExecutionFailed {
-            message: "Run cancelled by user".to_string(),
-            log_path: None,
-            log_summary: "Ctrl+C received during submission".to_string(),
-        });
+        return Err(CliError::execution_failed(
+            "Run cancelled by user",
+            "Ctrl+C received during submission",
+        ));
     }
 
     Ok(())

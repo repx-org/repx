@@ -90,11 +90,19 @@ pub fn collect_images_to_sync(
 ) -> HashSet<(std::path::PathBuf, String)> {
     let mut images_to_sync = HashSet::new();
 
+    let job_to_run: HashMap<&JobId, &RunId> = lab
+        .runs
+        .iter()
+        .flat_map(|(run_id, run)| run.jobs.iter().map(move |jid| (jid, run_id)))
+        .collect();
+
     for job_id in job_ids {
-        if let Some(run) = lab.runs.values().find(|r| r.jobs.contains(job_id)) {
-            if let Some(image_path) = &run.image {
-                if let Some(stem) = image_path.file_stem().and_then(|s| s.to_str()) {
-                    images_to_sync.insert((image_path.clone(), stem.to_string()));
+        if let Some(run_id) = job_to_run.get(job_id) {
+            if let Some(run) = lab.runs.get(*run_id) {
+                if let Some(image_path) = &run.image {
+                    if let Some(stem) = image_path.file_stem().and_then(|s| s.to_str()) {
+                        images_to_sync.insert((image_path.clone(), stem.to_string()));
+                    }
                 }
             }
         }
@@ -127,9 +135,7 @@ pub fn sync_images(
                 }
                 LabSource::Tar(tar_path) => {
                     let image_cache = local_cache_root.join("lab-images");
-                    fs_err::create_dir_all(&image_cache).map_err(|e| {
-                        crate::error::ClientError::Config(repx_core::errors::CoreError::Io(e))
-                    })?;
+                    fs_err::create_dir_all(&image_cache).map_err(crate::error::ClientError::Io)?;
                     let filename = relative_path
                         .file_name()
                         .unwrap_or(std::ffi::OsStr::new("image"))

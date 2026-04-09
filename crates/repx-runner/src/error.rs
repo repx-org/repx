@@ -24,3 +24,15 @@ pub enum CliError {
         log_summary: String,
     },
 }
+
+pub type Result<T> = std::result::Result<T, CliError>;
+
+impl CliError {
+    pub fn execution_failed(message: impl Into<String>, summary: impl Into<String>) -> Self {
+        Self::ExecutionFailed {
+            message: message.into(),
+            log_path: None,
+            log_summary: summary.into(),
+        }
+    }
+}

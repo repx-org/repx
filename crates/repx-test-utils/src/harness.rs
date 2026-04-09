@@ -1,3 +1,4 @@
+use repx_core::fs_utils::path_to_string;
 use serde_json::Value;
 use std::env;
 use std::fs;
@@ -318,7 +319,7 @@ local_concurrency = 2
             .expect("Could not read lab/ subdirectory in artifacts")
             .filter_map(|e| e.ok())
             .find(|e| {
-                let name = e.file_name().to_string_lossy().to_string();
+                let name = path_to_string(e.file_name());
                 name == "lab-metadata.json" || name.ends_with("-lab-metadata.json")
             })
             .map(|e| e.path())

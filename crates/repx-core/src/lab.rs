@@ -1,5 +1,6 @@
 use crate::{
     errors::CoreError,
+    fs_utils::path_to_string,
     model::{FileEntry, Lab, LabManifest, RootMetadata, Run, RunId, RunMetadataForLoading},
     path_safety::safe_join,
 };
@@ -305,7 +306,7 @@ fn load_from_path_inner(initial_path: &Path, verify_integrity: bool) -> Result<L
             ))
         })?;
 
-    let host_tools_dir_name = host_tools_entry.file_name().to_string_lossy().to_string();
+    let host_tools_dir_name = path_to_string(host_tools_entry.file_name());
     let host_tools_path = host_tools_entry.path().join("bin");
 
     let mut referenced_files = Vec::new();
@@ -319,19 +320,7 @@ fn load_from_path_inner(initial_path: &Path, verify_integrity: bool) -> Result<L
         referenced_files.push(p.to_path_buf());
     }
 
-    {
-        let mut seen = std::collections::HashSet::new();
-        for entry in &manifest.files {
-            let p = Path::new(&entry.path);
-            let mut components = p.components();
-            if let (Some(a), Some(b)) = (components.next(), components.next()) {
-                let dir_entry = PathBuf::from(a.as_os_str()).join(b.as_os_str());
-                if seen.insert(dir_entry.clone()) {
-                    referenced_files.push(dir_entry);
-                }
-            }
-        }
-    }
+    referenced_files.extend(collect_referenced_dirs(&manifest.files));
 
     let groups = root_meta
         .groups
@@ -527,7 +516,7 @@ fn probe_tar(data: &[u8], prefix: &str) -> Result<TarProbe, CoreError> {
                 ))
             })?
             .to_path_buf();
-        let raw_path_str = raw_path.to_string_lossy().to_string();
+        let raw_path_str = path_to_string(&raw_path);
 
         let rel_path = match strip_tar_prefix(&raw_path_str, prefix) {
             Some(p) if !p.is_empty() => p.to_string(),
@@ -553,7 +542,7 @@ fn probe_tar(data: &[u8], prefix: &str) -> Result<TarProbe, CoreError> {
 
         if entry_type == tar::EntryType::Link {
             if let Ok(Some(link_target)) = entry.link_name() {
-                let target_str = link_target.to_string_lossy().to_string();
+                let target_str = path_to_string(link_target.as_ref());
                 let target_rel = match strip_tar_prefix(&target_str, prefix) {
                     Some(p) if !p.is_empty() => p.to_string(),
                     _ => target_str,
@@ -636,7 +625,7 @@ fn register_parent_dirs(
     let p = Path::new(rel_path);
     let mut ancestor = p.parent();
     while let Some(dir) = ancestor {
-        let dir_str = dir.to_string_lossy().to_string();
+        let dir_str = path_to_string(dir);
         if dir_str.is_empty() {
             break;
         }
@@ -730,28 +719,12 @@ pub fn load_from_tar(tar_path: &Path) -> Result<Lab, CoreError> {
     let mut symlink_targets: HashSet<String> = HashSet::new();
     for path in &probe.files_to_verify {
         if hardlink_map.contains_key(path) {
-            let mut current = path.as_str();
-            let mut depth = 0;
-            while let Some(next) = hardlink_map.get(current) {
-                current = next.as_str();
-                depth += 1;
-                if depth > 100 {
-                    break;
-                }
-            }
-            hardlink_targets.insert(current.to_string());
+            let resolved = crate::fs_utils::resolve_link_chain(&hardlink_map, path, 100);
+            hardlink_targets.insert(resolved.to_string());
         }
         if symlink_map.contains_key(path) {
-            let mut current = path.as_str();
-            let mut depth = 0;
-            while let Some(next) = symlink_map.get(current) {
-                current = next.as_str();
-                depth += 1;
-                if depth > 100 {
-                    break;
-                }
-            }
-            symlink_targets.insert(current.to_string());
+            let resolved = crate::fs_utils::resolve_link_chain(&symlink_map, path, 100);
+            symlink_targets.insert(resolved.to_string());
         }
     }
 
@@ -776,7 +749,7 @@ pub fn load_from_tar(tar_path: &Path) -> Result<Lab, CoreError> {
                 ))
             })?
             .to_path_buf();
-        let raw_path_str = raw_path.to_string_lossy().to_string();
+        let raw_path_str = path_to_string(&raw_path);
 
         let rel_path = match strip_tar_prefix(&raw_path_str, &probe.prefix) {
             Some(p) if !p.is_empty() => p.to_string(),
@@ -899,7 +872,7 @@ pub fn load_from_tar(tar_path: &Path) -> Result<Lab, CoreError> {
             let first = components.next()?;
             let second = components.next()?;
             if first.as_os_str() == "host-tools" && components.next().is_none() {
-                Some(second.as_os_str().to_string_lossy().to_string())
+                Some(path_to_string(second.as_os_str()))
             } else {
                 None
             }
@@ -928,19 +901,7 @@ pub fn load_from_tar(tar_path: &Path) -> Result<Lab, CoreError> {
     referenced_files.push(PathBuf::from(&probe.manifest.metadata));
     referenced_files.push(PathBuf::from("host-tools").join(&host_tools_dir_name));
 
-    {
-        let mut seen = HashSet::new();
-        for entry in &probe.manifest.files {
-            let p = Path::new(&entry.path);
-            let mut components = p.components();
-            if let (Some(a), Some(b)) = (components.next(), components.next()) {
-                let dir_entry = PathBuf::from(a.as_os_str()).join(b.as_os_str());
-                if seen.insert(dir_entry.clone()) {
-                    referenced_files.push(dir_entry);
-                }
-            }
-        }
-    }
+    referenced_files.extend(collect_referenced_dirs(&probe.manifest.files));
 
     let groups = root_meta
         .groups
@@ -1017,7 +978,7 @@ pub fn load_from_tar(tar_path: &Path) -> Result<Lab, CoreError> {
 
     for run in lab.runs.values() {
         if let Some(image_rel_path) = &run.image {
-            let image_path_str = image_rel_path.to_string_lossy().to_string();
+            let image_path_str = path_to_string(image_rel_path);
             if !probe.known_paths.contains(&image_path_str)
                 && !probe.dir_paths.contains(&image_path_str)
             {
@@ -1030,7 +991,7 @@ pub fn load_from_tar(tar_path: &Path) -> Result<Lab, CoreError> {
     }
 
     for (job_id, job) in &lab.jobs {
-        let job_pkg_str = job.path_in_lab.to_string_lossy().to_string();
+        let job_pkg_str = path_to_string(&job.path_in_lab);
         if !probe.dir_paths.contains(&job_pkg_str) {
             return Err(CoreError::IntegrityError(format!(
                 "Job package directory not found for job '{}' at '{}' in tar",
@@ -1109,7 +1070,7 @@ pub fn list_tar_entries(tar_path: &Path, prefix: &str) -> Result<Vec<String>, Co
                 ))
             })?
             .to_path_buf();
-        let raw_path_str = raw_path.to_string_lossy().to_string();
+        let raw_path_str = path_to_string(&raw_path);
 
         if let Some(rel) = strip_tar_prefix(&raw_path_str, &tar_prefix) {
             if !rel.is_empty() && rel.starts_with(prefix) {
@@ -1119,6 +1080,22 @@ pub fn list_tar_entries(tar_path: &Path, prefix: &str) -> Result<Vec<String>, Co
     }
 
     Ok(result)
+}
+
+fn collect_referenced_dirs(files: &[crate::model::FileEntry]) -> Vec<PathBuf> {
+    let mut seen = std::collections::HashSet::new();
+    let mut dirs = Vec::new();
+    for entry in files {
+        let p = Path::new(&entry.path);
+        let mut components = p.components();
+        if let (Some(a), Some(b)) = (components.next(), components.next()) {
+            let dir_entry = PathBuf::from(a.as_os_str()).join(b.as_os_str());
+            if seen.insert(dir_entry.clone()) {
+                dirs.push(dir_entry);
+            }
+        }
+    }
+    dirs
 }
 
 #[cfg(test)]

@@ -49,7 +49,7 @@ impl Target {
     }
 }
 
-const TUI_DEFAULT_TICK_RATE_MS: u64 = 1000;
+pub const TUI_TICK_RATE: Duration = Duration::from_millis(1000);
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(deny_unknown_fields)]
@@ -115,8 +115,9 @@ pub struct Resources {
 }
 
 impl Config {
+    #[deprecated(note = "Use repx_core::config::TUI_TICK_RATE constant instead")]
     pub fn tui_tick_rate(&self) -> Duration {
-        Duration::from_millis(TUI_DEFAULT_TICK_RATE_MS)
+        TUI_TICK_RATE
     }
 }
 
@@ -125,7 +126,7 @@ fn create_default_config_if_missing(xdg_dirs: &BaseDirectories) -> Result<PathBu
         Some(path) => Ok(path),
         None => {
             let config_path = xdg_dirs.place_config_file(CONFIG_FILE_NAME)?;
-            fs::write(&config_path, DEFAULT_CONFIG_CONTENT)?;
+            crate::fs_utils::write_atomic(&config_path, DEFAULT_CONFIG_CONTENT.as_bytes())?;
             Ok(config_path)
         }
     }
