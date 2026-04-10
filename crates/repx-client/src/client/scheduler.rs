@@ -9,28 +9,48 @@ pub struct ScheduleResult {
     pub waves: Vec<HashSet<JobId>>,
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, thiserror::Error)]
 pub enum SchedulerError {
+    #[error("A cycle was detected in the job dependency graph. Remaining jobs: {0:?}")]
     CycleDetected(Vec<String>),
+    #[error("Job failed: {0}")]
     JobFailed(String),
 }
 
-impl std::fmt::Display for SchedulerError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            SchedulerError::CycleDetected(remaining) => {
-                write!(
-                    f,
-                    "A cycle was detected in the job dependency graph. Remaining jobs: {:?}",
-                    remaining
-                )
-            }
-            SchedulerError::JobFailed(msg) => write!(f, "Job failed: {}", msg),
-        }
-    }
-}
+pub fn compute_topological_waves(
+    graph: &HashMap<JobId, Vec<JobId>>,
+) -> Result<Vec<Vec<JobId>>, SchedulerError> {
+    let mut waves: Vec<Vec<JobId>> = Vec::new();
+    let mut assigned: HashSet<JobId> = HashSet::new();
+    let mut remaining: HashSet<JobId> = graph.keys().cloned().collect();
 
-impl std::error::Error for SchedulerError {}
+    while !remaining.is_empty() {
+        let mut wave: Vec<JobId> = remaining
+            .iter()
+            .filter(|job_id| {
+                let deps = graph.get(*job_id).map(|d| d.as_slice()).unwrap_or_default();
+                deps.iter().all(|dep| assigned.contains(dep))
+            })
+            .cloned()
+            .collect();
+
+        if wave.is_empty() {
+            let mut remaining_sorted: Vec<String> =
+                remaining.iter().map(|j| j.to_string()).collect();
+            remaining_sorted.sort();
+            return Err(SchedulerError::CycleDetected(remaining_sorted));
+        }
+
+        wave.sort();
+        for id in &wave {
+            remaining.remove(id);
+            assigned.insert(id.clone());
+        }
+        waves.push(wave);
+    }
+
+    Ok(waves)
+}
 
 pub fn run_wave_schedule<F>(
     graph: &HashMap<JobId, Vec<JobId>>,

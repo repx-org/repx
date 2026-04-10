@@ -1,5 +1,6 @@
 use crate::config::LoggingConfig;
 use crate::errors::CoreError;
+use crate::fs_utils::path_to_string;
 use chrono::Local;
 use std::env;
 use std::fs::{self, OpenOptions};
@@ -258,7 +259,7 @@ where
             let display_path = if file.starts_with('/') {
                 let file_path = PathBuf::from(file);
                 if let Ok(rel) = file_path.strip_prefix(&self.workspace_root) {
-                    rel.to_string_lossy().to_string()
+                    path_to_string(rel)
                 } else {
                     file.to_string()
                 }

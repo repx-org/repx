@@ -42,6 +42,15 @@ pub enum ExecutorError {
     Cancelled { job_id: String },
 }
 
+impl ExecutorError {
+    pub fn command_failed(command: impl Into<String>, source: std::io::Error) -> Self {
+        Self::CommandFailed {
+            command: command.into(),
+            source,
+        }
+    }
+}
+
 pub type Result<T> = std::result::Result<T, ExecutorError>;
 
 pub trait IoContext<T> {

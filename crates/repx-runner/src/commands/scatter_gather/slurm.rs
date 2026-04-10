@@ -1,5 +1,5 @@
 use crate::error::CliError;
-use repx_core::{constants::dirs, errors::CoreError};
+use repx_core::{constants::dirs, errors::CoreError, fs_utils::path_to_string};
 use std::collections::HashMap;
 use std::fs;
 use tokio::io::AsyncWriteExt;
@@ -49,7 +49,7 @@ pub(crate) async fn submit_slurm_gather_job(
         "--runtime".to_string(),
         args.runtime.to_string(),
         "--base-path".to_string(),
-        args.base_path.to_string_lossy().to_string(),
+        path_to_string(&args.base_path),
         "--host-tools-dir".to_string(),
         args.host_tools_dir.clone(),
         "--scheduler".to_string(),
@@ -57,11 +57,11 @@ pub(crate) async fn submit_slurm_gather_job(
         "--step-sbatch-opts".to_string(),
         "''".to_string(),
         "--job-package-path".to_string(),
-        args.job_package_path.to_string_lossy().to_string(),
+        path_to_string(&args.job_package_path),
         "--scatter-exe-path".to_string(),
-        args.scatter_exe_path.to_string_lossy().to_string(),
+        path_to_string(&args.scatter_exe_path),
         "--gather-exe-path".to_string(),
-        args.gather_exe_path.to_string_lossy().to_string(),
+        path_to_string(&args.gather_exe_path),
         "--steps-json".to_string(),
         format!("'{}'", steps_json_escaped),
         "--last-step-outputs-json".to_string(),
@@ -93,15 +93,15 @@ pub(crate) async fn submit_slurm_gather_job(
     }
     if let Some(local) = &args.node_local_path {
         gather_cmd_parts.push("--node-local-path".to_string());
-        gather_cmd_parts.push(local.to_string_lossy().to_string());
+        gather_cmd_parts.push(path_to_string(local));
     }
     if let Some(local_art) = &args.local_artifacts_path {
         gather_cmd_parts.push("--local-artifacts-path".to_string());
-        gather_cmd_parts.push(local_art.to_string_lossy().to_string());
+        gather_cmd_parts.push(path_to_string(local_art));
     }
     if let Some(tar) = &args.lab_tar_path {
         gather_cmd_parts.push("--lab-tar-path".to_string());
-        gather_cmd_parts.push(tar.to_string_lossy().to_string());
+        gather_cmd_parts.push(path_to_string(tar));
     }
     if let Some(anchor) = args.anchor_id {
         gather_cmd_parts.push("--anchor-id".to_string());
@@ -153,11 +153,10 @@ pub(crate) async fn submit_slurm_gather_job(
 
     let output = sbatch.output().await?;
     if !output.status.success() {
-        return Err(CliError::ExecutionFailed {
-            message: "Failed to submit Gather job".to_string(),
-            log_path: None,
-            log_summary: String::from_utf8_lossy(&output.stderr).to_string(),
-        });
+        return Err(CliError::execution_failed(
+            "Failed to submit Gather job",
+            String::from_utf8_lossy(&output.stderr).to_string(),
+        ));
     }
 
     Ok(())
@@ -347,14 +346,13 @@ exec {repx} internal-execute \
 
             let output = child.wait_with_output().await?;
             if !output.status.success() {
-                return Err(CliError::ExecutionFailed {
-                    message: format!(
+                return Err(CliError::execution_failed(
+                    format!(
                         "sbatch submission for branch #{} step '{}' failed",
                         branch_idx, step_name
                     ),
-                    log_path: None,
-                    log_summary: String::from_utf8_lossy(&output.stderr).to_string(),
-                });
+                    String::from_utf8_lossy(&output.stderr).to_string(),
+                ));
             }
             let slurm_id = String::from_utf8_lossy(&output.stdout).trim().to_string();
             if let Ok(id) = slurm_id.parse::<u32>() {

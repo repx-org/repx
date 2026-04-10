@@ -2,6 +2,7 @@ use crate::error::{ClientError, Result};
 use repx_core::{
     cache::{CacheKey, CacheMetadata, CacheStore, CacheStoreExt, FsCache},
     errors::CoreError,
+    fs_utils::path_to_string,
 };
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -165,7 +166,7 @@ pub fn restructure_layers_for_dedup(image_extract_dir: &Path, layers_cache: &Pat
         if path.is_dir() {
             let dirname = entry.file_name();
             if path.join("layer.tar").exists() {
-                let layer_hash = dirname.to_string_lossy().to_string();
+                let layer_hash = path_to_string(&dirname);
                 let dedup_key = CacheKey::LayerDedup {
                     layer_hash: layer_hash.clone(),
                 };
@@ -301,8 +302,8 @@ pub fn get_image_manifest(image_path: &Path, tar_tool: &Path) -> Result<Vec<Stri
         ))));
     }
 
-    let manifest: Vec<ManifestEntry> = serde_json::from_slice(&extract_output.stdout)
-        .map_err(|e| ClientError::Config(CoreError::Json(e)))?;
+    let manifest: Vec<ManifestEntry> =
+        serde_json::from_slice(&extract_output.stdout).map_err(ClientError::Json)?;
 
     if manifest.is_empty() {
         return Err(ClientError::Config(CoreError::InconsistentMetadata {

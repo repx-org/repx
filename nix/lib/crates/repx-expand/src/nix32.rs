@@ -95,16 +95,8 @@ pub fn mk_job_id(hash_inputs: &[&str]) -> JobId {
 pub fn sha256_hex(input: &[u8]) -> String {
     let mut h = Sha256::new();
     h.update(input);
-    let digest = h.finalize();
-    let mut s = String::with_capacity(64);
-    for &b in digest.as_slice() {
-        s.push(HEX_CHARS[(b >> 4) as usize] as char);
-        s.push(HEX_CHARS[(b & 0x0f) as usize] as char);
-    }
-    s
+    crate::util::hex_encode(h.finalize().as_slice())
 }
-
-const HEX_CHARS: &[u8; 16] = b"0123456789abcdef";
 
 #[cfg(test)]
 mod tests {

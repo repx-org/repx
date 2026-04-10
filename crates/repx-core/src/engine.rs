@@ -15,9 +15,9 @@ pub enum JobStatus {
 
 pub fn determine_job_statuses(
     lab: &Lab,
-    found_statuses: &HashMap<JobId, JobStatus>,
+    found_statuses: HashMap<JobId, JobStatus>,
 ) -> HashMap<JobId, JobStatus> {
-    let mut cache: HashMap<JobId, JobStatus> = found_statuses.clone();
+    let mut cache = found_statuses;
 
     for job_id in lab.jobs.keys() {
         resolve_job_status(job_id, lab, &mut cache);

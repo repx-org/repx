@@ -15,11 +15,8 @@ pub mod show;
 pub mod trace;
 
 pub(crate) fn create_tokio_runtime() -> Result<tokio::runtime::Runtime, CliError> {
-    tokio::runtime::Runtime::new().map_err(|e| {
-        CliError::Config(CoreError::InvalidConfig {
-            detail: format!("Failed to create async runtime: {}", e),
-        })
-    })
+    tokio::runtime::Runtime::new()
+        .map_err(|e| CliError::execution_failed("Failed to create async runtime", e.to_string()))
 }
 
 pub(crate) fn write_marker(path: &Path) -> std::io::Result<()> {
@@ -56,6 +53,21 @@ pub(crate) fn parse_runtime(
             image_tag: parse_tag("bwrap", image_tag)?,
         }),
     }
+}
+
+pub(crate) fn resolve_host_tools_dir(
+    base_path: &Path,
+    host_tools_dir: &str,
+    local_artifacts_path: Option<&Path>,
+) -> Option<std::path::PathBuf> {
+    if let Some(local) = local_artifacts_path {
+        let local_tools = local.join("host-tools").join(host_tools_dir).join("bin");
+        if local_tools.exists() {
+            return Some(local_tools);
+        }
+    }
+    let host_tools_root = base_path.join("artifacts").join("host-tools");
+    Some(host_tools_root.join(host_tools_dir).join("bin"))
 }
 
 pub struct AppContext<'a> {

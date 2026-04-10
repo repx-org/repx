@@ -114,12 +114,8 @@ pub fn handle_trace_params(args: TraceParamsArgs, lab: &Lab) -> Result<(), CliEr
         .map(|(k, v)| (k.into_inner(), v))
         .collect();
 
-    let json_str =
-        serde_json::to_string_pretty(&output).map_err(|e| CliError::ExecutionFailed {
-            message: "Failed to serialize params".to_string(),
-            log_path: None,
-            log_summary: e.to_string(),
-        })?;
+    let json_str = serde_json::to_string_pretty(&output)
+        .map_err(|e| CliError::execution_failed("Failed to serialize params", e.to_string()))?;
 
     println!("{}", json_str);
     Ok(())

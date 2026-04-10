@@ -7,6 +7,7 @@ use repx_core::{
     constants::{dirs, targets},
     engine,
     errors::CoreError,
+    fs_utils::path_to_string,
     model::{Job, JobId, Lab},
 };
 use serde_json::Value;
@@ -41,11 +42,14 @@ type ActiveHandle = (
     Instant,
 );
 
-fn get_job_mem_bytes(job: &Job, resources_config: &Option<repx_core::config::Resources>) -> u64 {
+fn get_job_mem_bytes(
+    job_id: &JobId,
+    target_name: &str,
+    job: &Job,
+    resources_config: &Option<repx_core::config::Resources>,
+) -> u64 {
     let hints = job.resource_hints.as_ref();
-
-    let dummy_id = JobId::from("");
-    let directives = resources::resolve_for_job(&dummy_id, "", resources_config, hints);
+    let directives = resources::resolve_for_job(job_id, target_name, resources_config, hints);
 
     directives
         .mem
@@ -54,10 +58,14 @@ fn get_job_mem_bytes(job: &Job, resources_config: &Option<repx_core::config::Res
         .unwrap_or(DEFAULT_JOB_MEM_BYTES)
 }
 
-fn get_job_cpus(job: &Job, resources_config: &Option<repx_core::config::Resources>) -> u32 {
+fn get_job_cpus(
+    job_id: &JobId,
+    target_name: &str,
+    job: &Job,
+    resources_config: &Option<repx_core::config::Resources>,
+) -> u32 {
     let hints = job.resource_hints.as_ref();
-    let dummy_id = JobId::from("");
-    let directives = resources::resolve_for_job(&dummy_id, "", resources_config, hints);
+    let directives = resources::resolve_for_job(job_id, target_name, resources_config, hints);
     directives.cpus_per_task.unwrap_or(DEFAULT_JOB_CPUS)
 }
 
@@ -126,10 +134,7 @@ pub(crate) fn build_steps_json(
             .collect();
 
         let mut step_obj = serde_json::Map::new();
-        step_obj.insert(
-            "exe_path".into(),
-            json!(exe_path.to_string_lossy().to_string()),
-        );
+        step_obj.insert("exe_path".into(), json!(path_to_string(&exe_path)));
         step_obj.insert("deps".into(), json!(exe.deps));
         step_obj.insert("outputs".into(), serde_json::Value::Object(outputs));
         step_obj.insert("inputs".into(), serde_json::Value::Array(inputs));
@@ -361,6 +366,54 @@ fn build_run_affinity_index(lab: &Lab) -> HashMap<JobId, usize> {
         .collect()
 }
 
+fn build_common_args(
+    ctx: &LocalJobContext<'_, '_>,
+    verbose: repx_core::logging::Verbosity,
+    subcommand: &str,
+) -> Vec<String> {
+    let mut args = verbose.as_args();
+    args.extend_from_slice(&[
+        subcommand.to_string(),
+        "--job-id".to_string(),
+        ctx.job_id.to_string(),
+        "--runtime".to_string(),
+        ctx.execution_type.to_string(),
+    ]);
+    if let Some(tag) = ctx.image_tag {
+        args.push("--image-tag".to_string());
+        args.push(tag.to_string());
+    }
+    args.extend_from_slice(&[
+        "--base-path".to_string(),
+        path_to_string(ctx.target.base_path()),
+    ]);
+    if let Some(local_path) = &ctx.target.config().node_local_path {
+        args.push("--node-local-path".to_string());
+        args.push(path_to_string(local_path));
+    }
+    if let Some(local_art) = ctx.local_artifacts_path {
+        args.push("--local-artifacts-path".to_string());
+        args.push(path_to_string(local_art));
+    }
+    args.extend_from_slice(&[
+        "--host-tools-dir".to_string(),
+        ctx.client.lab.host_tools_dir_name.clone(),
+    ]);
+    match ctx.target.config().mount_policy() {
+        repx_core::model::MountPolicy::AllHostPaths => {
+            args.push("--mount-host-paths".to_string());
+        }
+        repx_core::model::MountPolicy::SpecificPaths(paths) => {
+            for path in &paths {
+                args.push("--mount-paths".to_string());
+                args.push(path.clone());
+            }
+        }
+        repx_core::model::MountPolicy::Isolated => {}
+    }
+    args
+}
+
 fn build_sg_common_args(
     ctx: &LocalJobContext<'_, '_>,
     verbose: repx_core::logging::Verbosity,
@@ -381,56 +434,16 @@ fn build_sg_common_args(
     let job_package_path = artifacts_base.join(format!("jobs/{}", ctx.job_id));
     let scatter_exe_path = artifacts_base.join(&scatter_exe.path);
     let gather_exe_path = artifacts_base.join(&gather_exe.path);
-
     let (steps_json, last_step_outputs_json) = build_steps_json(ctx.job, &artifacts_base)?;
 
-    let mut args = verbose.as_args();
-    args.extend_from_slice(&[
-        "internal-scatter-gather".to_string(),
-        "--job-id".to_string(),
-        ctx.job_id.to_string(),
-        "--runtime".to_string(),
-        ctx.execution_type.to_string(),
-    ]);
-    if let Some(tag) = ctx.image_tag {
-        args.push("--image-tag".to_string());
-        args.push(tag.to_string());
-    }
-    args.extend_from_slice(&[
-        "--base-path".to_string(),
-        ctx.target.base_path().to_string_lossy().to_string(),
-    ]);
-    if let Some(local_path) = &ctx.target.config().node_local_path {
-        args.push("--node-local-path".to_string());
-        args.push(local_path.to_string_lossy().to_string());
-    }
-    if let Some(local_art) = ctx.local_artifacts_path {
-        args.push("--local-artifacts-path".to_string());
-        args.push(local_art.to_string_lossy().to_string());
-    }
-    args.extend_from_slice(&[
-        "--host-tools-dir".to_string(),
-        ctx.client.lab.host_tools_dir_name.clone(),
-    ]);
-    match ctx.target.config().mount_policy() {
-        repx_core::model::MountPolicy::AllHostPaths => {
-            args.push("--mount-host-paths".to_string());
-        }
-        repx_core::model::MountPolicy::SpecificPaths(paths) => {
-            for path in &paths {
-                args.push("--mount-paths".to_string());
-                args.push(path.clone());
-            }
-        }
-        repx_core::model::MountPolicy::Isolated => {}
-    }
+    let mut args = build_common_args(ctx, verbose, "internal-scatter-gather");
     args.extend_from_slice(&[
         "--job-package-path".to_string(),
-        job_package_path.to_string_lossy().to_string(),
+        path_to_string(&job_package_path),
         "--scatter-exe-path".to_string(),
-        scatter_exe_path.to_string_lossy().to_string(),
+        path_to_string(&scatter_exe_path),
         "--gather-exe-path".to_string(),
-        gather_exe_path.to_string_lossy().to_string(),
+        path_to_string(&gather_exe_path),
         "--steps-json".to_string(),
         steps_json,
         "--last-step-outputs-json".to_string(),
@@ -455,49 +468,10 @@ fn build_simple_job_args(
     })?;
     let executable_path = ctx.target.artifacts_base_path().join(&main_exe.path);
 
-    let mut args = verbose.as_args();
-    args.extend_from_slice(&[
-        "internal-execute".to_string(),
-        "--job-id".to_string(),
-        ctx.job_id.to_string(),
-        "--runtime".to_string(),
-        ctx.execution_type.to_string(),
-    ]);
-    if let Some(tag) = ctx.image_tag {
-        args.push("--image-tag".to_string());
-        args.push(tag.to_string());
-    }
-    args.extend_from_slice(&[
-        "--base-path".to_string(),
-        ctx.target.base_path().to_string_lossy().to_string(),
-    ]);
-    if let Some(local_path) = &ctx.target.config().node_local_path {
-        args.push("--node-local-path".to_string());
-        args.push(local_path.to_string_lossy().to_string());
-    }
-    if let Some(local_art) = ctx.local_artifacts_path {
-        args.push("--local-artifacts-path".to_string());
-        args.push(local_art.to_string_lossy().to_string());
-    }
-    args.extend_from_slice(&[
-        "--host-tools-dir".to_string(),
-        ctx.client.lab.host_tools_dir_name.clone(),
-    ]);
-    match ctx.target.config().mount_policy() {
-        repx_core::model::MountPolicy::AllHostPaths => {
-            args.push("--mount-host-paths".to_string());
-        }
-        repx_core::model::MountPolicy::SpecificPaths(paths) => {
-            for path in &paths {
-                args.push("--mount-paths".to_string());
-                args.push(path.clone());
-            }
-        }
-        repx_core::model::MountPolicy::Isolated => {}
-    }
+    let mut args = build_common_args(ctx, verbose, "internal-execute");
     args.extend_from_slice(&[
         "--executable-path".to_string(),
-        executable_path.to_string_lossy().to_string(),
+        path_to_string(&executable_path),
     ]);
     Ok(args)
 }
@@ -696,8 +670,8 @@ fn expand_scatter_gather<'job>(
     let gather_deps: Vec<WorkUnitId> = (0..work_items.len())
         .map(|b| WorkUnitId::step(ctx.job_id, b, &sink_step))
         .collect();
-    let gather_mem = get_job_mem_bytes(ctx.job, &options.resources);
-    let gather_cpus = get_job_cpus(ctx.job, &options.resources);
+    let gather_mem = get_job_mem_bytes(ctx.job_id, ctx.target.name(), ctx.job, &options.resources);
+    let gather_cpus = get_job_cpus(ctx.job_id, ctx.target.name(), ctx.job, &options.resources);
 
     let mut gather_extra = sg_common;
     gather_extra.extend_from_slice(&["--phase".to_string(), "gather".to_string()]);
@@ -749,7 +723,7 @@ pub fn submit_local_batch_run(
         target.name(),
         Some(repx_core::model::SchedulerType::Local),
     )?;
-    let all_job_statuses = engine::determine_job_statuses(&client.lab, &raw_statuses);
+    let all_job_statuses = engine::determine_job_statuses(&client.lab, raw_statuses);
     let completed_job_ids: HashSet<JobId> = all_job_statuses
         .into_iter()
         .filter(|(id, status)| {
@@ -817,8 +791,8 @@ pub fn submit_local_batch_run(
 
         if job.stage_type == repx_core::model::StageType::ScatterGather {
             let scatter_id = WorkUnitId::scatter(&job_id);
-            let mem = get_job_mem_bytes(job, &options.resources);
-            let cpus = get_job_cpus(job, &options.resources);
+            let mem = get_job_mem_bytes(&job_id, target.name(), job, &options.resources);
+            let cpus = get_job_cpus(&job_id, target.name(), job, &options.resources);
 
             let ctx = LocalJobContext {
                 job_id: &job_id,
@@ -848,8 +822,8 @@ pub fn submit_local_batch_run(
             completion_map.insert(job_id, WorkUnitId::gather(job_id_ref));
         } else {
             let unit_id = WorkUnitId::from_job(&job_id);
-            let mem = get_job_mem_bytes(job, &options.resources);
-            let cpus = get_job_cpus(job, &options.resources);
+            let mem = get_job_mem_bytes(&job_id, target.name(), job, &options.resources);
+            let cpus = get_job_cpus(&job_id, target.name(), job, &options.resources);
 
             let ctx = LocalJobContext {
                 job_id: &job_id,
@@ -974,7 +948,7 @@ pub fn submit_local_batch_run(
 
             match handle.join() {
                 Ok(output_res) => {
-                    let output = output_res.map_err(|e| ClientError::Config(CoreError::Io(e)))?;
+                    let output = output_res.map_err(ClientError::Io)?;
                     let phase = unit_id.phase();
                     let wall_time = Some(started_at.elapsed());
 

@@ -28,3 +28,5 @@ pub enum TuiError {
         source: std::io::Error,
     },
 }
+
+pub type Result<T> = std::result::Result<T, TuiError>;

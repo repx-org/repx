@@ -50,6 +50,8 @@ pub(crate) fn escape_dot_label(s: &str) -> String {
         .replace('"', "\\\"")
         .replace('<', "\\<")
         .replace('>', "\\>")
+        .replace('{', "\\{")
+        .replace('}', "\\}")
 }
 
 pub(crate) fn clean_id(s: &str) -> String {
@@ -81,15 +83,12 @@ pub(crate) fn smart_truncate(val: &Value, max_len: usize) -> String {
 
     s = s.replace(['[', ']', '\'', '"'], "");
 
-    if s.len() > max_len {
+    let char_count = s.chars().count();
+    if char_count > max_len {
         let keep = (max_len / 2).saturating_sub(2);
-        let chars: Vec<char> = s.chars().collect();
-        if chars.len() > max_len {
-            let start: String = chars.iter().take(keep).collect();
-            let end: String = chars.iter().rev().take(keep).collect();
-            let end_correct: String = end.chars().rev().collect();
-            return format!("{}..{}", start, end_correct);
-        }
+        let start: String = s.chars().take(keep).collect();
+        let end: String = s.chars().skip(char_count - keep).collect();
+        return format!("{}..{}", start, end);
     }
     s
 }

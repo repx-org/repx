@@ -1,166 +1,285 @@
 use crate::error::{ClientError, Result};
 use repx_core::errors::CoreError;
+use repx_core::fs_utils::path_to_string;
 use std::collections::HashMap;
 use std::io::Read;
 use std::path::Path;
 use tar::EntryType;
 
-pub(crate) fn extract_tar_to_dir(tar_path: &Path, dest_dir: &Path) -> Result<()> {
-    let file = std::fs::File::open(tar_path).map_err(|e| ClientError::Config(CoreError::Io(e)))?;
-    let mut archive = tar::Archive::new(file);
+fn io_err(e: std::io::Error) -> ClientError {
+    ClientError::Io(e)
+}
 
-    let mut hardlinks: Vec<(String, String)> = Vec::new();
+fn io_err_ctx(e: std::io::Error, msg: impl std::fmt::Display) -> ClientError {
+    ClientError::Io(std::io::Error::new(e.kind(), format!("{}: {}", msg, e)))
+}
 
-    for entry_result in archive.entries().map_err(|e| {
-        ClientError::Config(CoreError::Io(std::io::Error::new(
-            e.kind(),
-            format!("Failed to read tar entries: {}", e),
-        )))
-    })? {
-        let mut entry = entry_result.map_err(|e| {
-            ClientError::Config(CoreError::Io(std::io::Error::new(
-                e.kind(),
-                format!("Failed to read tar entry: {}", e),
-            )))
-        })?;
-
-        let raw_path = entry
-            .path()
-            .map_err(|e| {
-                ClientError::Config(CoreError::Io(std::io::Error::new(
-                    e.kind(),
-                    format!("Invalid path in tar: {}", e),
-                )))
-            })?
-            .to_path_buf();
-        let raw_str = raw_path.to_string_lossy().to_string();
-
-        let stripped = match raw_str.find('/') {
-            Some(idx) => &raw_str[idx + 1..],
-            None => continue,
-        };
-        if stripped.is_empty() {
-            continue;
-        }
-
-        let dest_path = dest_dir.join(stripped);
-        let entry_type = entry.header().entry_type();
-
-        match entry_type {
-            EntryType::Directory => {
-                std::fs::create_dir_all(&dest_path)
-                    .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
-            }
-            EntryType::Regular | EntryType::GNUSparse => {
-                if let Some(parent) = dest_path.parent() {
-                    std::fs::create_dir_all(parent)
-                        .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
-                }
-                let _ = std::fs::remove_file(&dest_path);
-                let mut out_file = std::fs::File::create(&dest_path)
-                    .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
-                std::io::copy(&mut entry, &mut out_file)
-                    .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
-
-                if let Ok(mode) = entry.header().mode() {
-                    use std::os::unix::fs::PermissionsExt;
-                    let _ =
-                        std::fs::set_permissions(&dest_path, std::fs::Permissions::from_mode(mode));
-                }
-            }
-            EntryType::Symlink => {
-                if let Some(parent) = dest_path.parent() {
-                    std::fs::create_dir_all(parent)
-                        .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
-                }
-                let link_target = entry
-                    .link_name()
-                    .map_err(|e| {
-                        ClientError::Config(CoreError::Io(std::io::Error::new(
-                            e.kind(),
-                            format!("Invalid symlink target in tar: {}", e),
-                        )))
-                    })?
-                    .ok_or_else(|| {
-                        ClientError::Config(CoreError::InvalidConfig {
-                            detail: format!("Symlink entry '{}' has no target", stripped),
-                        })
-                    })?;
-                let _ = std::fs::remove_file(&dest_path);
-                std::os::unix::fs::symlink(link_target.as_ref(), &dest_path)
-                    .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
-            }
-            EntryType::Link => {
-                let link_target = entry
-                    .link_name()
-                    .map_err(|e| {
-                        ClientError::Config(CoreError::Io(std::io::Error::new(
-                            e.kind(),
-                            format!("Invalid hardlink target in tar: {}", e),
-                        )))
-                    })?
-                    .ok_or_else(|| {
-                        ClientError::Config(CoreError::InvalidConfig {
-                            detail: format!("Hardlink entry '{}' has no target", stripped),
-                        })
-                    })?;
-                let target_str = link_target.to_string_lossy().to_string();
-                let stripped_target = match target_str.find('/') {
-                    Some(idx) => target_str[idx + 1..].to_string(),
-                    None => target_str,
-                };
-                hardlinks.push((stripped.to_string(), stripped_target));
-            }
-            _ => {}
-        }
+fn strip_tar_prefix(raw_str: &str) -> Option<&str> {
+    let idx = raw_str.find('/')?;
+    let rest = &raw_str[idx + 1..];
+    if rest.is_empty() {
+        None
+    } else {
+        Some(rest)
     }
+}
 
+fn write_regular_entry<R: Read>(entry: &mut tar::Entry<'_, R>, dest_path: &Path) -> Result<()> {
+    if let Some(parent) = dest_path.parent() {
+        std::fs::create_dir_all(parent).map_err(io_err)?;
+    }
+    let _ = std::fs::remove_file(dest_path);
+    let mut out_file = std::fs::File::create(dest_path).map_err(io_err)?;
+    std::io::copy(entry, &mut out_file).map_err(io_err)?;
+    if let Ok(mode) = entry.header().mode() {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(dest_path, std::fs::Permissions::from_mode(mode));
+    }
+    Ok(())
+}
+
+fn extract_hardlink_target<R: Read>(
+    entry: &tar::Entry<'_, R>,
+    stripped: &str,
+) -> Result<(String, String)> {
+    let link_target = entry
+        .link_name()
+        .map_err(|e| io_err_ctx(e, "Invalid hardlink target"))?
+        .ok_or_else(|| {
+            ClientError::Config(CoreError::InvalidConfig {
+                detail: format!("Hardlink '{}' has no target", stripped),
+            })
+        })?;
+    let target_str = path_to_string(&*link_target);
+    let stripped_target = match target_str.find('/') {
+        Some(idx) => target_str[idx + 1..].to_string(),
+        None => target_str,
+    };
+    Ok((stripped.to_string(), stripped_target))
+}
+
+fn resolve_hardlinks(
+    hardlinks: &[(String, String)],
+    dest_dir: &Path,
+) -> Result<Vec<(String, String)>> {
     let link_map: HashMap<&str, &str> = hardlinks
         .iter()
-        .map(|(link, target)| (link.as_str(), target.as_str()))
+        .map(|(l, t)| (l.as_str(), t.as_str()))
         .collect();
 
-    for (link_path, _) in &hardlinks {
-        let mut current = link_path.as_str();
-        let mut depth = 0;
-        while let Some(&next) = link_map.get(current) {
-            current = next;
-            depth += 1;
-            if depth > 100 {
-                break;
-            }
-        }
-        let ultimate_target = current;
+    let mut unresolved = Vec::new();
+
+    for (link_path, _) in hardlinks {
+        let ultimate_target =
+            repx_core::fs_utils::resolve_link_chain_ref(&link_map, link_path.as_str(), 100);
         let src = dest_dir.join(ultimate_target);
         let dst = dest_dir.join(link_path);
-
         if let Some(parent) = dst.parent() {
-            std::fs::create_dir_all(parent).map_err(|e| ClientError::Config(CoreError::Io(e)))?;
+            std::fs::create_dir_all(parent).map_err(io_err)?;
         }
         let _ = std::fs::remove_file(&dst);
-
         if src.exists() {
             std::fs::copy(&src, &dst).map_err(|e| {
-                ClientError::Config(CoreError::Io(std::io::Error::new(
-                    e.kind(),
+                io_err_ctx(
+                    e,
                     format!(
-                        "Failed to copy hardlink '{}' -> '{}': {}",
-                        link_path, ultimate_target, e
+                        "Failed to copy hardlink '{}' -> '{}'",
+                        link_path, ultimate_target
                     ),
-                )))
+                )
             })?;
             if let Ok(meta) = std::fs::metadata(&src) {
                 let _ = std::fs::set_permissions(&dst, meta.permissions());
             }
         } else {
-            tracing::warn!(
-                "Hardlink target '{}' not found for '{}', skipping",
-                ultimate_target,
-                link_path
-            );
+            unresolved.push((link_path.clone(), ultimate_target.to_string()));
         }
     }
 
+    Ok(unresolved)
+}
+
+fn write_data_to_links(
+    dest_dir: &Path,
+    link_paths: &[String],
+    data: &[u8],
+    mode: Option<u32>,
+) -> Result<()> {
+    for link_path in link_paths {
+        let dst = dest_dir.join(link_path);
+        if let Some(parent) = dst.parent() {
+            std::fs::create_dir_all(parent).map_err(io_err)?;
+        }
+        let _ = std::fs::remove_file(&dst);
+        std::fs::write(&dst, data).map_err(io_err)?;
+        if let Some(m) = mode {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(&dst, std::fs::Permissions::from_mode(m));
+        }
+    }
+    Ok(())
+}
+
+fn resolve_unresolved_from_tar(
+    tar_path: &Path,
+    dest_dir: &Path,
+    unresolved: &[(String, String)],
+    resolve_fs_symlinks: bool,
+) -> Result<()> {
+    if unresolved.is_empty() {
+        return Ok(());
+    }
+
+    let mut needed: HashMap<String, Vec<String>> = HashMap::new();
+    for (link_path, target_path) in unresolved {
+        needed
+            .entry(target_path.clone())
+            .or_default()
+            .push(link_path.clone());
+    }
+
+    let file = std::fs::File::open(tar_path).map_err(io_err)?;
+    let mut archive = tar::Archive::new(file);
+
+    for entry_result in archive
+        .entries()
+        .map_err(|e| io_err_ctx(e, "Failed to read tar entries (pass 2)"))?
+    {
+        if needed.is_empty() {
+            break;
+        }
+
+        let mut entry =
+            entry_result.map_err(|e| io_err_ctx(e, "Failed to read tar entry (pass 2)"))?;
+
+        let raw_path = entry
+            .path()
+            .map_err(|e| io_err_ctx(e, "Invalid path in tar"))?
+            .to_path_buf();
+        let raw_str = path_to_string(&raw_path);
+        let stripped = match strip_tar_prefix(&raw_str) {
+            Some(s) => s,
+            None => continue,
+        };
+
+        if let Some(link_paths) = needed.remove(stripped) {
+            let entry_type = entry.header().entry_type();
+
+            let data_and_mode = if entry_type.is_file() {
+                let mut data = Vec::new();
+                entry.read_to_end(&mut data).map_err(io_err)?;
+                let mode = entry.header().mode().ok();
+                Some((data, mode))
+            } else if resolve_fs_symlinks && entry_type.is_symlink() {
+                resolve_symlink_from_fs(&entry)
+            } else {
+                None
+            };
+
+            if let Some((data, mode)) = data_and_mode {
+                write_data_to_links(dest_dir, &link_paths, &data, mode)?;
+            } else {
+                needed.insert(stripped.to_string(), link_paths);
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn resolve_symlink_from_fs<R: Read>(entry: &tar::Entry<'_, R>) -> Option<(Vec<u8>, Option<u32>)> {
+    let target = entry.link_name().ok()??.to_path_buf();
+    if !target.is_absolute() || !target.exists() {
+        return None;
+    }
+    let data = std::fs::read(&target).ok()?;
+    let mode = std::fs::metadata(&target).ok().map(|m| {
+        use std::os::unix::fs::PermissionsExt;
+        m.permissions().mode()
+    });
+    Some((data, mode))
+}
+
+fn extract_filtered(
+    tar_path: &Path,
+    dest_dir: &Path,
+    prefix: Option<&str>,
+) -> Result<(bool, Vec<(String, String)>)> {
+    let file = std::fs::File::open(tar_path).map_err(io_err)?;
+    let mut archive = tar::Archive::new(file);
+    let mut hardlinks: Vec<(String, String)> = Vec::new();
+    let mut found = false;
+    let needle = prefix.map(|p| p.trim_end_matches('/'));
+
+    for entry_result in archive
+        .entries()
+        .map_err(|e| io_err_ctx(e, "Failed to read tar entries"))?
+    {
+        let mut entry = entry_result.map_err(|e| io_err_ctx(e, "Failed to read tar entry"))?;
+        let raw_path = entry
+            .path()
+            .map_err(|e| io_err_ctx(e, "Invalid path in tar"))?
+            .to_path_buf();
+        let raw_str = path_to_string(&raw_path);
+        let stripped = match strip_tar_prefix(&raw_str) {
+            Some(s) => s,
+            None => continue,
+        };
+
+        if let Some(needle) = needle {
+            if !stripped.starts_with(needle) {
+                continue;
+            }
+            let after = &stripped[needle.len()..];
+            if !after.is_empty() && !after.starts_with('/') {
+                continue;
+            }
+        }
+
+        found = true;
+        let dest_path = dest_dir.join(stripped);
+
+        match entry.header().entry_type() {
+            EntryType::Directory => {
+                std::fs::create_dir_all(&dest_path).map_err(io_err)?;
+            }
+            EntryType::Regular | EntryType::GNUSparse => {
+                write_regular_entry(&mut entry, &dest_path)?;
+            }
+            EntryType::Symlink => {
+                if let Some(parent) = dest_path.parent() {
+                    std::fs::create_dir_all(parent).map_err(io_err)?;
+                }
+                if let Ok(Some(target)) = entry.link_name().map(|o| o.map(|p| p.to_path_buf())) {
+                    let _ = std::fs::remove_file(&dest_path);
+                    std::os::unix::fs::symlink(&target, &dest_path).map_err(io_err)?;
+                }
+            }
+            EntryType::Link => {
+                hardlinks.push(extract_hardlink_target(&entry, stripped)?);
+            }
+            _ => {}
+        }
+    }
+
+    let unresolved = if hardlinks.is_empty() {
+        Vec::new()
+    } else {
+        resolve_hardlinks(&hardlinks, dest_dir)?
+    };
+
+    Ok((found, unresolved))
+}
+
+pub(crate) fn extract_tar_to_dir(tar_path: &Path, dest_dir: &Path) -> Result<()> {
+    let (_found, unresolved) = extract_filtered(tar_path, dest_dir, None)?;
+    for (link_path, target) in &unresolved {
+        tracing::warn!(
+            "Hardlink target '{}' not found for '{}', skipping",
+            target,
+            link_path
+        );
+    }
     Ok(())
 }
 
@@ -169,271 +288,35 @@ pub(crate) fn extract_image_from_tar(
     image_rel_path: &str,
     dest_dir: &Path,
 ) -> Result<()> {
-    let file = std::fs::File::open(tar_path).map_err(|e| ClientError::Config(CoreError::Io(e)))?;
-    let mut archive = tar::Archive::new(file);
-
-    let needle = image_rel_path.trim_end_matches('/');
-    let mut found = false;
-
-    let mut hardlinks: Vec<(String, String)> = Vec::new();
-
-    for entry_result in archive.entries().map_err(|e| {
-        ClientError::Config(CoreError::Io(std::io::Error::new(
-            e.kind(),
-            format!("Failed to read tar entries: {}", e),
-        )))
-    })? {
-        let mut entry = entry_result.map_err(|e| {
-            ClientError::Config(CoreError::Io(std::io::Error::new(
-                e.kind(),
-                format!("Failed to read tar entry: {}", e),
-            )))
-        })?;
-
-        let raw_path = entry
-            .path()
-            .map_err(|e| {
-                ClientError::Config(CoreError::Io(std::io::Error::new(
-                    e.kind(),
-                    format!("Invalid path in tar: {}", e),
-                )))
-            })?
-            .to_path_buf();
-        let raw_str = raw_path.to_string_lossy().to_string();
-
-        let stripped = match raw_str.find('/') {
-            Some(idx) => &raw_str[idx + 1..],
-            None => continue,
-        };
-        if stripped.is_empty() {
-            continue;
-        }
-
-        if !stripped.starts_with(needle) {
-            continue;
-        }
-        let after = &stripped[needle.len()..];
-        if !after.is_empty() && !after.starts_with('/') {
-            continue;
-        }
-
-        let dest_path = dest_dir.join(stripped);
-        let entry_type = entry.header().entry_type();
-
-        match entry_type {
-            EntryType::Directory => {
-                std::fs::create_dir_all(&dest_path)
-                    .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
-                found = true;
-            }
-            EntryType::Regular | EntryType::GNUSparse => {
-                if let Some(parent) = dest_path.parent() {
-                    std::fs::create_dir_all(parent)
-                        .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
-                }
-                let _ = std::fs::remove_file(&dest_path);
-                let mut out_file = std::fs::File::create(&dest_path)
-                    .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
-                std::io::copy(&mut entry, &mut out_file)
-                    .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
-                if let Ok(mode) = entry.header().mode() {
-                    use std::os::unix::fs::PermissionsExt;
-                    let _ =
-                        std::fs::set_permissions(&dest_path, std::fs::Permissions::from_mode(mode));
-                }
-                found = true;
-            }
-            EntryType::Link => {
-                let link_target = entry
-                    .link_name()
-                    .map_err(|e| {
-                        ClientError::Config(CoreError::Io(std::io::Error::new(
-                            e.kind(),
-                            format!("Invalid hardlink target: {}", e),
-                        )))
-                    })?
-                    .ok_or_else(|| {
-                        ClientError::Config(CoreError::InvalidConfig {
-                            detail: format!("Hardlink '{}' has no target", stripped),
-                        })
-                    })?;
-                let target_str = link_target.to_string_lossy().to_string();
-                let stripped_target = match target_str.find('/') {
-                    Some(idx) => target_str[idx + 1..].to_string(),
-                    None => target_str,
-                };
-                hardlinks.push((stripped.to_string(), stripped_target));
-                found = true;
-            }
-            EntryType::Symlink => {
-                if let Some(parent) = dest_path.parent() {
-                    std::fs::create_dir_all(parent)
-                        .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
-                }
-                if let Ok(Some(target)) = entry.link_name().map(|o| o.map(|p| p.to_path_buf())) {
-                    let _ = std::fs::remove_file(&dest_path);
-                    std::os::unix::fs::symlink(&target, &dest_path)
-                        .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
-                }
-                found = true;
-            }
-            _ => {}
-        }
-    }
-
-    if !hardlinks.is_empty() {
-        let mut unresolved: Vec<(String, String)> = Vec::new();
-        let link_map: HashMap<&str, &str> = hardlinks
-            .iter()
-            .map(|(l, t)| (l.as_str(), t.as_str()))
-            .collect();
-
-        for (link_path, _) in &hardlinks {
-            let mut current = link_path.as_str();
-            let mut depth = 0;
-            while let Some(&next) = link_map.get(current) {
-                current = next;
-                depth += 1;
-                if depth > 100 {
-                    break;
-                }
-            }
-            let src = dest_dir.join(current);
-            let dst = dest_dir.join(link_path);
-            if let Some(parent) = dst.parent() {
-                std::fs::create_dir_all(parent)
-                    .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
-            }
-            let _ = std::fs::remove_file(&dst);
-            if src.exists() {
-                std::fs::copy(&src, &dst).map_err(|e| ClientError::Config(CoreError::Io(e)))?;
-                if let Ok(meta) = std::fs::metadata(&src) {
-                    let _ = std::fs::set_permissions(&dst, meta.permissions());
-                }
-            } else {
-                unresolved.push((link_path.clone(), current.to_string()));
-            }
-        }
-
-        if !unresolved.is_empty() {
-            let needed: HashMap<String, Vec<String>> = {
-                let mut m: HashMap<String, Vec<String>> = HashMap::new();
-                for (link_path, target_path) in &unresolved {
-                    m.entry(target_path.clone())
-                        .or_default()
-                        .push(link_path.clone());
-                }
-                m
-            };
-
-            let file =
-                std::fs::File::open(tar_path).map_err(|e| ClientError::Config(CoreError::Io(e)))?;
-            let mut archive2 = tar::Archive::new(file);
-
-            for entry_result in archive2.entries().map_err(|e| {
-                ClientError::Config(CoreError::Io(std::io::Error::new(
-                    e.kind(),
-                    format!("Failed to read tar entries (pass 2): {}", e),
-                )))
-            })? {
-                let mut entry = entry_result.map_err(|e| {
-                    ClientError::Config(CoreError::Io(std::io::Error::new(
-                        e.kind(),
-                        format!("Failed to read tar entry (pass 2): {}", e),
-                    )))
-                })?;
-
-                if !entry.header().entry_type().is_file() {
-                    continue;
-                }
-
-                let raw_path = entry
-                    .path()
-                    .map_err(|e| {
-                        ClientError::Config(CoreError::Io(std::io::Error::new(
-                            e.kind(),
-                            format!("Invalid path in tar: {}", e),
-                        )))
-                    })?
-                    .to_path_buf();
-                let raw_str = raw_path.to_string_lossy().to_string();
-                let stripped = match raw_str.find('/') {
-                    Some(idx) => &raw_str[idx + 1..],
-                    None => continue,
-                };
-
-                if let Some(link_paths) = needed.get(stripped) {
-                    let mut data = Vec::new();
-                    entry
-                        .read_to_end(&mut data)
-                        .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
-                    let mode = entry.header().mode().ok();
-
-                    for link_path in link_paths {
-                        let dst = dest_dir.join(link_path);
-                        if let Some(parent) = dst.parent() {
-                            std::fs::create_dir_all(parent)
-                                .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
-                        }
-                        let _ = std::fs::remove_file(&dst);
-                        std::fs::write(&dst, &data)
-                            .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
-                        if let Some(m) = mode {
-                            use std::os::unix::fs::PermissionsExt;
-                            let _ =
-                                std::fs::set_permissions(&dst, std::fs::Permissions::from_mode(m));
-                        }
-                    }
-                }
-            }
-        }
-    }
-
+    let (found, unresolved) = extract_filtered(tar_path, dest_dir, Some(image_rel_path))?;
+    resolve_unresolved_from_tar(tar_path, dest_dir, &unresolved, false)?;
     if !found {
         tracing::warn!("Image '{}' not found in tar {:?}", image_rel_path, tar_path);
     }
-
     Ok(())
 }
 
 pub(crate) fn extract_host_tools_from_tar(tar_path: &Path, dest_dir: &Path) -> Result<()> {
-    let file = std::fs::File::open(tar_path).map_err(|e| ClientError::Config(CoreError::Io(e)))?;
+    let file = std::fs::File::open(tar_path).map_err(io_err)?;
     let mut archive = tar::Archive::new(file);
 
     let mut found_host_tools = false;
     let mut hardlinks: Vec<(String, String)> = Vec::new();
 
-    for entry_result in archive.entries().map_err(|e| {
-        ClientError::Config(CoreError::Io(std::io::Error::new(
-            e.kind(),
-            format!("Failed to read tar entries: {}", e),
-        )))
-    })? {
-        let mut entry = entry_result.map_err(|e| {
-            ClientError::Config(CoreError::Io(std::io::Error::new(
-                e.kind(),
-                format!("Failed to read tar entry: {}", e),
-            )))
-        })?;
-
+    for entry_result in archive
+        .entries()
+        .map_err(|e| io_err_ctx(e, "Failed to read tar entries"))?
+    {
+        let mut entry = entry_result.map_err(|e| io_err_ctx(e, "Failed to read tar entry"))?;
         let raw_path = entry
             .path()
-            .map_err(|e| {
-                ClientError::Config(CoreError::Io(std::io::Error::new(
-                    e.kind(),
-                    format!("Invalid path in tar: {}", e),
-                )))
-            })?
+            .map_err(|e| io_err_ctx(e, "Invalid path in tar"))?
             .to_path_buf();
-        let raw_str = raw_path.to_string_lossy().to_string();
-
-        let stripped = match raw_str.find('/') {
-            Some(idx) => &raw_str[idx + 1..],
+        let raw_str = path_to_string(&raw_path);
+        let stripped = match strip_tar_prefix(&raw_str) {
+            Some(s) => s,
             None => continue,
         };
-        if stripped.is_empty() {
-            continue;
-        }
 
         if !stripped.starts_with("host-tools/") && stripped != "host-tools" {
             if found_host_tools {
@@ -444,28 +327,13 @@ pub(crate) fn extract_host_tools_from_tar(tar_path: &Path, dest_dir: &Path) -> R
         found_host_tools = true;
 
         let dest_path = dest_dir.join(stripped);
-        let entry_type = entry.header().entry_type();
 
-        match entry_type {
+        match entry.header().entry_type() {
             EntryType::Directory => {
-                std::fs::create_dir_all(&dest_path)
-                    .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
+                std::fs::create_dir_all(&dest_path).map_err(io_err)?;
             }
             EntryType::Regular | EntryType::GNUSparse => {
-                if let Some(parent) = dest_path.parent() {
-                    std::fs::create_dir_all(parent)
-                        .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
-                }
-                let _ = std::fs::remove_file(&dest_path);
-                let mut out_file = std::fs::File::create(&dest_path)
-                    .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
-                std::io::copy(&mut entry, &mut out_file)
-                    .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
-                if let Ok(mode) = entry.header().mode() {
-                    use std::os::unix::fs::PermissionsExt;
-                    let _ =
-                        std::fs::set_permissions(&dest_path, std::fs::Permissions::from_mode(mode));
-                }
+                write_regular_entry(&mut entry, &dest_path)?;
             }
             EntryType::Symlink => {
                 if let Ok(Some(target)) = entry.link_name().map(|o| o.map(|p| p.to_path_buf())) {
@@ -487,184 +355,28 @@ pub(crate) fn extract_host_tools_from_tar(tar_path: &Path, dest_dir: &Path) -> R
                             }
                         }
                     }
-                    let resolved_str = resolved.to_string_lossy().to_string();
+                    let resolved_str = path_to_string(&resolved);
                     if resolved_str.starts_with("host-tools/") {
                         if let Some(parent) = dest_path.parent() {
-                            std::fs::create_dir_all(parent)
-                                .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
+                            std::fs::create_dir_all(parent).map_err(io_err)?;
                         }
                         let _ = std::fs::remove_file(&dest_path);
-                        std::os::unix::fs::symlink(&target, &dest_path)
-                            .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
+                        std::os::unix::fs::symlink(&target, &dest_path).map_err(io_err)?;
                     } else {
                         hardlinks.push((stripped.to_string(), resolved_str));
                     }
                 }
             }
             EntryType::Link => {
-                let link_target = entry
-                    .link_name()
-                    .map_err(|e| {
-                        ClientError::Config(CoreError::Io(std::io::Error::new(
-                            e.kind(),
-                            format!("Invalid hardlink target: {}", e),
-                        )))
-                    })?
-                    .ok_or_else(|| {
-                        ClientError::Config(CoreError::InvalidConfig {
-                            detail: format!("Hardlink '{}' has no target", stripped),
-                        })
-                    })?;
-                let target_str = link_target.to_string_lossy().to_string();
-                let stripped_target = match target_str.find('/') {
-                    Some(idx) => target_str[idx + 1..].to_string(),
-                    None => target_str,
-                };
-                hardlinks.push((stripped.to_string(), stripped_target));
+                hardlinks.push(extract_hardlink_target(&entry, stripped)?);
             }
             _ => {}
         }
     }
 
     if !hardlinks.is_empty() {
-        let link_map: HashMap<&str, &str> = hardlinks
-            .iter()
-            .map(|(l, t)| (l.as_str(), t.as_str()))
-            .collect();
-
-        let mut unresolved: Vec<(String, String)> = Vec::new();
-
-        for (link_path, _) in &hardlinks {
-            let mut current = link_path.as_str();
-            let mut depth = 0;
-            while let Some(&next) = link_map.get(current) {
-                current = next;
-                depth += 1;
-                if depth > 100 {
-                    break;
-                }
-            }
-            let src = dest_dir.join(current);
-            let dst = dest_dir.join(link_path);
-            if let Some(parent) = dst.parent() {
-                std::fs::create_dir_all(parent)
-                    .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
-            }
-            let _ = std::fs::remove_file(&dst);
-            if src.exists() {
-                std::fs::copy(&src, &dst).map_err(|e| ClientError::Config(CoreError::Io(e)))?;
-                if let Ok(meta) = std::fs::metadata(&src) {
-                    let _ = std::fs::set_permissions(&dst, meta.permissions());
-                }
-            } else {
-                unresolved.push((link_path.clone(), current.to_string()));
-            }
-        }
-
-        if !unresolved.is_empty() {
-            let mut needed: HashMap<String, Vec<String>> = HashMap::new();
-            for (link_path, target_path) in &unresolved {
-                needed
-                    .entry(target_path.clone())
-                    .or_default()
-                    .push(link_path.clone());
-            }
-
-            let file =
-                std::fs::File::open(tar_path).map_err(|e| ClientError::Config(CoreError::Io(e)))?;
-            let mut archive2 = tar::Archive::new(file);
-
-            for entry_result in archive2.entries().map_err(|e| {
-                ClientError::Config(CoreError::Io(std::io::Error::new(
-                    e.kind(),
-                    format!("Failed to read tar entries (pass 2): {}", e),
-                )))
-            })? {
-                if needed.is_empty() {
-                    break;
-                }
-
-                let mut entry = entry_result.map_err(|e| {
-                    ClientError::Config(CoreError::Io(std::io::Error::new(
-                        e.kind(),
-                        format!("Failed to read tar entry (pass 2): {}", e),
-                    )))
-                })?;
-
-                let raw_path = entry
-                    .path()
-                    .map_err(|e| {
-                        ClientError::Config(CoreError::Io(std::io::Error::new(
-                            e.kind(),
-                            format!("Invalid path in tar: {}", e),
-                        )))
-                    })?
-                    .to_path_buf();
-                let raw_str = raw_path.to_string_lossy().to_string();
-                let stripped = match raw_str.find('/') {
-                    Some(idx) => &raw_str[idx + 1..],
-                    None => continue,
-                };
-
-                if let Some(link_paths) = needed.remove(stripped) {
-                    let entry_type = entry.header().entry_type();
-
-                    let data_and_mode = if entry_type.is_file() {
-                        let mut data = Vec::new();
-                        entry
-                            .read_to_end(&mut data)
-                            .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
-                        let mode = entry.header().mode().ok();
-                        Some((data, mode))
-                    } else if entry_type.is_symlink() {
-                        if let Ok(Some(target)) =
-                            entry.link_name().map(|o| o.map(|p| p.to_path_buf()))
-                        {
-                            if target.is_absolute() && target.exists() {
-                                match std::fs::read(&target) {
-                                    Ok(data) => {
-                                        let mode = std::fs::metadata(&target).ok().map(|m| {
-                                            use std::os::unix::fs::PermissionsExt;
-                                            m.permissions().mode()
-                                        });
-                                        Some((data, mode))
-                                    }
-                                    Err(_) => None,
-                                }
-                            } else {
-                                None
-                            }
-                        } else {
-                            None
-                        }
-                    } else {
-                        None
-                    };
-
-                    if let Some((data, mode)) = data_and_mode {
-                        for link_path in &link_paths {
-                            let dst = dest_dir.join(link_path);
-                            if let Some(parent) = dst.parent() {
-                                std::fs::create_dir_all(parent)
-                                    .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
-                            }
-                            let _ = std::fs::remove_file(&dst);
-                            std::fs::write(&dst, &data)
-                                .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
-                            if let Some(m) = mode {
-                                use std::os::unix::fs::PermissionsExt;
-                                let _ = std::fs::set_permissions(
-                                    &dst,
-                                    std::fs::Permissions::from_mode(m),
-                                );
-                            }
-                        }
-                    } else {
-                        needed.insert(stripped.to_string(), link_paths);
-                    }
-                }
-            }
-        }
+        let unresolved = resolve_hardlinks(&hardlinks, dest_dir)?;
+        resolve_unresolved_from_tar(tar_path, dest_dir, &unresolved, true)?;
     }
 
     if !found_host_tools {

@@ -8,6 +8,7 @@ mod metadata;
 mod nix32;
 #[cfg(test)]
 mod tests;
+mod util;
 
 use anyhow::{Context, Result};
 use clap::Parser;

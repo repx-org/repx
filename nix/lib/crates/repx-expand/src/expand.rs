@@ -231,7 +231,7 @@ fn expand_pipeline_for_combo(
     pipeline: &PipelineTemplate,
     hash_mode: HashMode,
     combo: &ParamCombo,
-    _inter_run_dep_job_dir_names: &BTreeMap<String, Vec<String>>,
+    inter_run_dep_job_dir_names: &BTreeMap<String, Vec<String>>,
     bufs: &mut ThreadBuffers,
 ) -> Vec<ExpandedJob> {
     let mut jobs: Vec<ExpandedJob> = Vec::with_capacity(pipeline.stages.len());
@@ -252,7 +252,7 @@ fn expand_pipeline_for_combo(
                 }
                 "inter-run" => {
                     if let Some(ref source_run) = mapping.source_run {
-                        if let Some(dirs) = _inter_run_dep_job_dir_names.get(source_run) {
+                        if let Some(dirs) = inter_run_dep_job_dir_names.get(source_run) {
                             upstream_dirs.extend(dirs.iter().cloned());
                         }
                     }

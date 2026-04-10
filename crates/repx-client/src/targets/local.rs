@@ -5,6 +5,7 @@ use repx_core::{
     config,
     constants::{dirs, markers},
     errors::CoreError,
+    fs_utils::path_to_string,
     model::JobId,
 };
 use std::{
@@ -78,9 +79,7 @@ impl CommandRunner for LocalTarget {
 
         repx_core::logging::log_and_print_command(&cmd);
 
-        let output = cmd
-            .output()
-            .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
+        let output = cmd.output().map_err(ClientError::Io)?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
@@ -106,8 +105,7 @@ impl CommandRunner for LocalTarget {
 
         repx_core::logging::log_and_print_command(&cmd);
 
-        cmd.spawn()
-            .map_err(|e| ClientError::Config(CoreError::Io(e)))
+        cmd.spawn().map_err(ClientError::Io)
     }
 }
 
@@ -133,7 +131,7 @@ impl ArtifactSync for LocalTarget {
         let dest_path = self.artifacts_base_path().join(relative_path);
 
         if let Some(parent) = dest_path.parent() {
-            fs_err::create_dir_all(parent).map_err(|e| ClientError::Config(CoreError::Io(e)))?;
+            fs_err::create_dir_all(parent).map_err(ClientError::Io)?;
         }
 
         if local_path.is_dir() {
@@ -147,7 +145,7 @@ impl ArtifactSync for LocalTarget {
 
     fn sync_lab_root(&self, local_lab_path: &Path) -> Result<()> {
         let dest_path = self.artifacts_base_path();
-        fs_err::create_dir_all(&dest_path).map_err(|e| ClientError::Config(CoreError::Io(e)))?;
+        fs_err::create_dir_all(&dest_path).map_err(ClientError::Io)?;
 
         let mut cmd = Command::new(self.tool("rsync"));
         cmd.arg("-rltp")
@@ -155,9 +153,7 @@ impl ArtifactSync for LocalTarget {
             .arg(&dest_path);
 
         repx_core::logging::log_and_print_command(&cmd);
-        let output = cmd
-            .output()
-            .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
+        let output = cmd.output().map_err(ClientError::Io)?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
@@ -172,11 +168,9 @@ impl ArtifactSync for LocalTarget {
 
     fn sync_lab_root_metadata_only(&self, local_lab_path: &Path) -> Result<()> {
         let dest_path = self.artifacts_base_path();
-        fs_err::create_dir_all(&dest_path).map_err(|e| ClientError::Config(CoreError::Io(e)))?;
+        fs_err::create_dir_all(&dest_path).map_err(ClientError::Io)?;
 
-        let resolved = local_lab_path
-            .canonicalize()
-            .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
+        let resolved = local_lab_path.canonicalize().map_err(ClientError::Io)?;
         let mut cmd = Command::new(self.tool("rsync"));
         cmd.arg("-rltp")
             .arg("--exclude=/jobs")
@@ -184,9 +178,7 @@ impl ArtifactSync for LocalTarget {
             .arg(&dest_path);
 
         repx_core::logging::log_and_print_command(&cmd);
-        let output = cmd
-            .output()
-            .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
+        let output = cmd.output().map_err(ClientError::Io)?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
@@ -200,9 +192,9 @@ impl ArtifactSync for LocalTarget {
 
     fn sync_lab_from_tar_via_rsync(&self, tar_path: &Path) -> Result<()> {
         let dest_path = self.artifacts_base_path();
-        fs_err::create_dir_all(&dest_path).map_err(|e| ClientError::Config(CoreError::Io(e)))?;
+        fs_err::create_dir_all(&dest_path).map_err(ClientError::Io)?;
 
-        let tmp_dir = tempfile::tempdir().map_err(|e| ClientError::Config(CoreError::Io(e)))?;
+        let tmp_dir = tempfile::tempdir().map_err(ClientError::Io)?;
         let extract_root = tmp_dir.path();
 
         tracing::info!(
@@ -219,9 +211,7 @@ impl ArtifactSync for LocalTarget {
             .arg(&dest_path);
 
         repx_core::logging::log_and_print_command(&cmd);
-        let output = cmd
-            .output()
-            .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
+        let output = cmd.output().map_err(ClientError::Io)?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
@@ -235,14 +225,14 @@ impl ArtifactSync for LocalTarget {
 
     fn sync_file(&self, local_path: &Path, remote_path: &Path) -> Result<()> {
         if let Some(parent) = remote_path.parent() {
-            fs_err::create_dir_all(parent).map_err(|e| ClientError::Config(CoreError::Io(e)))?;
+            fs_err::create_dir_all(parent).map_err(ClientError::Io)?;
         }
         self.copy_file_with_permissions(local_path, remote_path)?;
         Ok(())
     }
 
     fn sync_directory(&self, local_path: &Path, remote_path: &Path) -> Result<()> {
-        fs_err::create_dir_all(remote_path).map_err(|e| ClientError::Config(CoreError::Io(e)))?;
+        fs_err::create_dir_all(remote_path).map_err(ClientError::Io)?;
 
         let mut cmd = Command::new(self.tool("rsync"));
         cmd.arg("-rltp")
@@ -250,9 +240,7 @@ impl ArtifactSync for LocalTarget {
             .arg(remote_path);
 
         repx_core::logging::log_and_print_command(&cmd);
-        let output = cmd
-            .output()
-            .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
+        let output = cmd.output().map_err(ClientError::Io)?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
@@ -273,17 +261,15 @@ impl ArtifactSync for LocalTarget {
     ) -> Result<()> {
         let dest_images_dir = self.base_path().join("images");
         let dest_store_dir = self.base_path().join("store");
-        fs_err::create_dir_all(&dest_images_dir)
-            .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
-        fs_err::create_dir_all(&dest_store_dir)
-            .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
+        fs_err::create_dir_all(&dest_images_dir).map_err(ClientError::Io)?;
+        fs_err::create_dir_all(&dest_store_dir).map_err(ClientError::Io)?;
 
         let dest_image_path = dest_images_dir.join(image_tag);
 
         let store_cache = local_cache_root.join("store");
         let images_cache = local_cache_root.join("images");
-        fs_err::create_dir_all(&store_cache).map_err(|e| ClientError::Config(CoreError::Io(e)))?;
-        fs_err::create_dir_all(&images_cache).map_err(|e| ClientError::Config(CoreError::Io(e)))?;
+        fs_err::create_dir_all(&store_cache).map_err(ClientError::Io)?;
+        fs_err::create_dir_all(&images_cache).map_err(ClientError::Io)?;
 
         if image_path.is_dir() {
             let final_source = image_path.to_path_buf();
@@ -304,8 +290,7 @@ impl ArtifactSync for LocalTarget {
                     );
                 }
             }
-            std::os::unix::fs::symlink(&final_source, &dest_image_path)
-                .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
+            std::os::unix::fs::symlink(&final_source, &dest_image_path).map_err(ClientError::Io)?;
             return Ok(());
         }
 
@@ -322,15 +307,14 @@ impl ArtifactSync for LocalTarget {
         let image_hash_name = super::common::parse_image_hash(image_filename)?;
         let image_cache_dir = images_cache.join(&image_hash_name);
 
-        fs_err::create_dir_all(&image_cache_dir)
-            .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
+        fs_err::create_dir_all(&image_cache_dir).map_err(ClientError::Io)?;
 
         let manifest_content = serde_json::to_string(&vec![super::common::ManifestEntry {
             layers: layers.clone(),
         }])
         .map_err(|e| ClientError::Config(CoreError::Json(e)))?;
         fs_err::write(image_cache_dir.join("manifest.json"), manifest_content)
-            .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
+            .map_err(ClientError::Io)?;
 
         for layer in &layers {
             let layer_hash = Path::new(layer)
@@ -347,8 +331,7 @@ impl ArtifactSync for LocalTarget {
             )?;
 
             let image_layer_dir = image_cache_dir.join(layer_hash);
-            fs_err::create_dir_all(&image_layer_dir)
-                .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
+            fs_err::create_dir_all(&image_layer_dir).map_err(ClientError::Io)?;
 
             let flat_layer_name = format!("{}-layer.tar", layer_hash);
             let target_layer_tar = store_cache.join(&flat_layer_name);
@@ -363,8 +346,7 @@ impl ArtifactSync for LocalTarget {
                     );
                 }
             }
-            std::os::unix::fs::symlink(&target_layer_tar, &link_path)
-                .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
+            std::os::unix::fs::symlink(&target_layer_tar, &link_path).map_err(ClientError::Io)?;
         }
 
         let final_source = image_cache_dir;
@@ -387,8 +369,7 @@ impl ArtifactSync for LocalTarget {
             }
         }
 
-        std::os::unix::fs::symlink(&final_source, &dest_image_path)
-            .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
+        std::os::unix::fs::symlink(&final_source, &dest_image_path).map_err(ClientError::Io)?;
 
         Ok(())
     }
@@ -397,14 +378,14 @@ impl ArtifactSync for LocalTarget {
 impl FileOps for LocalTarget {
     fn write_remote_file(&self, path: &Path, content: &str) -> Result<()> {
         if let Some(parent) = path.parent() {
-            fs_err::create_dir_all(parent).map_err(|e| ClientError::Config(CoreError::Io(e)))?;
+            fs_err::create_dir_all(parent).map_err(ClientError::Io)?;
         }
-        fs_err::write(path, content).map_err(|e| ClientError::Config(CoreError::Io(e)))?;
+        fs_err::write(path, content).map_err(ClientError::Io)?;
         Ok(())
     }
 
     fn read_remote_file(&self, path: &Path) -> Result<String> {
-        fs_err::read_to_string(path).map_err(|e| ClientError::Config(CoreError::Io(e)))
+        fs_err::read_to_string(path).map_err(ClientError::Io)
     }
 
     fn read_remote_file_tail(&self, path: &Path, line_count: u32) -> Result<Vec<String>> {
@@ -416,9 +397,7 @@ impl FileOps for LocalTarget {
         cmd.arg("-n").arg(line_count.to_string()).arg(path);
 
         repx_core::logging::log_and_print_command(&cmd);
-        let output = cmd
-            .output()
-            .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
+        let output = cmd.output().map_err(ClientError::Io)?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
@@ -462,12 +441,10 @@ impl JobRunner for LocalTarget {
                 detail: "Binary deploy path has no parent directory".to_string(),
             })
         })?;
-        fs_err::create_dir_all(versioned_bin_dir)
-            .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
-        fs_err::copy(&runner_exe_path, &dest_path)
-            .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
+        fs_err::create_dir_all(versioned_bin_dir).map_err(ClientError::Io)?;
+        fs_err::copy(&runner_exe_path, &dest_path).map_err(ClientError::Io)?;
         fs_err::set_permissions(&dest_path, PermissionsExt::from_mode(0o755))
-            .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
+            .map_err(ClientError::Io)?;
 
         let meta = CacheMetadata::new(&cache_key, "repx binary").with_content_hash(&hash);
         cache.mark_ready(&cache_key, meta)?;
@@ -487,8 +464,7 @@ impl JobRunner for LocalTarget {
 
         repx_core::logging::log_and_print_command(&cmd);
 
-        cmd.spawn()
-            .map_err(|e| ClientError::Config(CoreError::Io(e)))
+        cmd.spawn().map_err(ClientError::Io)
     }
 
     fn check_outcome_markers(
@@ -564,7 +540,7 @@ impl GcOps for LocalTarget {
             .join(repx_core::constants::dirs::GCROOTS)
             .join("auto")
             .join(project_id);
-        fs_err::create_dir_all(&gcroots).map_err(|e| ClientError::Config(CoreError::Io(e)))?;
+        fs_err::create_dir_all(&gcroots).map_err(ClientError::Io)?;
 
         let link_name = super::common::generate_gc_link_name(lab_hash);
         let link_path = gcroots.join(&link_name);
@@ -591,7 +567,7 @@ impl GcOps for LocalTarget {
             .base_path()
             .join(repx_core::constants::dirs::GCROOTS)
             .join("pinned");
-        fs_err::create_dir_all(&pinned_dir).map_err(|e| ClientError::Config(CoreError::Io(e)))?;
+        fs_err::create_dir_all(&pinned_dir).map_err(ClientError::Io)?;
 
         let link_path = pinned_dir.join(name);
         if link_path.exists() || link_path.symlink_metadata().is_ok() {
@@ -605,8 +581,7 @@ impl GcOps for LocalTarget {
         }
 
         let target_path = self.find_lab_manifest(lab_hash)?;
-        std::os::unix::fs::symlink(&target_path, &link_path)
-            .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
+        std::os::unix::fs::symlink(&target_path, &link_path).map_err(ClientError::Io)?;
 
         Ok(())
     }
@@ -624,7 +599,7 @@ impl GcOps for LocalTarget {
             }));
         }
 
-        fs_err::remove_file(&link_path).map_err(|e| ClientError::Config(CoreError::Io(e)))?;
+        fs_err::remove_file(&link_path).map_err(ClientError::Io)?;
         Ok(())
     }
 
@@ -634,12 +609,10 @@ impl GcOps for LocalTarget {
 
         let pinned_dir = gcroots_dir.join("pinned");
         if pinned_dir.exists() {
-            for entry in
-                fs_err::read_dir(&pinned_dir).map_err(|e| ClientError::Config(CoreError::Io(e)))?
-            {
-                let entry = entry.map_err(|e| ClientError::Config(CoreError::Io(e)))?;
+            for entry in fs_err::read_dir(&pinned_dir).map_err(ClientError::Io)? {
+                let entry = entry.map_err(ClientError::Io)?;
                 let target_path = std::fs::read_link(entry.path())
-                    .map(|p| p.to_string_lossy().to_string())
+                    .map(|p| path_to_string(&p))
                     .unwrap_or_else(|_| "???".to_string());
                 let size_bytes = if compute_sizes {
                     self.compute_root_size(&entry.path())
@@ -647,7 +620,7 @@ impl GcOps for LocalTarget {
                     None
                 };
                 entries.push(super::GcRootEntry {
-                    name: entry.file_name().to_string_lossy().to_string(),
+                    name: path_to_string(entry.file_name()),
                     kind: super::GcRootKind::Pinned,
                     target_path,
                     project_id: None,
@@ -658,22 +631,16 @@ impl GcOps for LocalTarget {
 
         let auto_dir = gcroots_dir.join("auto");
         if auto_dir.exists() {
-            for project_entry in
-                fs_err::read_dir(&auto_dir).map_err(|e| ClientError::Config(CoreError::Io(e)))?
-            {
-                let project_entry =
-                    project_entry.map_err(|e| ClientError::Config(CoreError::Io(e)))?;
+            for project_entry in fs_err::read_dir(&auto_dir).map_err(ClientError::Io)? {
+                let project_entry = project_entry.map_err(ClientError::Io)?;
                 if !project_entry.path().is_dir() {
                     continue;
                 }
-                let project_id = project_entry.file_name().to_string_lossy().to_string();
-                for link_entry in fs_err::read_dir(project_entry.path())
-                    .map_err(|e| ClientError::Config(CoreError::Io(e)))?
-                {
-                    let link_entry =
-                        link_entry.map_err(|e| ClientError::Config(CoreError::Io(e)))?;
+                let project_id = path_to_string(project_entry.file_name());
+                for link_entry in fs_err::read_dir(project_entry.path()).map_err(ClientError::Io)? {
+                    let link_entry = link_entry.map_err(ClientError::Io)?;
                     let target_path = std::fs::read_link(link_entry.path())
-                        .map(|p| p.to_string_lossy().to_string())
+                        .map(|p| path_to_string(&p))
                         .unwrap_or_else(|_| "???".to_string());
                     let size_bytes = if compute_sizes {
                         self.compute_root_size(&link_entry.path())
@@ -681,7 +648,7 @@ impl GcOps for LocalTarget {
                         None
                     };
                     entries.push(super::GcRootEntry {
-                        name: link_entry.file_name().to_string_lossy().to_string(),
+                        name: path_to_string(link_entry.file_name()),
                         kind: super::GcRootKind::Auto,
                         target_path,
                         project_id: Some(project_id.clone()),
@@ -712,9 +679,7 @@ impl GcOps for LocalTarget {
             cmd.arg("--dry-run");
         }
 
-        let output = cmd
-            .output()
-            .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
+        let output = cmd.output().map_err(ClientError::Io)?;
 
         if !output.status.success() {
             return Err(ClientError::Config(CoreError::CommandFailed(format!(
@@ -737,17 +702,13 @@ impl GcOps for LocalTarget {
         }
 
         let mut removed = 0u64;
-        for project_entry in
-            fs_err::read_dir(&auto_dir).map_err(|e| ClientError::Config(CoreError::Io(e)))?
-        {
-            let project_entry = project_entry.map_err(|e| ClientError::Config(CoreError::Io(e)))?;
+        for project_entry in fs_err::read_dir(&auto_dir).map_err(ClientError::Io)? {
+            let project_entry = project_entry.map_err(ClientError::Io)?;
             if !project_entry.path().is_dir() {
                 continue;
             }
-            for link_entry in fs_err::read_dir(project_entry.path())
-                .map_err(|e| ClientError::Config(CoreError::Io(e)))?
-            {
-                let link_entry = link_entry.map_err(|e| ClientError::Config(CoreError::Io(e)))?;
+            for link_entry in fs_err::read_dir(project_entry.path()).map_err(ClientError::Io)? {
+                let link_entry = link_entry.map_err(ClientError::Io)?;
                 if let Err(e) = fs_err::remove_file(link_entry.path()) {
                     tracing::debug!(
                         "Failed to remove auto GC root '{}': {}",
@@ -767,16 +728,16 @@ impl GcOps for LocalTarget {
 
 impl LocalTarget {
     fn copy_file_with_permissions(&self, src: &Path, dest: &Path) -> Result<()> {
-        fs_err::copy(src, dest).map_err(|e| ClientError::Config(CoreError::Io(e)))?;
+        fs_err::copy(src, dest).map_err(ClientError::Io)?;
 
-        let meta = fs_err::metadata(src).map_err(|e| ClientError::Config(CoreError::Io(e)))?;
+        let meta = fs_err::metadata(src).map_err(ClientError::Io)?;
         let is_executable = (meta.mode() & 0o111) != 0;
         let perms = if is_executable {
             PermissionsExt::from_mode(0o555)
         } else {
             PermissionsExt::from_mode(0o444)
         };
-        fs_err::set_permissions(dest, perms).map_err(|e| ClientError::Config(CoreError::Io(e)))?;
+        fs_err::set_permissions(dest, perms).map_err(ClientError::Io)?;
 
         Ok(())
     }
@@ -792,8 +753,7 @@ impl LocalTarget {
             let dest_path = dest.join(relative);
 
             if path.is_dir() {
-                fs_err::create_dir_all(&dest_path)
-                    .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
+                fs_err::create_dir_all(&dest_path).map_err(ClientError::Io)?;
             } else {
                 self.copy_file_with_permissions(path, &dest_path)?;
             }
@@ -803,7 +763,7 @@ impl LocalTarget {
             let entry = entry?;
             if entry.file_type().is_dir() {
                 fs_err::set_permissions(entry.path(), PermissionsExt::from_mode(0o555))
-                    .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
+                    .map_err(ClientError::Io)?;
             }
         }
 
@@ -833,8 +793,7 @@ impl LocalTarget {
                 })
             })?;
 
-        let content = std::fs::read_to_string(&manifest)
-            .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
+        let content = std::fs::read_to_string(&manifest).map_err(ClientError::Io)?;
         let json: serde_json::Value = serde_json::from_str(&content).map_err(|e| {
             ClientError::Config(CoreError::InvalidConfig {
                 detail: format!("Failed to parse lab-metadata.json: {}", e),
@@ -890,7 +849,7 @@ impl LocalTarget {
 
     fn cleanup_old_gc_roots(&self, gcroots_dir: &Path, keep: usize) -> Result<()> {
         let mut entries: Vec<_> = fs_err::read_dir(gcroots_dir)
-            .map_err(|e| ClientError::Config(CoreError::Io(e)))?
+            .map_err(ClientError::Io)?
             .filter_map(|e| e.ok())
             .collect();
 

@@ -5,6 +5,7 @@ use crate::{
 use repx_core::{
     constants::{dirs, manifests, markers},
     errors::CoreError,
+    fs_utils::path_to_string,
     model::{JobId, Memory, MountPolicy, SlurmTime},
     store::completion_log,
 };
@@ -113,21 +114,11 @@ impl ScatterGatherOrchestrator {
 
         let runtime = super::parse_runtime(args.runtime, args.image_tag.clone())?;
 
-        let host_tools_bin_dir = if let Some(ref local) = args.local_artifacts_path {
-            let local_tools = local
-                .join("host-tools")
-                .join(&args.host_tools_dir)
-                .join("bin");
-            if local_tools.exists() {
-                Some(local_tools)
-            } else {
-                let host_tools_root = args.base_path.join("artifacts").join("host-tools");
-                Some(host_tools_root.join(&args.host_tools_dir).join("bin"))
-            }
-        } else {
-            let host_tools_root = args.base_path.join("artifacts").join("host-tools");
-            Some(host_tools_root.join(&args.host_tools_dir).join("bin"))
-        };
+        let host_tools_bin_dir = crate::commands::resolve_host_tools_dir(
+            &args.base_path,
+            &args.host_tools_dir,
+            args.local_artifacts_path.as_deref(),
+        );
 
         let resolve = |p: &std::path::Path| {
             crate::commands::resolve_to_local_artifacts(
@@ -205,9 +196,9 @@ impl ScatterGatherOrchestrator {
         let mut executor =
             self.create_executor(self.scatter_out_dir.clone(), self.scatter_repx_dir.clone());
         let args = vec![
-            self.scatter_out_dir.to_string_lossy().to_string(),
-            self.inputs_json_path.to_string_lossy().to_string(),
-            self.parameters_json_path.to_string_lossy().to_string(),
+            path_to_string(&self.scatter_out_dir),
+            path_to_string(&self.inputs_json_path),
+            path_to_string(&self.parameters_json_path),
         ];
         let cancel = CancellationToken::new();
         executor
@@ -259,7 +250,7 @@ impl ScatterGatherOrchestrator {
         let mut gather_inputs = self.static_inputs.as_object().cloned().unwrap_or_default();
         gather_inputs.insert(
             "worker__outs".to_string(),
-            Value::String(worker_manifest_path.to_string_lossy().to_string()),
+            Value::String(path_to_string(&worker_manifest_path)),
         );
 
         let gather_inputs_json_path = self.repx_dir.join("gather_inputs.json");
@@ -270,9 +261,9 @@ impl ScatterGatherOrchestrator {
 
         let mut executor = self.create_executor(self.user_out_dir.clone(), self.repx_dir.clone());
         let args = vec![
-            self.user_out_dir.to_string_lossy().to_string(),
-            gather_inputs_json_path.to_string_lossy().to_string(),
-            self.parameters_json_path.to_string_lossy().to_string(),
+            path_to_string(&self.user_out_dir),
+            path_to_string(&gather_inputs_json_path),
+            path_to_string(&self.parameters_json_path),
         ];
 
         let cancel = CancellationToken::new();
@@ -447,9 +438,9 @@ async fn handle_phase_step(
 
     let mut executor = orch.create_executor(step_out.clone(), step_repx.clone());
     let exec_args = vec![
-        step_out.to_string_lossy().to_string(),
-        step_inputs_path.to_string_lossy().to_string(),
-        orch.parameters_json_path.to_string_lossy().to_string(),
+        path_to_string(&step_out),
+        path_to_string(&step_inputs_path),
+        path_to_string(&orch.parameters_json_path),
     ];
 
     let cancel = CancellationToken::new();

@@ -37,6 +37,7 @@ pub struct ExecutionRequest {
 pub struct Executor {
     pub request: ExecutionRequest,
     local_log_dir: Option<PathBuf>,
+    _temp_files: Vec<tempfile::TempPath>,
 }
 
 impl Executor {
@@ -44,6 +45,7 @@ impl Executor {
         Self {
             request,
             local_log_dir: None,
+            _temp_files: Vec::new(),
         }
     }
 
@@ -71,7 +73,10 @@ impl Executor {
             self.request.repx_out_dir.join(logs::STDERR)
         };
 
-        let mut cmd = self.build_command_for_script(script_path, args).await?;
+        let (mut cmd, temp_files) = self
+            .build_command_for_script_with_temps(script_path, args)
+            .await?;
+        self._temp_files = temp_files;
 
         tracing::info!(
             "Executing command for job '{}': {:?}",
@@ -83,17 +88,13 @@ impl Executor {
             .stdout(stdout_log.into_std().await)
             .stderr(stderr_log.into_std().await)
             .spawn()
-            .map_err(|e| ExecutorError::CommandFailed {
-                command: format!("{:?}", cmd.as_std().get_program()),
-                source: e,
+            .map_err(|e| {
+                ExecutorError::command_failed(format!("{:?}", cmd.as_std().get_program()), e)
             })?;
 
         let status = tokio::select! {
             result = child.wait() => {
-                result.map_err(|e| ExecutorError::CommandFailed {
-                    command: format!("{:?}", cmd.as_std().get_program()),
-                    source: e,
-                })?
+                result.map_err(|e| ExecutorError::command_failed(format!("{:?}", cmd.as_std().get_program()), e))?
             }
             _ = cancel.cancelled() => {
                 tracing::warn!(
@@ -130,12 +131,26 @@ impl Executor {
         script_path: &Path,
         args: &[String],
     ) -> Result<TokioCommand> {
+        let (cmd, _temps) = self
+            .build_command_for_script_with_temps(script_path, args)
+            .await?;
+        Ok(cmd)
+    }
+
+    async fn build_command_for_script_with_temps(
+        &self,
+        script_path: &Path,
+        args: &[String],
+    ) -> Result<(TokioCommand, Vec<tempfile::TempPath>)> {
         let ctx = self.context();
         let resolved_script = ctx.resolve_to_local(script_path).await;
         let script_path = resolved_script.as_path();
 
-        let cmd = match &self.request.runtime {
-            Runtime::Native => NativeRuntime::build_command(&self.request, script_path, args)?,
+        let (cmd, temps) = match &self.request.runtime {
+            Runtime::Native => (
+                NativeRuntime::build_command(&self.request, script_path, args)?,
+                Vec::new(),
+            ),
             Runtime::Podman { .. } | Runtime::Docker { .. } => {
                 ContainerRuntime::ensure_image_loaded(&ctx, &self.request.runtime).await?;
                 ContainerRuntime::build_command(&ctx, &self.request.runtime, script_path, args)
@@ -144,10 +159,13 @@ impl Executor {
             Runtime::Bwrap { image_tag } => {
                 let rootfs_path =
                     BwrapRuntime::ensure_rootfs_extracted(&ctx, image_tag.as_str()).await?;
-                BwrapRuntime::build_command(&ctx, &rootfs_path, script_path, args).await?
+                (
+                    BwrapRuntime::build_command(&ctx, &rootfs_path, script_path, args).await?,
+                    Vec::new(),
+                )
             }
         };
-        Ok(cmd)
+        Ok((cmd, temps))
     }
 
     async fn create_log_files(&mut self) -> Result<(File, File)> {

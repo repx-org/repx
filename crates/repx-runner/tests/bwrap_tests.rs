@@ -2,6 +2,7 @@
 
 mod harness;
 use harness::TestHarness;
+use repx_core::fs_utils::path_to_string;
 use std::fs;
 
 #[test]
@@ -458,7 +459,7 @@ fi
         .arg("--image-tag")
         .arg(&image_tag)
         .arg("--mount-paths")
-        .arg(secret_file.to_string_lossy().to_string());
+        .arg(path_to_string(&secret_file));
 
     cmd2.assert().success();
     let content2 = fs::read_to_string(job_out_path.join("out/found.txt"))

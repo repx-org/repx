@@ -77,15 +77,21 @@ pub fn merge_stores(
 ) -> Result<(), CoreError> {
     fs::create_dir_all(destination)?;
 
-    let entries: Vec<_> = sources
-        .iter()
-        .flat_map(|path| {
-            WalkDir::new(path)
-                .follow_links(false)
-                .into_iter()
-                .filter_map(Result::ok)
-        })
-        .collect();
+    let mut entries = Vec::new();
+    for source_path in sources {
+        for entry_result in WalkDir::new(source_path).follow_links(false) {
+            match entry_result {
+                Ok(entry) => entries.push(entry),
+                Err(e) => {
+                    tracing::warn!(
+                        "Skipping unreadable entry during merge in {}: {}",
+                        source_path.display(),
+                        e
+                    );
+                }
+            }
+        }
+    }
 
     let total_entries = entries.len() as u64;
 
@@ -111,22 +117,29 @@ pub fn merge_stores(
         let dest_path = destination.join(relative_path);
 
         if entry.path_is_symlink() {
-            if let Ok(link_target) = fs::read_link(path) {
-                let resolved = if link_target.is_absolute() {
-                    link_target.clone()
-                } else {
-                    path.parent().unwrap_or(Path::new(".")).join(&link_target)
-                };
-                if let Ok(canonical) = resolved.canonicalize() {
-                    let canonical_root = source_root
-                        .canonicalize()
-                        .unwrap_or(source_root.to_path_buf());
-                    if !canonical.starts_with(&canonical_root) {
-                        return Err(CoreError::SymlinkEscape {
-                            link: path.to_path_buf(),
-                            target: canonical,
-                        });
-                    }
+            let link_target = fs::read_link(path).map_err(|e| {
+                CoreError::path_io(
+                    path,
+                    std::io::Error::new(
+                        e.kind(),
+                        format!("Cannot read symlink during merge (safety check): {}", e),
+                    ),
+                )
+            })?;
+            let resolved = if link_target.is_absolute() {
+                link_target.clone()
+            } else {
+                path.parent().unwrap_or(Path::new(".")).join(&link_target)
+            };
+            if let Ok(canonical) = resolved.canonicalize() {
+                let canonical_root = source_root
+                    .canonicalize()
+                    .map_err(|e| CoreError::path_io(source_root, e))?;
+                if !canonical.starts_with(&canonical_root) {
+                    return Err(CoreError::SymlinkEscape {
+                        link: path.to_path_buf(),
+                        target: canonical,
+                    });
                 }
             }
         }

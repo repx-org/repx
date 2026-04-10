@@ -11,6 +11,12 @@ pub enum ClientError {
     #[error(transparent)]
     WalkDir(#[from] walkdir::Error),
 
+    #[error(transparent)]
+    Io(#[from] std::io::Error),
+
+    #[error("JSON serialization error: {0}")]
+    Json(#[from] serde_json::Error),
+
     #[error("Failed to execute command on target '{target}': {source}")]
     TargetCommandFailed {
         target: String,

@@ -3,6 +3,7 @@ use repx_core::{
     cache::{CacheKey, CacheMetadata, CacheStore, FsCache},
     constants::{dirs, logs, markers},
     errors::CoreError,
+    fs_utils::path_to_string,
     model::{JobId, MountPolicy},
     store::completion_log,
 };
@@ -32,10 +33,8 @@ async fn async_handle_execute(args: InternalExecuteArgs) -> Result<(), CliError>
     fs::create_dir_all(&user_out_dir)?;
     fs::create_dir_all(&repx_dir)?;
 
-    if repx_dir.exists() {
-        let _ = fs::remove_file(repx_dir.join(markers::SUCCESS));
-        let _ = fs::remove_file(repx_dir.join(markers::FAIL));
-    }
+    let _ = fs::remove_file(repx_dir.join(markers::SUCCESS));
+    let _ = fs::remove_file(repx_dir.join(markers::FAIL));
 
     let script_path = super::resolve_to_local_artifacts(
         &args.executable_path,
@@ -67,28 +66,17 @@ async fn async_handle_execute(args: InternalExecuteArgs) -> Result<(), CliError>
         read_fd_path_to_memory(&parameters_json_path_raw)?;
 
     let runtime = super::parse_runtime(args.runtime, args.image_tag)?;
-    let host_tools_root = args.base_path.join("artifacts").join("host-tools");
-    let host_tools_bin_dir = Some(host_tools_root.join(&args.host_tools_dir).join("bin"));
+    let host_tools_bin_dir = super::resolve_host_tools_dir(
+        &args.base_path,
+        &args.host_tools_dir,
+        args.local_artifacts_path.as_deref(),
+    );
 
     let exec_args = vec![
-        user_out_dir.to_string_lossy().to_string(),
-        inputs_json_path.to_string_lossy().to_string(),
-        parameters_json_path.to_string_lossy().to_string(),
+        path_to_string(&user_out_dir),
+        path_to_string(&inputs_json_path),
+        path_to_string(&parameters_json_path),
     ];
-
-    let host_tools_bin_dir = if let Some(ref local) = args.local_artifacts_path {
-        let local_tools = local
-            .join("host-tools")
-            .join(&args.host_tools_dir)
-            .join("bin");
-        if local_tools.exists() {
-            Some(local_tools)
-        } else {
-            host_tools_bin_dir
-        }
-    } else {
-        host_tools_bin_dir
-    };
 
     let base_path = args.base_path;
     let request = ExecutionRequest {

@@ -123,7 +123,7 @@ impl Iterator for CartesianIter {
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
-        let remaining = (self.total - self.current) as usize;
+        let remaining = (self.total - self.current).min(usize::MAX as u128) as usize;
         (remaining, Some(remaining))
     }
 }

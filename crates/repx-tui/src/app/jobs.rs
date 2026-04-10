@@ -133,7 +133,7 @@ impl JobsState {
         lab: &Lab,
         statuses: std::collections::HashMap<JobId, engine::JobStatus>,
     ) {
-        let full_job_statuses = engine::determine_job_statuses(lab, &statuses);
+        let full_job_statuses = engine::determine_job_statuses(lab, statuses);
 
         for job in self.jobs.iter_mut() {
             if job.status == JobStatus::Submitting {
@@ -466,27 +466,11 @@ impl JobsState {
             .map(|job| job.full_id.clone())
             .collect();
 
-        let mut dependents_map: std::collections::HashMap<JobId, Vec<JobId>> =
-            std::collections::HashMap::new();
-        for (job_id, job) in &lab.jobs {
-            for dep_id in job
-                .executables
-                .values()
-                .flat_map(|exe| exe.inputs.iter())
-                .filter_map(|m| m.job_id.as_ref())
-            {
-                dependents_map
-                    .entry(dep_id.clone())
-                    .or_default()
-                    .push(job_id.clone());
-            }
-        }
-
         let mut result = directly_matching.clone();
         let mut queue: VecDeque<_> = directly_matching.iter().cloned().collect();
 
         while let Some(job_id) = queue.pop_front() {
-            if let Some(deps) = dependents_map.get(&job_id) {
+            if let Some(deps) = self.dependents_cache.get(&job_id) {
                 for dep in deps {
                     if result.insert(dep.clone()) {
                         queue.push_back(dep.clone());
@@ -819,7 +803,7 @@ impl JobsState {
             StatusFilter::Failed => job.status == JobStatus::Failed,
             StatusFilter::Running => job.status == JobStatus::Running,
             StatusFilter::Pending => job.status == JobStatus::Pending,
-            StatusFilter::Completed => job.status == JobStatus::Succeeded,
+            StatusFilter::Succeeded => job.status == JobStatus::Succeeded,
         };
         if !status_match {
             return false;

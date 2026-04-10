@@ -13,11 +13,8 @@ pub mod error;
 use error::CliError;
 
 fn create_client(config: &config::Config, source: &LabSource) -> Result<Client, CliError> {
-    Client::new(config.clone(), source.clone()).map_err(|e| CliError::ExecutionFailed {
-        message: "Failed to initialize client".to_string(),
-        log_path: None,
-        log_summary: e.to_string(),
-    })
+    Client::new(config.clone(), source.clone())
+        .map_err(|e| CliError::execution_failed("Failed to initialize client", e.to_string()))
 }
 
 pub fn run(cli: Cli) -> Result<(), CliError> {

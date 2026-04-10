@@ -2,6 +2,7 @@ use crate::error::{ClientError, Result};
 use repx_core::{
     constants::dirs,
     errors::CoreError,
+    fs_utils::path_to_string,
     lab::LabSource,
     model::{Job, JobId, Lab},
 };
@@ -9,7 +10,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 pub fn generate_parameters_json_content(job: &Job) -> Result<String> {
-    serde_json::to_string_pretty(&job.params).map_err(|e| ClientError::Config(CoreError::Json(e)))
+    serde_json::to_string_pretty(&job.params).map_err(ClientError::Json)
 }
 
 pub fn generate_inputs_json_content(
@@ -84,7 +85,7 @@ pub fn generate_inputs_json_content(
         } else if mapping.mapping_type == Some(repx_core::model::MappingType::Global)
             || mapping.target_input == "store__base"
         {
-            let store_path = base_path.to_string_lossy().to_string();
+            let store_path = path_to_string(base_path);
             inputs_map.insert(
                 mapping.target_input.clone(),
                 serde_json::Value::String(store_path),
@@ -134,7 +135,7 @@ pub fn generate_inputs_json_content(
                 let remote_path = artifacts_base_path.join("revision").join(filename);
                 inputs_map.insert(
                     mapping.target_input.clone(),
-                    serde_json::Value::String(remote_path.to_string_lossy().to_string()),
+                    serde_json::Value::String(path_to_string(&remote_path)),
                 );
             } else {
                 tracing::warn!(
@@ -145,8 +146,7 @@ pub fn generate_inputs_json_content(
         }
     }
 
-    serde_json::to_string_pretty(&serde_json::Value::Object(inputs_map))
-        .map_err(|e| ClientError::Config(CoreError::Json(e)))
+    serde_json::to_string_pretty(&serde_json::Value::Object(inputs_map)).map_err(ClientError::Json)
 }
 
 pub fn generate_and_write_parameters_json(

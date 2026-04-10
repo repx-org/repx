@@ -31,47 +31,35 @@ fn submit_via_sbatch_stdin(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
 
-    let mut child = sbatch_cmd.spawn().map_err(|e| CliError::ExecutionFailed {
-        message: "Failed to spawn sbatch".to_string(),
-        log_path: None,
-        log_summary: e.to_string(),
-    })?;
+    let mut child = sbatch_cmd
+        .spawn()
+        .map_err(|e| CliError::execution_failed("Failed to spawn sbatch", e.to_string()))?;
 
     if let Some(mut stdin) = child.stdin.take() {
-        stdin
-            .write_all(script.as_bytes())
-            .map_err(|e| CliError::ExecutionFailed {
-                message: "Failed to write script to sbatch stdin".to_string(),
-                log_path: None,
-                log_summary: e.to_string(),
-            })?;
+        stdin.write_all(script.as_bytes()).map_err(|e| {
+            CliError::execution_failed("Failed to write script to sbatch stdin", e.to_string())
+        })?;
     }
 
     let output = child
         .wait_with_output()
-        .map_err(|e| CliError::ExecutionFailed {
-            message: "sbatch process failed".to_string(),
-            log_path: None,
-            log_summary: e.to_string(),
-        })?;
+        .map_err(|e| CliError::execution_failed("sbatch process failed", e.to_string()))?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(CliError::ExecutionFailed {
-            message: "sbatch command failed".to_string(),
-            log_path: None,
-            log_summary: stderr.to_string(),
-        });
+        return Err(CliError::execution_failed(
+            "sbatch command failed",
+            stderr.to_string(),
+        ));
     }
 
     let id_str = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    id_str
-        .parse::<u32>()
-        .map_err(|_| CliError::ExecutionFailed {
-            message: "Failed to parse SLURM ID from sbatch output".to_string(),
-            log_path: None,
-            log_summary: format!("sbatch output was: '{}'", id_str),
-        })
+    id_str.parse::<u32>().map_err(|_| {
+        CliError::execution_failed(
+            "Failed to parse SLURM ID from sbatch output",
+            format!("sbatch output was: '{}'", id_str),
+        )
+    })
 }
 
 fn submit_anchor(job_id: &str) -> Result<u32, CliError> {
@@ -84,29 +72,25 @@ fn submit_anchor(job_id: &str) -> Result<u32, CliError> {
         .arg("--error=/dev/null")
         .arg("--wrap=exit 0");
 
-    let output = cmd.output().map_err(|e| CliError::ExecutionFailed {
-        message: "Failed to submit anchor job".to_string(),
-        log_path: None,
-        log_summary: e.to_string(),
-    })?;
+    let output = cmd
+        .output()
+        .map_err(|e| CliError::execution_failed("Failed to submit anchor job", e.to_string()))?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(CliError::ExecutionFailed {
-            message: format!("Failed to submit anchor for job '{}'", job_id),
-            log_path: None,
-            log_summary: stderr.to_string(),
-        });
+        return Err(CliError::execution_failed(
+            format!("Failed to submit anchor for job '{}'", job_id),
+            stderr.to_string(),
+        ));
     }
 
     let id_str = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    id_str
-        .parse::<u32>()
-        .map_err(|_| CliError::ExecutionFailed {
-            message: format!("Failed to parse Anchor ID for job '{}'", job_id),
-            log_path: None,
-            log_summary: id_str,
-        })
+    id_str.parse::<u32>().map_err(|_| {
+        CliError::execution_failed(
+            format!("Failed to parse Anchor ID for job '{}'", job_id),
+            id_str.clone(),
+        )
+    })
 }
 
 fn handle_stream_orchestrate() -> Result<(), CliError> {
@@ -257,11 +241,9 @@ fn handle_plan_file_orchestrate(plan_file: &std::path::Path) -> Result<(), CliEr
 
             sbatch_cmd.arg(&script_path);
 
-            let output = sbatch_cmd.output().map_err(|e| CliError::ExecutionFailed {
-                message: "Process launch failed".to_string(),
-                log_path: None,
-                log_summary: e.to_string(),
-            })?;
+            let output = sbatch_cmd
+                .output()
+                .map_err(|e| CliError::execution_failed("Process launch failed", e.to_string()))?;
 
             if !output.status.success() {
                 let stderr = String::from_utf8_lossy(&output.stderr);

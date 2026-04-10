@@ -127,32 +127,8 @@ fn compute_waves(
         deps.insert(job_id.clone(), in_batch_deps);
     }
 
-    let mut waves: Vec<Vec<JobId>> = Vec::new();
-    let mut assigned: HashSet<JobId> = HashSet::new();
-    let mut remaining: HashSet<JobId> = jobs.keys().cloned().collect();
-
-    while !remaining.is_empty() {
-        let mut wave: Vec<JobId> = Vec::new();
-        for job_id in &remaining {
-            let job_deps = deps.get(job_id).map(|d| d.as_slice()).unwrap_or(&[]);
-            if job_deps.iter().all(|dep| assigned.contains(dep)) {
-                wave.push(job_id.clone());
-            }
-        }
-        if wave.is_empty() {
-            return Err(ClientError::Config(CoreError::CommandFailed(
-                "Cycle detected in job dependency graph".to_string(),
-            )));
-        }
-        wave.sort();
-        for id in &wave {
-            remaining.remove(id);
-            assigned.insert(id.clone());
-        }
-        waves.push(wave);
-    }
-
-    Ok(waves)
+    super::scheduler::compute_topological_waves(&deps)
+        .map_err(|e| ClientError::Config(CoreError::CommandFailed(e.to_string())))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -457,23 +433,17 @@ pub fn submit_slurm_batch_run(
                 deps,
             };
 
-            let line = serde_json::to_string(&stream_job)
-                .map_err(|e| ClientError::Config(CoreError::Json(e)))?;
-            writeln!(writer, "{}", line).map_err(|e| ClientError::Config(CoreError::Io(e)))?;
+            let line = serde_json::to_string(&stream_job).map_err(ClientError::Json)?;
+            writeln!(writer, "{}", line).map_err(ClientError::Io)?;
         }
 
-        writeln!(writer, "{}", protocol::WAVE_BOUNDARY)
-            .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
-        writer
-            .flush()
-            .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
+        writeln!(writer, "{}", protocol::WAVE_BOUNDARY).map_err(ClientError::Io)?;
+        writer.flush().map_err(ClientError::Io)?;
 
         let mut line_buf = String::new();
         loop {
             line_buf.clear();
-            let bytes_read = reader
-                .read_line(&mut line_buf)
-                .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
+            let bytes_read = reader.read_line(&mut line_buf).map_err(ClientError::Io)?;
             if bytes_read == 0 {
                 let status = child.wait().ok();
                 let stderr = child
@@ -528,16 +498,11 @@ pub fn submit_slurm_batch_run(
         }
     }
 
-    writeln!(writer, "{}", protocol::STREAM_END)
-        .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
-    writer
-        .flush()
-        .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
+    writeln!(writer, "{}", protocol::STREAM_END).map_err(ClientError::Io)?;
+    writer.flush().map_err(ClientError::Io)?;
     drop(writer);
 
-    let status = child
-        .wait()
-        .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
+    let status = child.wait().map_err(ClientError::Io)?;
     if !status.success() {
         let stderr = child
             .stderr

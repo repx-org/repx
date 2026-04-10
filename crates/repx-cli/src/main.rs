@@ -446,20 +446,17 @@ fn handle_cache(args: CacheArgs) -> Result<(), String> {
             for (key, meta) in &filtered {
                 let size = meta
                     .size_bytes
-                    .map(format_bytes)
+                    .map(|b| repx_core::fs_utils::format_bytes(b, false))
                     .unwrap_or_else(|| "-".to_string());
 
                 let age = format_age(meta.created_at);
-                let desc = if meta.description.len() > 30 {
-                    format!("{}...", &meta.description[..27])
-                } else {
-                    meta.description.clone()
-                };
+                let desc =
+                    repx_core::fs_utils::safe_truncate(&meta.description, 30, "...").into_owned();
 
                 println!(
                     "{:<20} {:<40} {:<10} {:<12} {}",
                     key.type_name(),
-                    truncate(&key.key_id(), 38),
+                    repx_core::fs_utils::safe_truncate(&key.key_id(), 38, "..."),
                     size,
                     age,
                     desc
@@ -485,7 +482,10 @@ fn handle_cache(args: CacheArgs) -> Result<(), String> {
             println!("{}", "-".repeat(40));
             println!("  Root:          {}", cache_root.display());
             println!("  Total entries: {}", stats.total_entries);
-            println!("  Disk usage:    {}", format_bytes(disk));
+            println!(
+                "  Disk usage:    {}",
+                repx_core::fs_utils::format_bytes(disk, false)
+            );
 
             if let Some(oldest) = stats.oldest {
                 println!("  Oldest entry:  {}", format_age(oldest));
@@ -602,21 +602,6 @@ fn handle_cache(args: CacheArgs) -> Result<(), String> {
     }
 }
 
-fn format_bytes(bytes: u64) -> String {
-    const KB: u64 = 1024;
-    const MB: u64 = KB * 1024;
-    const GB: u64 = MB * 1024;
-    if bytes >= GB {
-        format!("{:.1} GB", bytes as f64 / GB as f64)
-    } else if bytes >= MB {
-        format!("{:.1} MB", bytes as f64 / MB as f64)
-    } else if bytes >= KB {
-        format!("{:.1} KB", bytes as f64 / KB as f64)
-    } else {
-        format!("{} B", bytes)
-    }
-}
-
 fn format_age(timestamp: chrono::DateTime<chrono::Utc>) -> String {
     let age = chrono::Utc::now() - timestamp;
     let total_secs = age.num_seconds();
@@ -632,14 +617,6 @@ fn format_age(timestamp: chrono::DateTime<chrono::Utc>) -> String {
         format!("{}h {}m", hours, mins)
     } else {
         format!("{}m", mins)
-    }
-}
-
-fn truncate(s: &str, max: usize) -> String {
-    if s.len() > max {
-        format!("{}...", &s[..max.saturating_sub(3)])
-    } else {
-        s.to_string()
     }
 }
 

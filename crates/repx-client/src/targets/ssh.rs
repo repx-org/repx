@@ -8,6 +8,7 @@ use repx_core::{
     config,
     constants::dirs,
     errors::CoreError,
+    fs_utils::path_to_string,
     logging,
     model::JobId,
 };
@@ -55,8 +56,7 @@ impl SshTarget {
     }
 
     fn ssh_upload_file(&self, local_path: &Path, remote_path: &Path) -> Result<()> {
-        let local_file =
-            std::fs::File::open(local_path).map_err(|e| ClientError::Config(CoreError::Io(e)))?;
+        let local_file = std::fs::File::open(local_path).map_err(ClientError::Io)?;
 
         let remote_cmd = format!("cat > {}", shell_quote(&remote_path.to_string_lossy()));
 
@@ -68,9 +68,7 @@ impl SshTarget {
             .stderr(std::process::Stdio::piped());
 
         logging::log_and_print_command(&cmd);
-        let output = cmd
-            .output()
-            .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
+        let output = cmd.output().map_err(ClientError::Io)?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
@@ -95,7 +93,7 @@ impl SshTarget {
             target: self.name.clone(),
         };
         let remote_dest_path = remote_cache.path(&cache_key);
-        let remote_dest_str = remote_dest_path.to_string_lossy().to_string();
+        let remote_dest_str = path_to_string(&remote_dest_path);
 
         let check_cmd = RemoteCommand::new("test")
             .arg("-f")
@@ -175,9 +173,7 @@ impl CommandRunner for SshTarget {
         cmd.arg(&self.address).arg(&remote_command_string);
 
         logging::log_and_print_command(&cmd);
-        let output = cmd
-            .output()
-            .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
+        let output = cmd.output().map_err(ClientError::Io)?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
@@ -213,8 +209,7 @@ impl CommandRunner for SshTarget {
 
         logging::log_and_print_command(&cmd);
 
-        cmd.spawn()
-            .map_err(|e| ClientError::Config(CoreError::Io(e)))
+        cmd.spawn().map_err(ClientError::Io)
     }
 }
 
@@ -228,7 +223,7 @@ impl SlurmOps for SshTarget {
 impl SshTarget {
     fn find_lab_manifest_remote(&self, lab_hash: &str) -> Result<String> {
         let lab_dir = self.artifacts_base_path().join("lab");
-        let lab_dir_str = lab_dir.to_string_lossy().to_string();
+        let lab_dir_str = path_to_string(&lab_dir);
 
         let check_script = format!(
             r#"for f in {0}/*lab-metadata.json; do test -f "$f" && grep -q {1} "$f" && echo "$f" && exit 0; done; exit 1"#,
@@ -267,9 +262,7 @@ impl SshTarget {
             .arg(format!("{}:{}", self.address, remote_path.display()));
 
         logging::log_and_print_command(&rsync_cmd);
-        let output = rsync_cmd
-            .output()
-            .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
+        let output = rsync_cmd.output().map_err(ClientError::Io)?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
@@ -340,15 +333,12 @@ impl ArtifactSync for SshTarget {
         let mut temp_file = tempfile::Builder::new()
             .prefix("repx-sync-list-")
             .tempfile_in(&self.local_temp_path)
-            .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
+            .map_err(ClientError::Io)?;
 
         for path in artifacts {
-            writeln!(temp_file, "{}", path.to_string_lossy())
-                .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
+            writeln!(temp_file, "{}", path.to_string_lossy()).map_err(ClientError::Io)?;
         }
-        temp_file
-            .flush()
-            .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
+        temp_file.flush().map_err(ClientError::Io)?;
 
         let remote_rsync_path = self.deploy_rsync_binary()?;
 
@@ -368,9 +358,7 @@ impl ArtifactSync for SshTarget {
             .current_dir(local_lab_path);
 
         logging::log_and_print_command(&rsync_cmd);
-        let output = rsync_cmd
-            .output()
-            .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
+        let output = rsync_cmd.output().map_err(ClientError::Io)?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
@@ -442,9 +430,7 @@ impl ArtifactSync for SshTarget {
         let remote_artifacts_base = self.artifacts_base_path();
         let remote_rsync_path = self.deploy_rsync_binary()?;
 
-        let resolved = local_lab_path
-            .canonicalize()
-            .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
+        let resolved = local_lab_path.canonicalize().map_err(ClientError::Io)?;
 
         let mut rsync_cmd = Command::new(self.local_tool("rsync"));
         rsync_cmd
@@ -461,9 +447,7 @@ impl ArtifactSync for SshTarget {
             ));
 
         logging::log_and_print_command(&rsync_cmd);
-        let output = rsync_cmd
-            .output()
-            .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
+        let output = rsync_cmd.output().map_err(ClientError::Io)?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
@@ -486,7 +470,7 @@ impl ArtifactSync for SshTarget {
         let remote_artifacts_base = self.artifacts_base_path();
         let remote_rsync_path = self.deploy_rsync_binary()?;
 
-        let tmp_dir = tempfile::tempdir().map_err(|e| ClientError::Config(CoreError::Io(e)))?;
+        let tmp_dir = tempfile::tempdir().map_err(ClientError::Io)?;
         let extract_root = tmp_dir.path();
 
         tracing::info!(
@@ -512,9 +496,7 @@ impl ArtifactSync for SshTarget {
             ));
 
         logging::log_and_print_command(&rsync_cmd);
-        let output = rsync_cmd
-            .output()
-            .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
+        let output = rsync_cmd.output().map_err(ClientError::Io)?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
@@ -555,9 +537,7 @@ impl ArtifactSync for SshTarget {
             .arg(format!("{}:{}", self.address, remote_path.display()));
 
         logging::log_and_print_command(&rsync_cmd);
-        let output = rsync_cmd
-            .output()
-            .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
+        let output = rsync_cmd.output().map_err(ClientError::Io)?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
@@ -578,7 +558,7 @@ impl ArtifactSync for SshTarget {
     ) -> Result<()> {
         let store_cache = local_cache_root.join("store");
 
-        fs_err::create_dir_all(&store_cache).map_err(|e| ClientError::Config(CoreError::Io(e)))?;
+        fs_err::create_dir_all(&store_cache).map_err(ClientError::Io)?;
 
         let tar_tool = self.local_tool("tar");
 
@@ -710,9 +690,7 @@ impl ArtifactSync for SshTarget {
                     .arg(format!("{}:{}", self.address, remote_dest.display()));
 
                 logging::log_and_print_command(&rsync_cmd);
-                let output = rsync_cmd
-                    .output()
-                    .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
+                let output = rsync_cmd.output().map_err(ClientError::Io)?;
 
                 if !output.status.success() {
                     let stderr = String::from_utf8_lossy(&output.stderr);
@@ -741,7 +719,7 @@ impl ArtifactSync for SshTarget {
         let manifest_content = serde_json::to_string(&vec![super::common::ManifestEntry {
             layers: layers.clone(),
         }])
-        .map_err(|e| ClientError::Config(CoreError::Json(e)))?;
+        .map_err(ClientError::Json)?;
 
         self.write_remote_file(&remote_image_dir.join("manifest.json"), &manifest_content)?;
 
@@ -834,9 +812,7 @@ impl FileOps for SshTarget {
 
         logging::log_and_print_command(&cmd);
 
-        let mut child = cmd
-            .spawn()
-            .map_err(|e| ClientError::Config(CoreError::Io(e)))?;
+        let mut child = cmd.spawn().map_err(ClientError::Io)?;
 
         let mut stdin = child.stdin.take().ok_or_else(|| {
             ClientError::Config(CoreError::InvalidConfig {

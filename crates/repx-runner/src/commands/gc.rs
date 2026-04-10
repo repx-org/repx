@@ -3,7 +3,7 @@ use crate::cli::{
 };
 use crate::commands::AppContext;
 use crate::error::CliError;
-use repx_core::{config::Config, constants::dirs, errors::DomainError, lab, resolver};
+use repx_core::{config::Config, constants::dirs, errors::DomainError, fs_utils, lab, resolver};
 use std::collections::HashSet;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
@@ -79,13 +79,9 @@ fn handle_gc_collect(
     }
 
     if pinned_only {
-        let removed = target
-            .remove_auto_roots()
-            .map_err(|e| CliError::ExecutionFailed {
-                message: "Failed to remove auto GC roots".to_string(),
-                log_path: None,
-                log_summary: e.to_string(),
-            })?;
+        let removed = target.remove_auto_roots().map_err(|e| {
+            CliError::execution_failed("Failed to remove auto GC roots", e.to_string())
+        })?;
         if removed > 0 {
             println!("Removed {} auto GC root(s).", removed);
         }
@@ -112,11 +108,10 @@ fn handle_gc_collect(
             }
         }
         Err(e) => {
-            return Err(CliError::ExecutionFailed {
-                message: "Failed to run GC on target".to_string(),
-                log_path: None,
-                log_summary: e.to_string(),
-            })
+            return Err(CliError::execution_failed(
+                "Failed to run GC on target",
+                e.to_string(),
+            ))
         }
     }
 
@@ -167,11 +162,7 @@ fn handle_gc_list(
 
     let all_roots = target
         .list_gc_roots(args.sizes)
-        .map_err(|e| CliError::ExecutionFailed {
-            message: "Failed to list GC roots".to_string(),
-            log_path: None,
-            log_summary: e.to_string(),
-        })?;
+        .map_err(|e| CliError::execution_failed("Failed to list GC roots", e.to_string()))?;
 
     let roots: Vec<_> = all_roots
         .into_iter()
@@ -216,20 +207,20 @@ fn handle_gc_list(
         let mut total_size: u64 = 0;
         for root in &roots {
             let hash = extract_lab_hash(root);
-            let hash_display = truncate_hash(&hash, 14);
+            let hash_display = truncate(&hash, 14);
             let size_str = root
                 .size_bytes
                 .map(|s| {
                     total_size += s;
-                    format_bytes(s)
+                    fs_utils::format_bytes(s, false)
                 })
                 .unwrap_or_else(|| "-".to_string());
             let project = root
                 .project_id
                 .as_deref()
-                .map(|p| truncate_str(p, 16))
+                .map(|p| truncate(p, 16))
                 .unwrap_or_else(|| "-".to_string());
-            let name_display = truncate_str(&root.name, 18);
+            let name_display = truncate(&root.name, 18);
             println!(
                 "{:<8} {:<20} {:<16} {:<10} {}",
                 root.kind, name_display, hash_display, size_str, project
@@ -239,19 +230,19 @@ fn handle_gc_list(
         println!(
             "{} root(s), total: {}",
             roots.len(),
-            format_bytes(total_size)
+            fs_utils::format_bytes(total_size, false)
         );
     } else {
         println!("{:<8} {:<20} {:<16} PROJECT", "KIND", "NAME", "HASH");
         for root in &roots {
             let hash = extract_lab_hash(root);
-            let hash_display = truncate_hash(&hash, 14);
+            let hash_display = truncate(&hash, 14);
             let project = root
                 .project_id
                 .as_deref()
-                .map(|p| truncate_str(p, 16))
+                .map(|p| truncate(p, 16))
                 .unwrap_or_else(|| "-".to_string());
-            let name_display = truncate_str(&root.name, 18);
+            let name_display = truncate(&root.name, 18);
             println!(
                 "{:<8} {:<20} {:<16} {}",
                 root.kind, name_display, hash_display, project
@@ -272,21 +263,14 @@ fn handle_gc_status(target_arg: Option<&str>, context: &AppContext) -> Result<()
         .get_target(target_name)
         .ok_or_else(|| CliError::Domain(DomainError::TargetNotFound(target_name.to_string())))?;
 
-    let current_lab = lab::load(context.source).map_err(|e| CliError::ExecutionFailed {
-        message: "Failed to load lab metadata".to_string(),
-        log_path: None,
-        log_summary: e.to_string(),
-    })?;
+    let current_lab = lab::load(context.source)
+        .map_err(|e| CliError::execution_failed("Failed to load lab metadata", e.to_string()))?;
     let lab_hash = &current_lab.content_hash;
-    let hash_short = truncate_hash(lab_hash, 12);
+    let hash_short = truncate(lab_hash, 12);
 
     let roots = target
         .list_gc_roots(false)
-        .map_err(|e| CliError::ExecutionFailed {
-            message: "Failed to list GC roots".to_string(),
-            log_path: None,
-            log_summary: e.to_string(),
-        })?;
+        .map_err(|e| CliError::execution_failed("Failed to list GC roots", e.to_string()))?;
 
     let references_lab = |r: &repx_client::targets::GcRootEntry| -> bool {
         r.name.contains(lab_hash.as_str()) || r.target_path.contains(lab_hash.as_str())
@@ -344,10 +328,11 @@ fn handle_gc_pin(
     let lab_hash = match args.lab_hash {
         Some(h) => h,
         None => {
-            let lab = lab::load(context.source).map_err(|e| CliError::ExecutionFailed {
-                message: "Failed to load lab metadata. Provide a lab hash explicitly.".to_string(),
-                log_path: None,
-                log_summary: e.to_string(),
+            let lab = lab::load(context.source).map_err(|e| {
+                CliError::execution_failed(
+                    "Failed to load lab metadata. Provide a lab hash explicitly.",
+                    e.to_string(),
+                )
             })?;
             lab.content_hash.clone()
         }
@@ -355,13 +340,12 @@ fn handle_gc_pin(
 
     let name = args.name.unwrap_or_else(|| lab_hash.clone());
 
-    target
-        .pin_gc_root(&lab_hash, &name)
-        .map_err(|e| CliError::ExecutionFailed {
-            message: format!("Failed to pin GC root on target '{}'", target_name),
-            log_path: None,
-            log_summary: e.to_string(),
-        })?;
+    target.pin_gc_root(&lab_hash, &name).map_err(|e| {
+        CliError::execution_failed(
+            format!("Failed to pin GC root on target '{}'", target_name),
+            e.to_string(),
+        )
+    })?;
 
     println!("Pinned '{}' on target '{}'.", name, target_name);
     Ok(())
@@ -381,11 +365,7 @@ fn handle_gc_unpin(
 
     let roots = target
         .list_gc_roots(false)
-        .map_err(|e| CliError::ExecutionFailed {
-            message: "Failed to list GC roots".to_string(),
-            log_path: None,
-            log_summary: e.to_string(),
-        })?;
+        .map_err(|e| CliError::execution_failed("Failed to list GC roots", e.to_string()))?;
 
     let pinned_names: Vec<&str> = roots
         .iter()
@@ -396,16 +376,15 @@ fn handle_gc_unpin(
     let resolved_name =
         resolver::resolve_name_by_prefix(pinned_names, &args.name).map_err(CliError::Domain)?;
 
-    target
-        .unpin_gc_root(resolved_name)
-        .map_err(|e| CliError::ExecutionFailed {
-            message: format!(
+    target.unpin_gc_root(resolved_name).map_err(|e| {
+        CliError::execution_failed(
+            format!(
                 "Failed to unpin '{}' on target '{}'",
                 resolved_name, target_name
             ),
-            log_path: None,
-            log_summary: e.to_string(),
-        })?;
+            e.to_string(),
+        )
+    })?;
 
     println!(
         "Unpinned '{}' from target '{}'.",
@@ -557,7 +536,7 @@ pub async fn async_handle_internal_gc(args: InternalGcArgs) -> Result<(), CliErr
                                     tracing::info!(
                                         "[dry-run] Would delete artifact: {:?} ({})",
                                         sub_rel,
-                                        format_bytes(size)
+                                        fs_utils::format_bytes(size, false)
                                     );
                                     deleted_artifacts += 1;
                                     freed_bytes += size;
@@ -586,7 +565,7 @@ pub async fn async_handle_internal_gc(args: InternalGcArgs) -> Result<(), CliErr
                         tracing::info!(
                             "[dry-run] Would delete artifact: {:?} ({})",
                             name,
-                            format_bytes(size)
+                            fs_utils::format_bytes(size, false)
                         );
                         deleted_artifacts += 1;
                         freed_bytes += size;
@@ -620,7 +599,7 @@ pub async fn async_handle_internal_gc(args: InternalGcArgs) -> Result<(), CliErr
                         tracing::info!(
                             "[dry-run] Would delete output: {:?} ({})",
                             name,
-                            format_bytes(size)
+                            fs_utils::format_bytes(size, false)
                         );
                         deleted_outputs += 1;
                         freed_bytes += size;
@@ -644,7 +623,7 @@ pub async fn async_handle_internal_gc(args: InternalGcArgs) -> Result<(), CliErr
                 "Would delete {} artifact(s) and {} job output(s). Would free {}.",
                 deleted_artifacts,
                 deleted_outputs,
-                format_bytes(freed_bytes)
+                fs_utils::format_bytes(freed_bytes, false)
             );
         }
     } else if deleted_artifacts == 0 && deleted_outputs == 0 {
@@ -654,7 +633,7 @@ pub async fn async_handle_internal_gc(args: InternalGcArgs) -> Result<(), CliErr
             "Deleted {} artifact(s) and {} job output(s). Freed {}.",
             deleted_artifacts,
             deleted_outputs,
-            format_bytes(freed_bytes)
+            fs_utils::format_bytes(freed_bytes, false)
         );
     }
 
@@ -713,30 +692,6 @@ fn path_size(path: &std::path::Path) -> u64 {
         .sum()
 }
 
-fn format_bytes(bytes: u64) -> String {
-    if bytes >= 1_073_741_824 {
-        format!("{:.1} GB", bytes as f64 / 1_073_741_824.0)
-    } else if bytes >= 1_048_576 {
-        format!("{:.1} MB", bytes as f64 / 1_048_576.0)
-    } else if bytes >= 1024 {
-        format!("{:.1} KB", bytes as f64 / 1024.0)
-    } else {
-        format!("{} B", bytes)
-    }
-}
-
-fn truncate_hash(hash: &str, max_len: usize) -> String {
-    if hash.len() <= max_len {
-        hash.to_string()
-    } else {
-        format!("{}..", &hash[..max_len - 2])
-    }
-}
-
-fn truncate_str(s: &str, max_len: usize) -> String {
-    if s.len() <= max_len {
-        s.to_string()
-    } else {
-        format!("{}..", &s[..max_len - 2])
-    }
+fn truncate(s: &str, max_len: usize) -> String {
+    fs_utils::safe_truncate(s, max_len, "..").into_owned()
 }
