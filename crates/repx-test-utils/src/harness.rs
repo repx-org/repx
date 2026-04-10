@@ -1,4 +1,4 @@
-use repx_core::fs_utils::path_to_string;
+use repx_core::fs_utils::{force_remove_dir, path_to_string};
 use serde_json::Value;
 use std::env;
 use std::fs;
@@ -371,5 +371,11 @@ local_concurrency = 2
                     Some(file_name.to_string())
                 }
             })
+    }
+}
+
+impl Drop for TestContext {
+    fn drop(&mut self) {
+        let _ = force_remove_dir(self._temp_dir.path());
     }
 }
